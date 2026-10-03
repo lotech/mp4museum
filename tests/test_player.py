@@ -511,3 +511,16 @@ def test_play_pressed_while_a_rewind_is_on_its_way(tmp_path):
     assert len(starts) == 2 and starts[1] < 50, starts       # straight back to playing from the start
     assert [e for e in r['log'] if 'key' in e] == []          # not sent to the omxplayer being stopped
     assert not [s for s in r['statuses'] if s['state'] == 'paused']
+
+
+def test_custom_boot_video_that_stops_the_player_is_replaced_by_the_original(tmp_path):
+    # it plays before everything else: skipping it like the others needs doing at startup
+    custom = {'/boot/mp4museum-boot.mp4': 'a video that stops the player'}
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write=custom,
+            crashed={'file': '/boot/mp4museum-boot.mp4', 'times': 2}, max_plays=4)
+    assert plays(r)[:3] == ['mp4museum-boot.mp4', 'mp4museum-boot.mp4', 'mp4m-v7beta.jpg']
+    assert all(e['play'].startswith('/home/pi/') for e in r['log'] if e.get('play', '').endswith('boot.mp4'))
+    # once could be chance: still played
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write=custom,
+            crashed={'file': '/boot/mp4museum-boot.mp4', 'times': 1}, max_plays=4)
+    assert not first_play(r, 'boot.mp4')['play'].startswith('/home/pi/')

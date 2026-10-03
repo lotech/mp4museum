@@ -52,7 +52,7 @@ in alphabetical order, over and over.
 - A file that hasn't started playing after 20 seconds (broken file, stalled USB stick) is skipped.
 - **If the player stops** by itself (an error, or out of memory, e.g. on an image far bigger
   than the screen), `.bashrc` starts it again, and the file it was playing is skipped until it
-  is replaced or chosen in the web interface. Its output is in `/tmp/mp4museum.log` (also on
+  is replaced or chosen in the web interface (a custom boot video: the original is played instead). Its output is in `/tmp/mp4museum.log` (also on
   the System tab). Ctrl-C on the console stops it for good, as before.
 - **Images** more than 2048 pixels wide or high come out scrambled on a Pi 3 (after a long
   wait), so a Pi 3 or older skips them. The web interface marks them "too large" and warns

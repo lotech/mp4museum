@@ -548,11 +548,18 @@ def sync_mode():
 # *** run player ****
 
 boot_video = CUSTOM_BOOT_VIDEO if os.path.isfile(CUSTOM_BOOT_VIDEO) else BOOT_VIDEO
+# it plays before anything else, so one that keeps stopping the player would keep it from ever
+# getting to the playlist: the original is played instead
+entry = skipped.get(boot_video)
+if boot_video != BOOT_VIDEO and entry and entry[1] >= SKIP_AFTER and entry[0] == file_version(boot_video):
+    print("%s stopped the player twice: playing the original boot video instead" % boot_video, flush=True)
+    boot_video = BOOT_VIDEO
 
 # start player twice to make sure it is working
 # seems weird but works
-vlc_play(boot_video)
-vlc_play(boot_video)
+for _ in range(2):
+    if vlc_play(boot_video) == 'ended':
+        forgive(boot_video)
 
 # please do not remove my logo screen
 skip_requested = False

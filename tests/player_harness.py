@@ -206,6 +206,20 @@ paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
 for real, fake in paths.items():
     if real in scenario.get('write', {}):
         open(fake, 'w').write(scenario['write'][real])
+# scenario crashed: {'file': path, 'times': n}: the last player stopped while playing it, and it
+# had stopped the player n - 1 times before (recorded with the file's real size and time)
+if 'crashed' in scenario:
+    crashed = paths.get(scenario['crashed']['file'], scenario['crashed']['file'])
+    try:
+        info = os.stat(crashed)
+        version = [info.st_size, int(info.st_mtime)]
+    except OSError:
+        version = None
+    with open(paths['/tmp/mp4museum-status.json'], 'w') as f:
+        json.dump({'state': 'playing', 'file': crashed, 'since': 1, 'pid': 999999}, f)
+    if scenario['crashed']['times'] > 1:
+        with open(paths['/tmp/mp4museum-skipped.json'], 'w') as f:
+            json.dump([[crashed, version, scenario['crashed']['times'] - 1]], f)
 source = PLAYER.read_text()
 for real, fake in paths.items():
     source = source.replace(repr(real)[1:-1], fake)
