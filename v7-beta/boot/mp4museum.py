@@ -67,7 +67,7 @@ if os.path.isfile(ALSA_FILE):
 
 def read_settings():
     settings = {'image_duration': DEFAULT_IMAGE_DURATION, 'loop_player': 'omxplayer',
-                'boot_video_plays': 2, 'show_address': True}
+                'boot_video_plays': 1, 'show_address': True}
     try:
         with open(SETTINGS_FILE, 'r') as f:
             for line in f:
@@ -707,8 +707,8 @@ if boot_video != BOOT_VIDEO and entry and entry[1] >= SKIP_AFTER and entry[0] ==
 
 # start player twice to make sure it is working
 # seems weird but works
-# (boot_video_plays: 2 by default; fewer to test whether the first file still shows properly
-# after a cold start)
+# (boot_video_plays: once by default. Without the boot video, a Pi 3 B+ showed the first file
+# properly after a reboot and 4 cold starts, so the warm-up isn't needed there; 2 as before)
 settings = read_settings()
 boot_played = [vlc_play(boot_video) for _ in range(settings['boot_video_plays'])]
 # forgiven only when all played: it could stop the player on the second

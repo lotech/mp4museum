@@ -228,6 +228,13 @@ paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
 for real, fake in paths.items():
     if real in scenario.get('write', {}):
         open(fake, 'w').write(scenario['write'][real])
+# the boot video plays twice, as in the original, which most tests' times are written for (a
+# test's own boot_video_plays comes later in the file, so it wins). Scenario option
+# real_default: the player's own default
+if not scenario.get('real_default'):
+    settings_file = paths['/boot/mp4m-player.txt']
+    before = open(settings_file).read() if os.path.exists(settings_file) else ''
+    open(settings_file, 'w').write('boot_video_plays=2\n' + before)
 # scenario crashed: {'file': path, 'times': n}: the last player stopped while playing it, and it
 # had stopped the player n - 1 times before (recorded with the file's real size and time)
 if 'crashed' in scenario:

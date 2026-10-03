@@ -983,7 +983,7 @@ def test_device_info(pi, client, tmp_path, monkeypatch):
 
 def test_start_up_settings(pi, client):
     html = client.get('/').data.decode()
-    assert '<option value="2" selected>Play twice (default)</option>' in html
+    assert '<option value="1" selected>Play once (default)</option>' in html
     assert '<option value="yes" selected>Show (default)</option>' in html and 'Show network address on boot' in html
     r = client.post('/set_boot_video_plays', data={'boot_video_plays': '0'}, follow_redirects=True)
     assert b"boot video won&#39;t play" in r.data

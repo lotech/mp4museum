@@ -32,7 +32,7 @@ a network is optional.
 - [x] Bring back sync mode (v6 had it, using omxplayer-sync); only runs when omxplayer-sync is installed
 - [x] Use one VLC instance instead of creating one per file
 - [x] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround). Setting for it in Media → Playback (`boot_video_plays`: 2, 1, 0). Pi 3 B+: with no boot video, a reboot and 4 cold starts (unplugged) all showed the logo with the address, then the first file properly. Sound not checked (no clip with sound, nothing plugged in)
-- [ ] Decide: default boot video plays (once, or not at all?) and whether the setting moves to the System tab
+- [x] The boot video plays once by default (setting in Media → Playback: once, twice, not at all)
 - [x] Previous file button; back to the start (rewind) moved apart from the other buttons, with its own icon
 - [x] Setting for how long images are shown
 - [x] "Now playing", Pause/Resume and Next in the web interface

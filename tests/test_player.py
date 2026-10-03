@@ -127,9 +127,11 @@ def test_boot_video_plays_setting(tmp_path):
         r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=%d\n' % times},
                 max_plays=times + 2)
         assert plays(r)[:times + 2] == ['mp4museum-boot.mp4'] * times + ['mp4m-v7beta.jpg', 'a.mp4']
-    # anything else: twice, as in the original
-    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=5\n'}, max_plays=4)
-    assert plays(r)[:4] == ['mp4museum-boot.mp4'] * 2 + ['mp4m-v7beta.jpg', 'a.mp4']
+    # not set, or anything else: once (twice in the original, as a warm-up)
+    for setting in ('', 'boot_video_plays=5\n'):
+        r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': setting},
+                real_default=True, max_plays=3)
+        assert plays(r)[:3] == ['mp4museum-boot.mp4', 'mp4m-v7beta.jpg', 'a.mp4']
 
 
 def test_boot_video_original_or_custom(tmp_path):

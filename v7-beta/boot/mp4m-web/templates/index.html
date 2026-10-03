@@ -118,8 +118,8 @@
           <label for="boot_video_plays">{{ icon('film') }}Boot video at start-up</label>
           <div class="input-row">
             <select name="boot_video_plays" id="boot_video_plays">
-              <option value="2"{% if boot_video_plays == 2 %} selected{% endif %}>Play twice (default)</option>
-              <option value="1"{% if boot_video_plays == 1 %} selected{% endif %}>Play once</option>
+              <option value="1"{% if boot_video_plays == 1 %} selected{% endif %}>Play once (default)</option>
+              <option value="2"{% if boot_video_plays == 2 %} selected{% endif %}>Play twice</option>
               <option value="0"{% if boot_video_plays == 0 %} selected{% endif %}>Don't play</option>
             </select>
             <button type="submit" class="button">Save</button>
