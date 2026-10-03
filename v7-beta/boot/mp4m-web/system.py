@@ -365,10 +365,13 @@ def read_script_file():
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
+# Held while the player script is saved, and while an update decides whether to replace it
+player_lock = threading.Lock()
+
 def write_script_file(content):
     """Write content to the Python script file."""
     try:
-        with writable(BOOT_PATH):
+        with writable(BOOT_PATH), player_lock:
             # Browsers send Windows line endings from text areas
             write_file(SCRIPT_FILE, content.replace('\r\n', '\n'))
         return True, "Script saved successfully"

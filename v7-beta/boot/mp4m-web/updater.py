@@ -221,15 +221,18 @@ def install_from(source_root, version, check_system_files=True):
     return {'version': version, 'player': player,
             'system_files': changed_system_files(source_root) if check_system_files else []}
 
+def official_player_hashes(manifest):
+    """Player scripts earlier updates installed; a player matching one of them hasn't been edited."""
+    hashes = list(manifest.get('official_player_hashes') or [])
+    if manifest.get('player_sha256') and manifest['player_sha256'] not in hashes:
+        hashes.insert(0, manifest['player_sha256'])
+    return hashes
+
 def _install(source_root, version):
     previous = installed_version()
+    previous_players = official_player_hashes(previous)
     new_player = os.path.join(source_root, PLAYER_SOURCE)
     new_player_hash = file_sha256(new_player)
-    current_player_hash = file_sha256(system.SCRIPT_FILE) if os.path.isfile(system.SCRIPT_FILE) else None
-    # Not edited: still what the previous update (or the v7 image) put there
-    unedited = (current_player_hash is None
-                or current_player_hash == previous.get('player_sha256')
-                or current_player_hash in KNOWN_PLAYER_HASHES)
 
     new_dir = APP_DIR + '.new'
     old_dir = APP_DIR + '.old'
@@ -237,24 +240,13 @@ def _install(source_root, version):
         for leftover in (new_dir, old_dir):
             shutil.rmtree(leftover, ignore_errors=True)
         copy_tree(os.path.join(source_root, APP_SOURCE), new_dir)
+        # The previous players stay listed, so if the player can't be written below (or the power
+        # goes off first), the next update still sees the old player as unedited
+        manifest = dict(version, player_sha256=new_player_hash,
+                        official_player_hashes=([new_player_hash] + [h for h in previous_players if h != new_player_hash])[:20])
         # Written last: a .new folder with a manifest is complete (mp4m-update --recover relies on this)
-        manifest = dict(version, player_sha256=new_player_hash)
         with open(os.path.join(new_dir, MANIFEST_NAME), 'w') as f:
             json.dump(manifest, f, indent=2)
-
-        # The player first: if that fails, nothing else has changed yet
-        if current_player_hash == new_player_hash:
-            player = 'unchanged'
-        else:
-            with open(new_player, 'r') as f:
-                new_player_text = f.read()
-            if unedited:
-                system.write_file(system.SCRIPT_FILE, new_player_text)
-                player = 'updated'
-            else:
-                # Edited on this player: keep it, and put the new version next to it
-                system.write_file(system.SCRIPT_FILE + '.new', new_player_text)
-                player = 'kept'
 
         # On the SD card before the swap, so a power cut can't leave half-written files in place
         os.sync()
@@ -270,7 +262,22 @@ def _install(source_root, version):
         # Keep the old copy until the new one is safely on the card
         os.sync()
         shutil.rmtree(old_dir, ignore_errors=True)
-    return player
+
+        # Decided and written under the player lock, so a script saved in the web interface
+        # at the same moment is never overwritten
+        with system.player_lock:
+            current_player_hash = file_sha256(system.SCRIPT_FILE) if os.path.isfile(system.SCRIPT_FILE) else None
+            if current_player_hash == new_player_hash:
+                return 'unchanged'
+            with open(new_player, 'r') as f:
+                new_player_text = f.read()
+            if (current_player_hash is None or current_player_hash in previous_players
+                    or current_player_hash in KNOWN_PLAYER_HASHES):
+                system.write_file(system.SCRIPT_FILE, new_player_text)
+                return 'updated'
+            # Edited on this player: keep it, and put the new version next to it
+            system.write_file(system.SCRIPT_FILE + '.new', new_player_text)
+            return 'kept'
 
 def update(latest=None, config=None):
     """Download a commit (default: the newest on the configured branch) and install it.
