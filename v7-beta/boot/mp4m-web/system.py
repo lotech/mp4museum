@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import signal
+import struct
 import socket
 import subprocess
 import tempfile
@@ -40,6 +41,10 @@ PLAYER_SETTINGS_FILE = os.path.join(BOOT_PATH, "mp4m-player.txt")
 PLAYER_STATUS_FILE = "/tmp/mp4museum-status.json"
 # A file chosen in the web interface, read by the player when it gets SIGUSR1
 PLAY_REQUEST_FILE = "/tmp/mp4museum-play.json"
+# What the player prints (.bashrc sends it here)
+PLAYER_LOG_FILE = "/tmp/mp4museum.log"
+# Files that were playing when the player stopped by itself, which it skips until they are replaced
+PLAYER_SKIPPED_FILE = "/tmp/mp4museum-skipped.json"
 DEFAULT_IMAGE_DURATION = 10
 
 DEFAULT_PASSWORD = 'mp4museum'
@@ -450,9 +455,73 @@ def media_kind(name):
             return kind
     return 'other'
 
+# Images bigger than a 4K screen gain nothing on screen, and a very large one can be more than
+# a Pi can decode (a Pi 3 has 1 GB of memory, shared with the graphics)
+LARGE_IMAGE = (3840, 2160)
+
+def image_size(path):
+    """(width, height) of a PNG, JPEG, GIF, BMP or WebP image from its header, or None."""
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(32)
+            if head[:8] == b'\x89PNG\r\n\x1a\n' and head[12:16] == b'IHDR':
+                return struct.unpack('>II', head[16:24])
+            if head[:6] in (b'GIF87a', b'GIF89a'):
+                return struct.unpack('<HH', head[6:10])
+            if head[:2] == b'BM' and len(head) >= 26:
+                width, height = struct.unpack('<ii', head[18:26])
+                return width, abs(height)
+            if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+                if head[12:16] == b'VP8X':
+                    return int.from_bytes(head[24:27], 'little') + 1, int.from_bytes(head[27:30], 'little') + 1
+                if head[12:16] == b'VP8 ':
+                    width, height = struct.unpack('<HH', head[26:30])
+                    return width & 0x3fff, height & 0x3fff
+                if head[12:16] == b'VP8L':
+                    bits = int.from_bytes(head[21:25], 'little')
+                    return (bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1
+            if head[:2] == b'\xff\xd8':
+                # JPEG: the size is in the start-of-frame segment
+                f.seek(2)
+                while True:
+                    marker = f.read(2)
+                    if len(marker) < 2 or marker[0] != 0xff:
+                        return None
+                    if marker[1] in (0xd8, 0x01) or 0xd0 <= marker[1] <= 0xd7:
+                        continue
+                    length = struct.unpack('>H', f.read(2))[0]
+                    if 0xc0 <= marker[1] <= 0xcf and marker[1] not in (0xc4, 0xc8, 0xcc):
+                        height, width = struct.unpack('>xHH', f.read(5))
+                        return width, height
+                    f.seek(length - 2, 1)
+    except (OSError, struct.error):
+        pass
+    return None
+
+def is_large_image(size):
+    """True if (width, height) is bigger than a 4K screen, either way round."""
+    return bool(size) and (max(size) > max(LARGE_IMAGE) or min(size) > min(LARGE_IMAGE))
+
+def read_player_log(lines=40):
+    """The end of what the player printed, or '' if there is nothing."""
+    try:
+        with open(PLAYER_LOG_FILE, 'r', errors='replace') as f:
+            return ''.join(f.readlines()[-lines:])
+    except OSError:
+        return ''
+
+def get_skipped_files():
+    """{path: [size, mtime]} of the files the player skips because it stopped while playing them."""
+    try:
+        with open(PLAYER_SKIPPED_FILE, 'r') as f:
+            return {path: version for path, version in json.load(f)}
+    except (OSError, ValueError, TypeError):
+        return {}
+
 def get_playlist():
     """Every file the player plays, in its order (/media/*/*.*: the media partition and USB
     sticks), and the media partition's other files, which it doesn't play (no extension)."""
+    skipped = get_skipped_files()
     media_root = os.path.dirname(MEDIA_PATH)
     paths = set(glob.glob(os.path.join(media_root, '*', '*.*')))
     try:
@@ -465,12 +534,18 @@ def get_playlist():
             continue
         name = os.path.basename(path)
         try:
-            size = os.path.getsize(path)
+            info = os.stat(path)
+            size, version = info.st_size, [info.st_size, int(info.st_mtime)]
         except OSError:
-            size = 0
+            size, version = 0, None
+        kind = media_kind(name)
+        pixels = image_size(path) if kind == 'image' else None
         entries.append({'path': path, 'name': name, 'folder': os.path.basename(os.path.dirname(path)),
-                        'internal': os.path.dirname(path) == MEDIA_PATH, 'kind': media_kind(name),
-                        'plays': '.' in name, 'loop': 'loop.' in path, 'size': size})
+                        'internal': os.path.dirname(path) == MEDIA_PATH, 'kind': kind,
+                        'plays': '.' in name, 'loop': 'loop.' in path, 'size': size,
+                        'pixels': pixels, 'large': is_large_image(pixels),
+                        # the player compares the same way: a replaced file is played again
+                        'skipped': path in skipped and skipped[path] == version})
     return entries
 
 _play_request_lock = threading.Lock()

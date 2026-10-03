@@ -342,6 +342,13 @@ a {
   margin-top: 20px;
 }
 
+pre.log {
+  max-height: 320px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 900px) {
   .grid-2 {
     grid-template-columns: minmax(0, 1fr);
@@ -396,6 +403,16 @@ a {
 .badge.muted {
   background: transparent;
   border: 1px solid var(--border);
+}
+
+.badge.danger {
+  color: var(--danger);
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.badge.warning {
+  color: var(--paused);
+  background: rgba(245, 185, 66, 0.12);
 }
 
 .badge.on {
@@ -823,10 +840,27 @@ select {
 }
 
 .item-name {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-weight: 500;
+  cursor: pointer;
+}
+
+.item-name:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.item-name:disabled {
+  cursor: default;
 }
 
 .playlist-item.current .item-name {
@@ -1021,6 +1055,14 @@ select {
   color: var(--danger);
 }
 
+.toast.warning {
+  border-color: rgba(245, 185, 66, 0.5);
+}
+
+.toast.warning .toast-icon {
+  color: var(--paused);
+}
+
 .toast.hiding {
   opacity: 0;
   transform: translateY(-6px);
@@ -1076,14 +1118,14 @@ select {
   width: 40px;
   height: 40px;
   color: var(--muted);
-  animation: spin-slow 2.4s linear infinite;
+  animation: spin 0.9s linear infinite;
 }
 
 .reboot-message p {
   color: var(--muted);
 }
 
-@keyframes spin-slow {
+@keyframes spin {
   to { transform: rotate(360deg); }
 }
 

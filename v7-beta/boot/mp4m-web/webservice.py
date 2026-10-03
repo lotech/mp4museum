@@ -157,6 +157,7 @@ def index():
 
     return render_template('index.html',
                            playlist=system.get_playlist(),
+                           player_log=system.read_player_log(),
                            player=player_view(system.get_player_status()),
                            media_path=system.MEDIA_PATH,
                            is_available=is_available,
@@ -186,7 +187,7 @@ def index():
 def describe_player_status(status):
     """One line for the web interface, e.g. 'Playing intro.mp4 (internal) for 2 min'."""
     if not status:
-        return "The player is not running."
+        return "The player is not running. Reboot to start it again."
     state = status.get('state')
     if state == 'idle':
         return "Nothing to play: add files below or plug in a USB stick."
@@ -372,8 +373,14 @@ def upload_file():
                         upload_message("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
                     else:
                         file.stream.flush()
-                        os.replace(file.stream.name, os.path.join(system.MEDIA_PATH, file.filename))
+                        path = os.path.join(system.MEDIA_PATH, file.filename)
+                        os.replace(file.stream.name, path)
                         upload_message(f"File '{file.filename}' uploaded successfully.", "success")
+                        pixels = system.image_size(path) if system.media_kind(path) == 'image' else None
+                        if system.is_large_image(pixels):
+                            upload_message(f"'{file.filename}' is {pixels[0]}×{pixels[1]} pixels, bigger than a 4K screen: "
+                                           "the player may not be able to show it. Resize it to the screen's size "
+                                           "(e.g. 1920×1080).", "warning")
                 finally:
                     # Close the temp files before the partition goes back to read-only
                     discard_upload_temp_files()

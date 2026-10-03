@@ -112,15 +112,25 @@ if ! shopt -oq posix; then
   fi
 fi
 
+# mp4museum, modified 2026 in https://github.com/lotech/mp4museum (see git history)
 # only run local
 if [[ $(tty) == /dev/tty* ]]; then
 
 # the web interface runs as a service: systemctl status mp4m-webservice
 
-# mp4museum autostart
+# mp4museum autostart. If the player stops by itself (an error, or out of memory), it is
+# started again; stopped on purpose (Ctrl-C) it exits with 0 and you get the console.
+# Its output is in /tmp/mp4museum.log (the web interface shows the end of it).
 setterm -cursor off
 clear
-python3 /boot/mp4museum.py > /tmp/mp4museum.log 2>&1
+: > /tmp/mp4museum.log
+while true; do
+  python3 /boot/mp4museum.py >> /tmp/mp4museum.log 2>&1
+  status=$?
+  [ $status -eq 0 ] && break
+  echo "$(date '+%F %T') the player stopped (exit code $status), starting it again" >> /tmp/mp4museum.log
+  sleep 3
+done
 setterm -cursor on
 
 fi

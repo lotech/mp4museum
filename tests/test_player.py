@@ -283,3 +283,66 @@ def test_status_has_a_clock_that_does_not_jump(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4'], max_plays=4)
     status = r['statuses'][-1]
     assert status['mono'] == status['since'] - 500
+
+
+# ----- Stopping and starting again ----- #
+def test_ctrl_c_stops_the_player_with_exit_code_0(tmp_path):
+    # .bashrc starts the player again unless it exits with 0
+    for at in (2, 30):     # during the boot video, and while playing
+        r = run(tmp_path, files=['/media/internal/a.mp4'], signals=[{'at': at, 'signal': 'SIGINT'}], max_plays=20)
+        assert r['log'][-1] == {'exit': '0'}
+    r = run(tmp_path, files=['/media/internal/a-loop.mp4'], installed=['omxplayer'],
+            signals=[{'at': 40, 'signal': 'SIGINT'}], max_plays=20)
+    assert r['log'][-1] == {'exit': '0'} and killpgs(r)[:1] == [(2, 40)]
+
+
+def bashrc_autostart(tmp_path, exit_codes):
+    """Run the autostart part of .bashrc with a fake python3 that exits with these codes in turn."""
+    bashrc = (Path(__file__).parents[1] / 'v7-beta' / 'home' / 'pi' / '.bashrc').read_text()
+    start = bashrc.index('# mp4museum autostart')
+    block = bashrc[start:bashrc.index('setterm -cursor on', start)].replace('/tmp/mp4museum.log', str(tmp_path / 'log'))
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir(exist_ok=True)
+    (tmp_path / 'codes').write_text(' '.join(map(str, exit_codes)))
+    fakes = {'python3': 'set -- $(cat "%s"); echo "run $*" >> "%s"; echo "${@:2}" > "%s"; exit $1'
+                        % (tmp_path / 'codes', tmp_path / 'runs', tmp_path / 'codes'),
+             'setterm': 'exit 0', 'clear': 'exit 0', 'sleep': 'exit 0'}
+    for name, body in fakes.items():
+        (bin_dir / name).write_text('#!/bin/bash\n' + body + '\n')
+        (bin_dir / name).chmod(0o755)
+    subprocess.run(['bash', '-c', block], env={'PATH': '%s:/usr/bin:/bin' % bin_dir}, check=True, timeout=10)
+    return (tmp_path / 'runs').read_text().count('run'), (tmp_path / 'log').read_text()
+
+
+def test_bashrc_starts_the_player_again_if_it_dies(tmp_path):
+    # killed for lack of memory (137), then an error (1), then stopped with Ctrl-C (0)
+    runs, log = bashrc_autostart(tmp_path, [137, 1, 0])
+    assert runs == 3 and 'exit code 137)' in log and 'exit code 1)' in log
+
+
+def crashed_on(path, state='playing'):
+    # the status the last player left behind (pid 1 isn't this player)
+    return {'/tmp/mp4museum-status.json': json.dumps({'state': state, 'file': path, 'since': 1, 'pid': 1})}
+
+
+def test_file_that_stopped_the_player_is_skipped(tmp_path):
+    files = ['/media/internal/a.mp4', '/media/internal/b.png', '/media/internal/c.mp4']
+    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png'), max_plays=7)
+    assert plays(r)[3:7] == ['a.mp4', 'c.mp4', 'a.mp4', 'c.mp4']
+    # stopped on purpose: nothing is skipped
+    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png', state='stopped'), max_plays=6)
+    assert plays(r)[3:6] == ['a.mp4', 'b.png', 'c.mp4']
+    # chosen in the web interface, it is tried again
+    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png'),
+            signals=[{'at': 21, 'play': '/media/internal/b.png'}], max_plays=8)
+    assert plays(r)[3:8] == ['a.mp4', 'b.png', 'c.mp4', 'a.mp4', 'b.png']
+
+
+def test_everything_skipped_waits(tmp_path):
+    r = run(tmp_path, files=['/media/internal/b.png'], write=crashed_on('/media/internal/b.png'), max_seconds=60)
+    assert plays(r)[3:] == [] and r['statuses'][-1]['state'] == 'idle' and r['log'][-1] == {'exit': 'time limit'}
+
+
+def test_stopping_on_purpose_says_so_in_the_status(tmp_path):
+    r = run(tmp_path, files=['/media/internal/a.mp4'], signals=[{'at': 30, 'signal': 'SIGTERM'}], max_plays=20)
+    assert r['statuses'][-1]['state'] == 'stopped' and r['log'][-1] == {'exit': '0'}

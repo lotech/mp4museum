@@ -52,6 +52,11 @@ a network is optional.
 - [x] Sound, Video and System tabs in side-by-side cards; sound cards listed with a Use button; Lucide icons
 - [ ] Test on the Pi: choosing a file (VLC and omxplayer loops), the position for videos and images, uploading several files, the update bar
 - [ ] Test on the Pi: `omxplayer -i` reports the codec as expected (loops of H.264 files go to omxplayer, HEVC ones to VLC)
+- [x] Click a file's name to play it; play buttons stay on when the player isn't running and say why
+- [x] The player icon flickered every few seconds (it was set again on every status check); the reboot spinner turns around its centre
+- [x] Very large images (bigger than a 4K screen) marked in the playlist, with a warning when uploaded
+- [x] The player is started again if it stops by itself (`.bashrc`, needs `install.sh`), skipping the file that stopped it; its log on the System tab
+- [ ] Find out what stopped the player on the 12 MB PNG (out of memory?) and how big an image a Pi 3 can show
 
 ## 5. Installation
 

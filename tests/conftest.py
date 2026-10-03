@@ -68,6 +68,8 @@ def pi(tmp_path, monkeypatch):
         'PLAYER_SETTINGS_FILE': p.path('mp4m-player.txt'),
         'PLAYER_STATUS_FILE': str(tmp_path / 'mp4museum-status.json'),
         'PLAY_REQUEST_FILE': str(tmp_path / 'mp4museum-play.json'),
+        'PLAYER_LOG_FILE': str(tmp_path / 'mp4museum.log'),
+        'PLAYER_SKIPPED_FILE': str(tmp_path / 'mp4museum-skipped.json'),
         'LOCK_DIR': str(tmp_path / 'locks'),
     }.items():
         monkeypatch.setattr(system, name, value)

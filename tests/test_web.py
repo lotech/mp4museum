@@ -572,3 +572,67 @@ def test_position_survives_the_clock_being_set(client, monkeypatch):
 def test_page_starts_with_doctype(client):
     assert client.get('/').data.startswith(b'<!doctype html>')
     assert client.get('/login').data.startswith(b'<!doctype html>')
+
+
+# ----- Images too big to show, the player's log ----- #
+def png(width, height):
+    import struct
+    return b'\x89PNG\r\n\x1a\n' + struct.pack('>I', 13) + b'IHDR' + struct.pack('>II', width, height) + b'\x08\x02\x00\x00\x00'
+
+
+def jpeg(width, height):
+    import struct
+    exif = b'\xff\xe1' + struct.pack('>H', 8) + b'Exif\x00\x00'
+    sof = b'\xff\xc2' + struct.pack('>HBHH', 11, 8, height, width) + b'\x03\x01\x11\x00'
+    return b'\xff\xd8' + exif + sof + b'\xff\xd9'
+
+
+def test_image_sizes(pi):
+    files = {'a.png': png(1920, 1080), 'b.jpg': jpeg(6000, 4000), 'c.gif': b'GIF89a' + bytes([0x80, 0x07, 0x38, 0x04]),
+             'd.png': png(2160, 3840), 'e.png': png(2200, 4000), 'f.jpg': b'\xff\xd8\xff', 'g.mp4': png(9000, 9000)}
+    for name, data in files.items():
+        (pi.media / name).write_bytes(data)
+    found = {e['name']: (e['pixels'], e['large']) for e in system.get_playlist()}
+    assert found == {'a.png': ((1920, 1080), False), 'b.jpg': ((6000, 4000), True), 'c.gif': ((1920, 1080), False),
+                     'd.png': ((2160, 3840), False),      # a 4K screen on its side
+                     'e.png': ((2200, 4000), True), 'f.jpg': (None, False),
+                     'g.mp4': (None, False)}              # only images are read
+
+
+def test_very_large_image_gets_a_warning(pi, client):
+    fetch = {'X-Requested-With': 'fetch'}
+    r = client.post('/upload', data={'file': (io.BytesIO(png(8000, 6000)), 'huge.png')}, headers=fetch).get_json()
+    assert r['ok'] is True and r['messages'][1][0] == 'warning' and '8000×6000' in r['messages'][1][1]
+    r = client.post('/upload', data={'file': (io.BytesIO(png(1920, 1080)), 'fine.png')}, headers=fetch).get_json()
+    assert len(r['messages']) == 1
+    html = client.get('/').data.decode()
+    assert '8000×6000' in html and 'very large' in html and html.count('very large</span>') == 1
+
+
+def test_player_log_on_the_system_tab(client):
+    assert 'Nothing yet.' in client.get('/').data.decode()
+    with open(system.PLAYER_LOG_FILE, 'w') as f:
+        f.write(''.join('line %d\n' % n for n in range(100)) + '2026-10-03 05:00:00 the player stopped (exit code 137)\n')
+    html = client.get('/').data.decode()
+    assert 'exit code 137' in html and 'line 99' in html and 'line 40\n' not in html
+
+
+def test_file_name_plays_the_file(pi, client):
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    html = client.get('/').data.decode()
+    # the name is a second button for the same play form
+    assert 'id="play-1"' in html and 'form="play-1" class="item-name js-play"' in html
+    assert 'Reboot to start it again' in client.get('/player/status').get_json()['text']
+
+
+def test_files_the_player_skips_are_marked(pi, client):
+    (pi.media / 'big.png').write_bytes(png(9000, 9000))
+    (pi.media / 'ok.mp4').write_bytes(b'x')
+    info = os.stat(pi.media / 'big.png')
+    with open(system.PLAYER_SKIPPED_FILE, 'w') as f:
+        json.dump([[str(pi.media / 'big.png'), [info.st_size, int(info.st_mtime)]]], f)
+    assert [e['skipped'] for e in system.get_playlist()] == [True, False]
+    assert 'skipped</span>' in client.get('/').data.decode()
+    # replaced (another size or time): the player plays it again, so it isn't marked
+    (pi.media / 'big.png').write_bytes(png(1920, 1080) + b'more')
+    assert [e['skipped'] for e in system.get_playlist()] == [False, False]

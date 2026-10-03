@@ -20,7 +20,7 @@ The player is meant to run offline. A network is optional and only needed for th
 | `boot/mp4m-web/` | Web interface (Flask, port 80, runs as root): `webservice.py` (routes), `system.py` (partitions, config.txt, network name, password), `updater.py` (software update), `templates/`, `static/`. On the boot partition so it can be updated without turning off the overlay |
 | `etc/systemd/system/mp4m-webservice.service` | Starts the web interface at boot |
 | `usr/local/bin/mp4m-update` | The `sudo mp4m-update` command |
-| `home/pi/.bashrc` | Autostart on tty1: runs `/boot/mp4museum.py` |
+| `home/pi/.bashrc` | Autostart on tty1: runs `/boot/mp4museum.py`, and again if it stops by itself |
 | `home/pi/mp4m-v7beta.jpg` | Logo screen shown after boot |
 | `home/pi/mp4museum-boot.mp4` | Boot video (the original from the v7 image) |
 | `boot/config.txt` | Video/audio config (video lines set by the web UI video presets) |
@@ -50,6 +50,13 @@ in alphabetical order, over and over.
 - **Images** are shown for 10 seconds, or as set in the web interface (`/boot/mp4m-player.txt`,
   `image_duration=<seconds>`). A new setting applies from the next image.
 - A file that hasn't started playing after 20 seconds (broken file, stalled USB stick) is skipped.
+- **If the player stops** by itself (an error, or out of memory, e.g. on an image far bigger
+  than the screen), `.bashrc` starts it again, and the file it was playing is skipped until it
+  is replaced or chosen in the web interface. Its output is in `/tmp/mp4museum.log` (also on
+  the System tab). Ctrl-C on the console stops it for good, as before.
+- **Images** bigger than a 4K screen are marked "very large" in the web interface, with a
+  warning when uploaded: they gain nothing on screen and may be too much for a Pi 3's memory.
+  Resize them to the screen's size, e.g. 1920×1080.
 - **Buttons:** GPIO pin 11 pauses and resumes, pin 13 skips to the next file. The web interface
   has the same buttons, shows what is playing and how far it has got (the player writes
   `/tmp/mp4museum-status.json`), and can start any file in the playlist (it writes
@@ -66,7 +73,7 @@ Open `http://<network name>.local` in a browser on the same network.
 
 - **Media:** the player (what is playing, Pause/Resume, Next), playback settings, and the
   playlist: every file the player plays, from the media partition and USB sticks, in order.
-  Start any file from there; upload files (several at once, with progress) or download and
+  Start any file from there (its play button or its name); upload files (several at once, with progress) or download and
   delete them.
 - **Updates:** when the player has an internet connection, the page checks for a new version
   by itself (at most every few hours) and shows a bar to install it.

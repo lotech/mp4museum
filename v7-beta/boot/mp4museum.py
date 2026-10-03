@@ -10,7 +10,7 @@
 # that don't start playing; loop files restarted by the player; custom boot
 # video from /boot; VLC kept open between files; omxplayer for loop videos
 # when it is installed; position for the web interface, which can also choose
-# the file to play
+# the file to play; exit code 0 only when stopped on purpose (.bashrc restarts it)
 
 import time, vlc, os, glob, json, signal, shutil, sys, re
 import RPi.GPIO as GPIO
@@ -28,6 +28,8 @@ SETTINGS_FILE = '/boot/mp4m-player.txt'
 STATUS_FILE = '/tmp/mp4museum-status.json'
 # a file chosen in the web interface: {"id": ..., "file": ...}, followed by SIGUSR1
 PLAY_REQUEST_FILE = '/tmp/mp4museum-play.json'
+# files that were playing when the player stopped by itself: [[path, [size, mtime]], ...]
+SKIPPED_FILE = '/tmp/mp4museum-skipped.json'
 DEFAULT_IMAGE_DURATION = 10
 # a file that hasn't started playing after this long is skipped (broken file, stalled USB stick)
 OPEN_TIMEOUT = 20
@@ -151,6 +153,15 @@ def pause_toggle():
 # the web interface sends signals for its pause and next buttons
 signal.signal(signal.SIGUSR1, lambda signum, frame: next_file())
 signal.signal(signal.SIGUSR2, lambda signum, frame: pause_toggle())
+
+# stopped on purpose (Ctrl-C on the console, SIGTERM, SIGHUP): exit code 0, so .bashrc doesn't
+# start it again, and omxplayer is stopped too (see the end) so it isn't left looping on screen
+def quit_player(signum, frame):
+    # so the file playing now isn't taken for the one that stopped the player
+    write_status('stopped')
+    sys.exit(0)
+for quit_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(quit_signal, quit_player)
 
 # play media with vlc and wait until it has finished
 # returns 'ended', 'skipped' (next was pressed) or 'failed' (it didn't play)
@@ -279,6 +290,42 @@ def omx_loop(source):
             return 'failed'
     return 'skipped'
 
+# A file that was playing when the player stopped by itself (e.g. an image too big for the
+# memory) is skipped until it is replaced or chosen in the web interface, so it can't stop the
+# player again each time round. /tmp is emptied at boot, so a reboot tries everything again.
+def file_version(path):
+    try:
+        info = os.stat(path)
+        return [info.st_size, int(info.st_mtime)]
+    except OSError:
+        return None
+
+def read_skipped():
+    try:
+        with open(SKIPPED_FILE, 'r') as f:
+            return {path: version for path, version in json.load(f)}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+def save_skipped():
+    try:
+        with open(SKIPPED_FILE + '.tmp', 'w') as f:
+            json.dump([[path, version] for path, version in skipped.items()], f)
+        os.replace(SKIPPED_FILE + '.tmp', SKIPPED_FILE)
+    except OSError:
+        pass
+
+skipped = read_skipped()
+try:
+    with open(STATUS_FILE, 'r') as f:
+        last_status = json.load(f)
+    if last_status.get('state') in ('playing', 'paused') and last_status.get('pid') != os.getpid() and last_status.get('file'):
+        skipped[last_status['file']] = file_version(last_status['file'])
+        print("%s was playing when the player stopped: it is skipped until it is replaced" % last_status['file'], flush=True)
+        save_skipped()
+except (OSError, ValueError, TypeError, AttributeError):
+    pass
+
 # find a file, and if found, return its path (for sync)
 def search_file(file_name):
     matching_files = glob.glob(f'/media/*/{file_name}') + glob.glob(f'/boot/{file_name}')
@@ -320,12 +367,6 @@ GPIO.add_event_detect(13, GPIO.RISING, callback = buttonNext, bouncetime = 1234)
 # check for sync mode instructions
 sync_mode()
 
-# stop omxplayer if the player is stopped, so it isn't left looping on screen
-def quit_player(signum, frame):
-    sys.exit(0)
-signal.signal(signal.SIGTERM, quit_player)
-signal.signal(signal.SIGHUP, quit_player)
-
 # the loop
 try:
     while(1):
@@ -337,6 +378,7 @@ try:
             write_status('idle')
             time.sleep(2)
         index = 0
+        played = False
         while index < len(files):
             # a file chosen in the web interface plays next, then the files after it; a next press
             # from here on skips this file. (No signal in between, or it would be lost.)
@@ -348,10 +390,20 @@ try:
                 files = sorted(glob.glob(MEDIA_FILES))
             if requested in files:
                 index = files.index(requested)
+                if skipped.pop(requested, False) is not False:
+                    # chosen in the web interface: try it again
+                    save_skipped()
             if index >= len(files):
                 break
             file = files[index]
             index += 1
+            if file in skipped:
+                if skipped[file] == file_version(file):
+                    continue
+                # replaced since
+                del skipped[file]
+                save_skipped()
+            played = True
             # read for every file, so a new image duration applies straight away
             settings = read_settings()
             options = [':image-duration=%d' % settings['image_duration']]
@@ -367,6 +419,11 @@ try:
                     pass
             else:
                 vlc_play(file, options)
+        if files and not played:
+            # everything was skipped: wait for a file to be replaced or chosen
+            player.stop()
+            write_status('idle')
+            time.sleep(2)
 finally:
     if omx:
         stop_omx(omx)

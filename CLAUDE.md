@@ -37,7 +37,9 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
 ## Code layout (`v7-beta/`)
 
 - `boot/mp4museum.py`: the player. One VLC instance; plays `/media/*/*.*` in order; GPIO
-  pin 11 pause, pin 13 next. VLC is not stopped when a file ends by itself (`stop()` closes
+  pin 11 pause, pin 13 next. `.bashrc` starts it again unless it exits with 0 (Ctrl-C, SIGTERM,
+  SIGHUP); a file it was playing when it died is skipped until replaced (`/tmp/mp4museum-skipped.json`),
+  so one bad file can't stop it again and again. VLC is not stopped when a file ends by itself (`stop()` closes
   the video output: black frames), only on skip, failure, idle or before handing the screen to
   omxplayer. `loop.` H.264/MPEG-4 videos (checked with `omxplayer -i`) are looped by `omxplayer --loop` when it is installed (it
   holds the last frame; VLC still shows a black frame each time it starts a file again on

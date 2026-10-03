@@ -187,7 +187,8 @@ tmp = tempfile.mkdtemp()
 paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
          '/boot/alsa.txt': os.path.join(tmp, 'alsa.txt'), '/boot/mp4m-player.txt': os.path.join(tmp, 'mp4m-player.txt'),
          '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json'),
-         '/tmp/mp4museum-play.json': os.path.join(tmp, 'play.json')}
+         '/tmp/mp4museum-play.json': os.path.join(tmp, 'play.json'),
+         '/tmp/mp4museum-skipped.json': os.path.join(tmp, 'skipped.json')}
 for real, fake in paths.items():
     if real in scenario.get('write', {}):
         open(fake, 'w').write(scenario['write'][real])
