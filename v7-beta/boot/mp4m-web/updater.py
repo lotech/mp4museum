@@ -298,23 +298,40 @@ def matches_installed(source_root):
             and os.path.isfile(system.SCRIPT_FILE)
             and file_sha256(system.SCRIPT_FILE) == file_sha256(os.path.join(source_root, PLAYER_SOURCE)))
 
-def identify_local_copy(latest, config=None):
+# Commits already compared with a local copy and found different (no need to download them again)
+_differs_from_local_copy = set()
+
+def identify_local_copy(latest, config=None, record=True):
     """install.sh can't tell which commit it installed ("local copy"). If the installed files
-    are exactly this commit, record it, so the update check doesn't offer the same version.
-    Returns True if it did."""
+    are exactly this commit, record it (unless record=False), so the update check doesn't offer
+    the same version. Returns True if they match."""
     config = config or read_config()
+    if latest['commit'] in _differs_from_local_copy:
+        return False
     archive = download(config['repo'], latest['commit'])
     with tempfile.TemporaryDirectory(prefix='mp4m-update-') as temp:
         source_root = extract(archive, temp)
-        with system.writable(system.BOOT_PATH):
-            previous = installed_version()
-            if previous.get('commit') != 'local' or not matches_installed(source_root):
-                return False
-            player_hash = file_sha256(system.SCRIPT_FILE)
-            manifest = dict(latest, repo=config['repo'], branch=config['branch'], player_sha256=player_hash,
-                            official_player_hashes=([player_hash] + [h for h in official_player_hashes(previous)
-                                                                     if h != player_hash])[:20])
-            system.write_file(os.path.join(APP_DIR, MANIFEST_NAME), json.dumps(manifest, indent=2))
+        # Compare first: reading doesn't need /boot writable
+        if not matches_installed(source_root):
+            _differs_from_local_copy.add(latest['commit'])
+            return False
+        if not record:
+            return True
+        if not _install_lock.acquire(blocking=False):
+            raise UpdateError("An update is already running.")
+        try:
+            with system.writable(system.BOOT_PATH):
+                # Again under the lock, in case something changed in the meantime
+                previous = installed_version()
+                if previous.get('commit') != 'local' or not matches_installed(source_root):
+                    return False
+                player_hash = file_sha256(system.SCRIPT_FILE)
+                manifest = dict(latest, repo=config['repo'], branch=config['branch'], player_sha256=player_hash,
+                                official_player_hashes=([player_hash] + [h for h in official_player_hashes(previous)
+                                                                         if h != player_hash])[:20])
+                system.write_file(os.path.join(APP_DIR, MANIFEST_NAME), json.dumps(manifest, indent=2))
+        finally:
+            _install_lock.release()
     return True
 
 def update(latest=None, config=None):
@@ -387,8 +404,12 @@ def main():
 
         if latest['commit'] != installed.get('commit') and installed.get('commit') == 'local' and not args.force:
             print("Comparing the local copy with the latest version...")
-            if identify_local_copy(latest, config):
-                installed = installed_version()
+            try:
+                if identify_local_copy(latest, config, record=not args.check):
+                    print("Already up to date (the local copy is this version).")
+                    return
+            except Exception as e:
+                print(f"Couldn't compare the local copy: {e}")
         if latest['commit'] == installed.get('commit') and not args.force:
             print("Already up to date.")
             return

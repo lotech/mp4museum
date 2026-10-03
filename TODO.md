@@ -30,11 +30,13 @@ a network is optional.
 ## 3. Player
 
 - [x] Bring back sync mode (v6 had it, using omxplayer-sync); only runs when omxplayer-sync is installed
-- [x] Use one VLC instance instead of creating one per file; the boot video only plays twice if the first try fails
+- [x] Use one VLC instance instead of creating one per file
+- [ ] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround, kept for now)
 - [x] Setting for how long images are shown
 - [x] "Now playing", Pause/Resume and Next in the web interface
 - [x] Sound cards 10 and above (player reads all of `alsa.txt`, web interface allows 0–99)
 - [x] Update check recognises an install from `install.sh` that already matches the latest version
+- [x] Loop files froze on the last frame (VLC's input-repeat); the player now restarts them itself
 - [ ] Test on the Pi 3B: boot video shows, images use the set duration, loop files, pause/next from the web and GPIO, sync mode (needs omxplayer-sync on the image?)
 
 ## 4. Installation

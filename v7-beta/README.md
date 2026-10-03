@@ -36,9 +36,11 @@ The player (`/boot/mp4museum.py`, started from `.bashrc`) plays the boot video, 
 MP4MUSEUM logo, then every file in `/media/*/` (the internal media partition and USB sticks)
 in alphabetical order, over and over.
 
-- **Loops:** a file with `loop.` in its name repeats forever.
+- **Loops:** a file with `loop.` in its name (e.g. `intro-loop.mp4`) plays again and again
+  until Next is pressed; then the playlist carries on.
 - **Images** are shown for 10 seconds, or as set in the web interface (`/boot/mp4m-player.txt`,
-  `image_duration=<seconds>`). The new setting applies from the next pass through the playlist.
+  `image_duration=<seconds>`). A new setting applies from the next image.
+- A file that hasn't started playing after 20 seconds (broken file, stalled USB stick) is skipped.
 - **Buttons:** GPIO pin 11 pauses and resumes, pin 13 skips to the next file. The web interface
   has the same buttons and shows what is playing (the player writes `/tmp/mp4museum-status.json`).
 - **Sound:** the card number from `/boot/alsa.txt` (0 if not set), chosen in the web interface.

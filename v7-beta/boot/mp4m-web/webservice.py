@@ -210,6 +210,16 @@ def player_status():
             'text': describe_player_status(status)}
 
 def control_player(signum, done):
+    status = system.get_player_status()
+    unavailable = {
+        'sync': "Pause and Next don't work in sync mode.",
+        'idle': "Nothing is playing.",
+    }.get(status.get('state') if status else None)
+    if unavailable:
+        if is_fetch():
+            return player_status()
+        flash(unavailable, "error")
+        return redirect(url_for('index'))
     if system.signal_player(signum):
         # Give the player a moment so the status shows the change
         time.sleep(0.5)
@@ -232,12 +242,12 @@ def player_pause():
 @app.route('/set_image_duration', methods=['POST'])
 def set_image_duration():
     seconds = request.form.get('seconds', '').strip()
-    if not seconds.isdigit() or not 1 <= int(seconds) <= 86400:
+    if not seconds.isdecimal() or not 1 <= int(seconds) <= 86400:
         flash("Please enter a number of seconds from 1 to 86400.", "error")
         return redirect(url_for('index'))
     try:
         system.save_image_duration(int(seconds))
-        flash(f"Images are shown for {int(seconds)} seconds from the next time the playlist starts over.", "success")
+        flash(f"Images are now shown for {int(seconds)} seconds.", "success")
     except Exception as e:
         flash(f"Failed to save the image duration: {e}", "error")
     return redirect(url_for('index'))
@@ -438,8 +448,9 @@ def check_update():
         try:
             if updater.identify_local_copy(latest, config):
                 RUNNING_VERSION = updater.installed_version()
-        except updater.UpdateError:
-            pass
+        except Exception as e:
+            # Not knowing just means the update is offered
+            print(f"Couldn't compare the local copy with {latest['commit'][:7]}: {e}", flush=True)
     if latest['commit'] == RUNNING_VERSION.get('commit'):
         session.pop('update', None)
         flash("The software is up to date.", "success")

@@ -6,7 +6,8 @@
 # modified 2026 in https://github.com/lotech/mp4museum (see git history):
 # waits between scans when there is nothing to play; one VLC instance for
 # everything; image duration setting; now playing, pause and next for the web
-# interface; sync mode back from v6; sound cards 10 and above
+# interface; sync mode back from v6; sound cards 10 and above; skips files
+# that don't start playing; loop files restarted by the player
 
 import time, vlc, os, glob, json, signal, shutil
 import RPi.GPIO as GPIO
@@ -21,13 +22,15 @@ SETTINGS_FILE = '/boot/mp4m-player.txt'
 # what is playing, for the web interface
 STATUS_FILE = '/tmp/mp4museum-status.json'
 DEFAULT_IMAGE_DURATION = 10
+# a file that hasn't started playing after this long is skipped (broken file, stalled USB stick)
+OPEN_TIMEOUT = 20
 
 # read audio device config: the card number, "0" if not set
 audiodevice = "0"
 if os.path.isfile(ALSA_FILE):
     with open(ALSA_FILE, 'r') as f:
         card = f.read().strip()
-    if card.isdigit():
+    if card.isdecimal():
         audiodevice = card
 
 def read_settings():
@@ -36,7 +39,7 @@ def read_settings():
         with open(SETTINGS_FILE, 'r') as f:
             for line in f:
                 key, sep, value = line.partition('=')
-                if key.strip() == 'image_duration' and value.strip().isdigit():
+                if key.strip() == 'image_duration' and value.strip().isdecimal():
                     settings['image_duration'] = max(1, int(value.strip()))
     except OSError:
         pass
@@ -77,14 +80,24 @@ def buttonNext(channel):
             inputfilter = inputfilter + 1
         time.sleep(.001)
     if (inputfilter > 50):
-        player.stop()
+        next_file()
+
+# stop the current file; also ends a loop file
+skip_requested = False
+def next_file():
+    global skip_requested
+    skip_requested = True
+    player.stop()
 
 # the web interface sends signals for its pause and next buttons
-signal.signal(signal.SIGUSR1, lambda signum, frame: player.stop())
+signal.signal(signal.SIGUSR1, lambda signum, frame: next_file())
 signal.signal(signal.SIGUSR2, lambda signum, frame: player.pause())
 
-# play media with vlc and wait until it has finished; returns how long it played
+# play media with vlc and wait until it has finished
+# returns 'ended', 'skipped' (next was pressed) or 'failed' (it didn't play)
 def vlc_play(source, options=()):
+    global skip_requested
+    skip_requested = False
     media = vlc_instance.media_new(source, *options)
     player.set_media(media)
     player.play()
@@ -93,7 +106,13 @@ def vlc_play(source, options=()):
     write_status(shown_state, source)
     time.sleep(1)
     current_state = player.get_state()
+    has_played = False
     while current_state in (vlc.State.Opening, vlc.State.Buffering, vlc.State.Playing, vlc.State.Paused):
+        if current_state in (vlc.State.Playing, vlc.State.Paused):
+            has_played = True
+        elif not has_played and time.time() - started > OPEN_TIMEOUT:
+            print("skipping %s: it didn't start playing" % source, flush=True)
+            break
         state = 'paused' if current_state == vlc.State.Paused else 'playing'
         if state != shown_state:
             shown_state = state
@@ -102,7 +121,9 @@ def vlc_play(source, options=()):
         current_state = player.get_state()
     player.stop()
     media.release()
-    return time.time() - started
+    if skip_requested:
+        return 'skipped'
+    return 'ended' if has_played else 'failed'
 
 # find a file, and if found, return its path (for sync)
 def search_file(file_name):
@@ -125,10 +146,10 @@ def sync_mode():
 
 # *** run player ****
 
-# the original started the boot video twice "to make sure it is working";
-# now it only plays again if the first try didn't really play
-if vlc_play(BOOT_VIDEO) < 2:
-    vlc_play(BOOT_VIDEO)
+# start player twice to make sure it is working
+# seems weird but works
+vlc_play(BOOT_VIDEO)
+vlc_play(BOOT_VIDEO)
 
 # please do not remove my logo screen
 vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,))
@@ -142,14 +163,19 @@ sync_mode()
 
 # the loop
 while(1):
-    settings = read_settings()
     files = sorted(glob.glob(MEDIA_FILES))
     # nothing to play yet (no USB stick, empty media partition): check again shortly
     if not files:
         write_status('idle')
         time.sleep(2)
     for file in files:
+        # read for every file, so a new image duration applies straight away
+        settings = read_settings()
         options = [':image-duration=%d' % settings['image_duration']]
         if "loop." in file:
-            options.append(':input-repeat=999999999')
-        vlc_play(file, options)
+            # play it again and again until next is pressed
+            # (VLC's own input-repeat could freeze on the last frame on the Pi)
+            while vlc_play(file, options) == 'ended':
+                pass
+        else:
+            vlc_play(file, options)

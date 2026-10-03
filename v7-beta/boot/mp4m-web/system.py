@@ -387,7 +387,7 @@ def read_player_settings():
 
 def get_image_duration():
     value = read_player_settings().get('image_duration', '')
-    return max(1, int(value)) if value.isdigit() else DEFAULT_IMAGE_DURATION
+    return max(1, int(value)) if value.isdecimal() else DEFAULT_IMAGE_DURATION
 
 def save_image_duration(seconds):
     settings = read_player_settings()
