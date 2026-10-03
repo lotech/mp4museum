@@ -60,7 +60,12 @@ a network is optional.
 - [ ] Check the image limit on the Pi: does 2048 wide show, and 2560? And what a Pi 4 can show
 - [ ] Find out what stopped the player the first time (the 12 MB PNG: out of memory?)
 - [x] Rewind button: back to the first frame, held until play (omxplayer loops show it in VLC, then loop in omxplayer again)
-- [ ] Test rewind on the Pi: does VLC show the first frame while paused after jumping back?
+- [x] Rewind tested on the Pi: omxplayer loops went black, then took a second to play; VLC held the frame but was slow to play on, with a black frame. Now the file starts again and pauses at its first picture (no jump back), and omxplayer starts in front of the frame VLC holds
+- [ ] Test rewind again on the Pi: is the first frame shown for omxplayer loops? Does VLC play on straight away? No black between the held frame and omxplayer?
+- [x] Badge on the player card: which program shows the file (VLC, omxplayer)
+- [x] Changing the loop player starts the loop video playing now again with it
+- [x] Rename files in the web interface (order, `-loop`)
+- [ ] Try mpv instead of VLC and omxplayer (seamless loops with `--loop-file`, no black frames between files, images, control over its IPC socket); not on the image, so it needs installing
 
 ## 5. Installation
 

@@ -71,11 +71,12 @@ in alphabetical order, over and over.
 
 Open `http://<network name>.local` in a browser on the same network.
 
-- **Media:** the player (what is playing, Pause/Resume, Next, and Rewind: back to the first
-  frame, held until play is pressed), playback settings, and the
+- **Media:** the player (what is playing and with which program, VLC or omxplayer; Pause/Resume,
+  Next, and Rewind: the file starts again and holds its first frame until play is pressed),
+  playback settings (changing the loop player starts the loop video playing now again), and the
   playlist: every file the player plays, from the media partition and USB sticks, in order.
-  Start any file from there (its play button or its name); upload files (several at once, with progress) or download and
-  delete them.
+  Start any file from there (its play button or its name); upload files (several at once, with progress),
+  rename them (files play in alphabetical order; add `-loop` to repeat a video), download or delete them.
 - **Updates:** when the player has an internet connection, the page checks for a new version
   by itself (at most every few hours) and shows a bar to install it.
 

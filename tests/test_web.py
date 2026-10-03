@@ -687,3 +687,48 @@ def test_large_images_only_marked_where_the_player_skips_them(pi, client, tmp_pa
         r = client.post('/upload', data={'file': (io.BytesIO(png(4000, 3000)), 'b2.png')},
                         headers={'X-Requested-With': 'fetch'}).get_json()
         assert len(r['messages']) == 1
+
+
+def test_rename(pi, client):
+    (pi.media / 'clip.mp4').write_bytes(b'video')
+    (pi.media / 'other.mp4').write_bytes(b'x')
+    r = client.post('/rename', data={'filename': 'clip.mp4', 'new_name': ' 01 clip-loop.mp4 '}, follow_redirects=True)
+    assert b'Renamed' in r.data and (pi.media / '01 clip-loop.mp4').read_bytes() == b'video'
+    assert not (pi.media / 'clip.mp4').exists() and ['mount', '-o', 'remount,rw', str(pi.media)] in pi.commands
+    # not over another file, not to a bad name, not outside the media partition
+    for new in ('other.mp4', '.hidden.mp4', '../escape.mp4', 'a/b.mp4', ''):
+        r = client.post('/rename', data={'filename': '01 clip-loop.mp4', 'new_name': new}, follow_redirects=True)
+        assert b'Renamed' not in r.data, new
+    assert (pi.media / '01 clip-loop.mp4').exists() and not (pi.media.parent / 'escape.mp4').exists()
+    assert b'not found' in client.post('/rename', data={'filename': 'gone.mp4', 'new_name': 'x.mp4'}, follow_redirects=True).data
+    # a name without an extension isn't played: said so
+    r = client.post('/rename', data={'filename': 'other.mp4', 'new_name': 'notes'}, follow_redirects=True)
+    assert b"won&#39;t play it" in r.data
+    assert 'askNewName' in client.get('/').data.decode()
+
+
+def test_engine_badge(client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    for engine, shown in (('omxplayer', 'omxplayer'), ('vlc', 'vlc'), ('something', None)):
+        with open(system.PLAYER_STATUS_FILE, 'w') as f:
+            json.dump({'state': 'playing', 'file': '/media/internal/a-loop.mp4', 'since': time.time(), 'pid': 4242,
+                       'engine': engine}, f)
+        assert client.get('/player/status').get_json()['engine'] == shown
+    assert 'id="playerEngine"' in client.get('/').data.decode()
+
+
+def test_changing_the_loop_player_starts_the_loop_again(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    (pi.media / 'a-loop.mp4').write_bytes(b'x')
+    (pi.media / 'b.mp4').write_bytes(b'x')
+    for playing, restarted in (('a-loop.mp4', True), ('b.mp4', False)):
+        sent.clear()
+        with open(system.PLAYER_STATUS_FILE, 'w') as f:
+            json.dump({'state': 'playing', 'file': str(pi.media / playing), 'since': time.time(), 'pid': 4242,
+                       'play_file': True}, f)
+        r = client.post('/set_loop_player', data={'loop_player': 'vlc'}, follow_redirects=True)
+        assert (b'has started again' in r.data) == restarted and bool(sent) == restarted
+        if restarted:
+            assert json.load(open(system.PLAY_REQUEST_FILE))['file'] == str(pi.media / playing)

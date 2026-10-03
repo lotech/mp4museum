@@ -46,7 +46,7 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   the Pi). omxplayer is no longer developed and isn't on newer OS versions, so with
   `loop_player=vlc` or without omxplayer, the player restarts them in VLC (VLC's
   `input-repeat` froze on the Pi). Talks to the web interface through
-  `/tmp/mp4museum-status.json` (status it writes, with position and length), `SIGUSR1` (next),
+  `/tmp/mp4museum-status.json` (status it writes, with position, length and `engine`: vlc or omxplayer), `SIGUSR1` (next),
   `SIGUSR2` (pause), `/tmp/mp4museum-play.json` (a file chosen in the web interface, or
   `"command": "rewind"`, read when SIGUSR1 arrives) and `/boot/mp4m-player.txt` (settings). Edited players from before may not
   write `play_file` in their status; the web interface then doesn't offer choosing a file.

@@ -76,7 +76,8 @@ class Player:
     def stop(self):
         if self.state in (_S.Playing, _S.Paused):
             log.append({'stop': self.media.path, 'at': round(clock['now'] - 1000, 2)})
-        log.append({'stop_call': self.media.path if self.media else None, 'state': int(self.state)})
+        log.append({'stop_call': self.media.path if self.media else None, 'state': int(self.state),
+                    'at': round(clock['now'] - 1000, 2)})
         self.state = _S.Stopped
     def pause(self):
         self.state = _S.Paused if self.state == _S.Playing else _S.Playing

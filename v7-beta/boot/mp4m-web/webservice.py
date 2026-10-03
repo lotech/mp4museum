@@ -209,12 +209,13 @@ def player_view(status):
     browser doesn't depend on the Pi's clock (which may be wrong without a network)."""
     view = {'running': bool(status), 'state': None, 'text': describe_player_status(status), 'file': None,
             'name': None, 'folder': None, 'kind': None, 'loop': False, 'position': None, 'length': None,
-            'play_file': False, 'rewind': False}
+            'play_file': False, 'rewind': False, 'engine': None}
     if not status:
         return view
     path = status.get('file') or None
     view.update(state=status.get('state'), file=path, play_file=status.get('play_file') is True,
                 rewind=status.get('rewind') is True,
+                engine=status.get('engine') if status.get('engine') in ('vlc', 'omxplayer', 'omxplayer-sync') else None,
                 name=os.path.basename(path) if path else None,
                 folder=os.path.basename(os.path.dirname(path)) if path else None,
                 kind=system.media_kind(path) if path else None, loop='loop.' in (path or ''))
@@ -357,11 +358,24 @@ def set_loop_player():
     if choice not in system.LOOP_PLAYERS:
         flash("Please choose VLC or omxplayer.", "error")
         return redirect(url_for('index'))
+    name = 'omxplayer' if choice == 'omxplayer' else 'VLC'
     try:
         system.save_player_setting('loop_player', choice)
-        flash(f"Loop videos are now played with {'omxplayer' if choice == 'omxplayer' else 'VLC'}.", "success")
     except Exception as e:
         flash(f"Failed to save the setting: {e}", "error")
+        return redirect(url_for('index'))
+    # a loop video playing now starts again with the player chosen
+    status = system.get_player_status() or {}
+    playing = status.get('file') or ''
+    if (status.get('state') in ('playing', 'paused') and 'loop.' in playing and status.get('play_file') is True
+            and any(entry['path'] == playing for entry in system.get_playlist())):
+        try:
+            system.request_play(playing)
+            flash(f"Loop videos are now played with {name}; {os.path.basename(playing)} has started again.", "success")
+            return redirect(url_for('index'))
+        except OSError:
+            pass
+    flash(f"Loop videos are now played with {name}.", "success")
     return redirect(url_for('index'))
 
 
@@ -448,6 +462,40 @@ def delete_file():
             flash(f"Failed to delete file: {e}", "error")
     else:
         flash("File not found.", "error")
+    return redirect(url_for('index'))
+
+
+@app.route('/rename', methods=['POST'])
+def rename_file():
+    filename = request.form.get('filename', '')
+    new_name = request.form.get('new_name', '').strip()
+    if not system.media_available():
+        flash(f"The media partition {system.MEDIA_PATH} is not mounted.", "error")
+        return redirect(url_for('index'))
+    if not system.is_valid_filename(filename):
+        flash("Invalid filename.", "error")
+        return redirect(url_for('index'))
+    if not system.is_valid_filename(new_name):
+        flash("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
+        return redirect(url_for('index'))
+    old_path = os.path.join(system.MEDIA_PATH, filename)
+    new_path = os.path.join(system.MEDIA_PATH, new_name)
+    if not os.path.isfile(old_path):
+        flash("File not found.", "error")
+        return redirect(url_for('index'))
+    # the media partition (exFAT) ignores case: a name differing only in case is the same file
+    if os.path.exists(new_path) and not os.path.samefile(old_path, new_path):
+        flash(f"There is already a file called '{new_name}'.", "error")
+        return redirect(url_for('index'))
+    try:
+        with system.writable(system.MEDIA_PATH):
+            os.rename(old_path, new_path)
+    except Exception as e:
+        flash(f"Failed to rename the file: {e}", "error")
+        return redirect(url_for('index'))
+    flash(f"Renamed '{filename}' to '{new_name}'.", "success")
+    if '.' not in new_name:
+        flash(f"'{new_name}' has no extension, so the player won't play it.", "warning")
     return redirect(url_for('index'))
 
 

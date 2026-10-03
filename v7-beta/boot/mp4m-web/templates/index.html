@@ -59,6 +59,7 @@
             <span id="playerState" class="badge state">{{ player.state or 'stopped' }}</span>
             <span id="playerLoop" class="badge" {% if not player.loop %}hidden{% endif %}>{{ icon('repeat') }}loop</span>
             <span id="playerFolder" class="badge" {% if not player.folder %}hidden{% endif %}>{{ player.folder }}</span>
+            <span id="playerEngine" class="badge" title="The program showing it" {% if not player.engine %}hidden{% endif %}>{{ icon('monitor-play') }}<span>{{ {'vlc': 'VLC'}.get(player.engine, player.engine) }}</span></span>
           </div>
           <div id="playerTitle" class="screen-title">{{ player.name if player.name and player.state in ('playing', 'paused', 'sync') else player.text }}</div>
         </div>
@@ -160,6 +161,11 @@
           </div>
           <div class="item-actions">
             {% if entry.internal %}
+            <form method="post" action="{{ url_for('rename_file') }}" onsubmit="return askNewName(this)">
+              <input type="hidden" name="filename" value="{{ entry.name }}">
+              <input type="hidden" name="new_name" value="">
+              <button type="submit" class="icon-button" title="Rename" aria-label="Rename {{ entry.name }}">{{ icon('pencil') }}</button>
+            </form>
             <a class="icon-button" href="{{ url_for('download_file', filename=entry.name) }}" title="Download" aria-label="Download {{ entry.name }}">{{ icon('download') }}</a>
             <form method="post" action="{{ url_for('delete_file') }}" onsubmit="return confirm('Delete ' + this.filename.value + '?')">
               <input type="hidden" name="filename" value="{{ entry.name }}">
