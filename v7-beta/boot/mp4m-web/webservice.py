@@ -839,45 +839,69 @@ UPDATED_PAGE = """<!doctype html>
     <style>{{ inline_css|safe }}</style>
   </head>
   <body>
-    <div class="container">
+    <div class="container narrow-page">
       <h2>Update installed</h2>
       {% for line in lines %}<p>{{ line }}</p>{% endfor %}
-      {% if restarting %}
-      <p id="status" class="hint">The web interface is restarting with the new version, then it offers to reboot...</p>
-      <form method="post" action="{{ url_for('reboot_system') }}" id="rebootAnyway" hidden>
-        <p class="hint">The new version hasn't answered yet.</p>
-        <button type="submit" class="button primary">Reboot now</button>
-      </form>
-      <p><a href="{{ url_for('index') }}" class="button button-link">Later</a></p>
-      {% else %}
-      <p class="hint">Reboot to use the new version.</p>
-      <form method="post" action="{{ url_for('reboot_system') }}">
-        <button type="submit" class="button primary">Reboot now</button>
+      {# One page: while the web interface restarts with the new version it says so, then it offers
+         the reboot here (not on another page); the reboot is done from here too #}
+      <p id="status" class="update-status">
+        {% if restarting %}<span class="spinner"></span>Restarting the web interface with the new version...
+        {% else %}Reboot the player to finish the update.{% endif %}</p>
+      <div id="rebootButtons" class="button-row" {% if restarting %}hidden{% endif %}>
+        <button type="button" class="button primary" onclick="rebootNow()">Reboot now</button>
         <a href="{{ url_for('index') }}" class="button button-link">Later</a>
-      </form>
+      </div>
+      {% if restarting %}
+      <p id="laterOnly"><a href="{{ url_for('index') }}" class="button button-link">Later</a></p>
       {% endif %}
     </div>
-    {% if restarting %}
     <script>
-      // Wait for the new version to answer, then offer the reboot (on one page, the new version's;
-      // a Reboot button here only led to that page)
+      const statusLine = document.getElementById('status');
+      function offerReboot(text) {
+        statusLine.textContent = text;
+        document.getElementById('rebootButtons').hidden = false;
+        const later = document.getElementById('laterOnly');
+        if (later) later.hidden = true;
+      }
+      function rebootNow() {
+        document.getElementById('rebootButtons').hidden = true;
+        statusLine.innerHTML = '<span class="spinner"></span>Rebooting... This page goes back to the web interface when the player has started again.';
+        fetch('{{ url_for('reboot_system') }}', {method: 'POST', headers: {'X-Requested-With': 'fetch'}})
+          .catch(() => {});
+        // give it time to go down, then wait for it to answer again
+        setTimeout(waitForPlayer, 15000);
+      }
+      function waitForPlayer() {
+        fetch('{{ url_for('version') }}', {cache: 'no-store'})
+          .then(response => { if (response.ok) { window.location = '{{ url_for('index') }}'; } else { throw 0; } })
+          .catch(() => setTimeout(waitForPlayer, 2000));
+      }
+      {% if restarting %}
+      let waited = 0;
       function waitForNewVersion() {
-        fetch('{{ url_for('version') }}', {headers: {'X-Requested-With': 'fetch'}})
+        fetch('{{ url_for('version') }}', {headers: {'X-Requested-With': 'fetch'}, cache: 'no-store'})
           .then(response => response.ok ? response.json() : {})
           .then(data => {
             if (data.commit === {{ new_commit|tojson }}) {
-              window.location = '{{ url_for('confirm_reboot') }}';
+              offerReboot('Ready. Reboot the player to finish the update.');
             } else {
-              setTimeout(waitForNewVersion, 2000);
+              retry();
             }
           })
-          .catch(() => setTimeout(waitForNewVersion, 2000));
+          .catch(retry);
+      }
+      function retry() {
+        waited += 2;
+        if (waited >= 60) {
+          // the new version hasn't answered: the reboot starts it anyway
+          offerReboot("The web interface hasn't come back yet. Reboot the player to finish the update.");
+        } else {
+          setTimeout(waitForNewVersion, 2000);
+        }
       }
       setTimeout(waitForNewVersion, 3000);
-      // still no answer after a minute: offer to reboot from here
-      setTimeout(() => { document.getElementById('rebootAnyway').hidden = false; }, 60000);
+      {% endif %}
     </script>
-    {% endif %}
   </body>
 </html>
 """
