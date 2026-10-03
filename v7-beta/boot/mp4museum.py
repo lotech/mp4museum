@@ -1,6 +1,10 @@
 # mp4museum player script v7 beta - july 2025
 
 # (c) julius schmiedel - http://mp4museum.org
+# licensed under the GNU GPL v3, see LICENSE
+
+# modified 2026 in https://github.com/lotech/mp4museum (see git history):
+# waits between scans when there is nothing to play
 
 import time, vlc, os, glob
 import RPi.GPIO as GPIO

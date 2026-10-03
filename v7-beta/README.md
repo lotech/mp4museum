@@ -1,6 +1,7 @@
 # MP4MUSEUM v7 beta – fork
 
-Based on the MP4MUSEUM v7 beta image by Julius Schmiedel (https://mp4museum.org/v7-beta/).
+Based on the MP4MUSEUM v7 beta image by Julius Schmiedel (https://mp4museum.org/v7-beta/),
+the author of MP4MUSEUM (https://github.com/JuliusCode/MP4MUSEUM).
 Its source was not published, so these files were copied off a running v7 beta install
 and are developed further here. The files exactly as they came off the image are in
 commits `eff36bc` and `1ba2c91`.
@@ -67,3 +68,10 @@ It stops when you close the SSH session; reboot to go back to the installed vers
    `scp v7-beta/home/pi/mp4m-webservice.py v7-beta/home/pi/mp4museum-boot.mp4 pi@<name>.local:`
 3. Run `sudo raspi-config` again, enable the overlay file system, and answer **yes** to
    write-protecting the boot partition. Reboot.
+
+## License
+
+GNU General Public License v3, like the original MP4MUSEUM (see `LICENSE` in the repository root).
+The original files are © Julius Schmiedel; changed files say so at the top. The web interface
+was not published with a license of its own by its author and is included as part of the
+GPL-licensed MP4MUSEUM project.

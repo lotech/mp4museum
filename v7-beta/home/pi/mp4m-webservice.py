@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 # mp4museum web interface
 # based on the MP4MUSEUM v7 beta web service by julius schmiedel - http://mp4museum.org
-# source: https://github.com/lotech/mp4museum
+# licensed under the GNU GPL v3, see LICENSE
+#
+# modified 2026 in https://github.com/lotech/mp4museum (see git history):
+# read-only partitions restored after writes, login, per-player network name,
+# video presets that keep config.txt, uploads written to the SD card
 import hashlib
 import hmac
 import os
