@@ -191,8 +191,7 @@ def index():
                            loop_player=system.get_loop_player(),
                            boot_video_plays=system.get_boot_video_plays(),
                            show_address=system.get_show_address(),
-                           start_up_settings=system.player_has_start_up_settings(),
-                           omxplayer_installed=system.omxplayer_installed())
+                           start_up_settings=system.player_has_start_up_settings())
 
 
 # ----- Player ----- #
@@ -293,8 +292,33 @@ def player_pause():
 @app.route('/player/play', methods=['POST'])
 def player_play():
     path = request.form.get('file', '')
-    status = system.get_player_status()
     entry = next((e for e in system.get_playlist() if e['path'] == path and e['plays']), None)
+    return play_entry(entry, system.get_player_status())
+
+@app.route('/player/previous', methods=['POST'])
+def player_previous():
+    # the file before the one playing, among those the player plays (not the skipped ones),
+    # the last one when it is the first, as the playlist repeats
+    status = system.get_player_status()
+    playable = [e for e in system.get_playlist() if e['plays'] and not e['large'] and not e['skipped']]
+    index = next((i for i, e in enumerate(playable) if e['path'] == (status or {}).get('file')), None)
+    if status and status.get('state') in ('playing', 'paused') and index is not None:
+        return play_entry(playable[index - 1], status)
+    if not status:
+        error = "The player is not running."
+    elif status.get('state') == 'sync':
+        error = "Files can't be chosen in sync mode."
+    elif status.get('state') not in ('playing', 'paused'):
+        error = "Nothing is playing."
+    else:
+        error = "There's no previous file yet: the player is starting up."
+    if is_fetch():
+        return dict(player_view(status), error=error), 409
+    flash(error, "error")
+    return redirect(url_for('index'))
+
+def play_entry(entry, status):
+    """Ask the player to play a playlist entry (None: not in the playlist)."""
     if not entry:
         error = "That file isn't in the playlist."
     elif not status:
@@ -307,7 +331,7 @@ def player_play():
         error = None
     if not error:
         try:
-            if system.request_play(path):
+            if system.request_play(entry['path']):
                 time.sleep(0.5)
             else:
                 error = "The player is not running."

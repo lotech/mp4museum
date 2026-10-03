@@ -399,7 +399,8 @@ def test_loop_player(client, monkeypatch):
     open(system.PLAYER_SETTINGS_FILE, 'w').write('image_duration=7\n')
     monkeypatch.setattr(system.shutil, 'which', lambda name: None)
     r = client.get('/')
-    assert b'<option value="omxplayer" selected>' in r.data and b"isn't installed here" in r.data
+    assert b'<option value="omxplayer" selected>' in r.data
+    assert b'Add -loop to the end of the file name to loop or hold a clip. omxplayer is preferred for loops.' in r.data
     r = client.post('/set_loop_player', data={'loop_player': 'vlc'}, follow_redirects=True)
     assert b'played with VLC' in r.data and b'<option value="vlc" selected>' in r.data
     assert open(system.PLAYER_SETTINGS_FILE).read() == 'image_duration=7\nloop_player=vlc\n'
@@ -483,6 +484,54 @@ def test_play_chosen_file(pi, client, monkeypatch):
     write_status('playing', str(pi.media / 'a.mp4'))
     r = client.post('/player/play', data={'file': path}, headers={'X-Requested-With': 'fetch'})
     assert r.status_code == 409 and 'older version' in r.get_json()['error'] and sent == []
+
+
+
+def test_previous_file(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    monkeypatch.setattr(webservice.time, 'sleep', lambda s: None)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    fetch = {'X-Requested-With': 'fetch'}
+    for name in ('a.mp4', 'b-huge.png', 'c.mp4', 'README', 'd.jpg'):
+        (pi.media / name).write_bytes(png(4000, 3000) if name.endswith('png') else b'x')
+
+    def playing(name, state='playing', **status):
+        with open(system.PLAYER_STATUS_FILE, 'w') as f:
+            json.dump(dict({'state': state, 'file': str(pi.media / name), 'since': time.time(), 'pid': 4242,
+                            'play_file': True}, **status), f)
+
+    def previous():
+        r = client.post('/player/previous', headers=fetch)
+        return r.status_code, (json.load(open(system.PLAY_REQUEST_FILE))['file'].split('/')[-1]
+                               if r.status_code == 200 else r.get_json()['error'])
+
+    # the file before, among those the player plays: not b-huge.png (too large for a Pi 3, skipped)
+    # or README (no extension); from the first, the last (the playlist repeats)
+    playing('c.mp4')
+    assert previous() == (200, 'a.mp4') and sent == [(4242, signal.SIGUSR1)]
+    playing('d.jpg', 'paused')
+    assert previous() == (200, 'c.mp4')
+    playing('a.mp4')
+    assert previous() == (200, 'd.jpg')
+    # nothing to go back from
+    sent.clear()
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': '/home/pi/mp4m-v7beta.jpg', 'since': time.time(), 'pid': 4242,
+                   'play_file': True}, f)
+    assert previous() == (409, "There's no previous file yet: the player is starting up.")
+    playing('a.mp4', 'idle')
+    assert previous() == (409, 'Nothing is playing.')
+    playing('a.mp4', 'sync')
+    assert previous() == (409, "Files can't be chosen in sync mode.")
+    # an older player script can't be asked for a file
+    write_status('playing', str(pi.media / 'c.mp4'))
+    status, error = previous()
+    assert status == 409 and 'older version' in error and sent == []
+    os.remove(system.PLAYER_STATUS_FILE)
+    assert b'The player is not running' in client.post('/player/previous', follow_redirects=True).data
+    html = client.get('/').data.decode()
+    assert 'id="previousButton"' in html and 'id="rewindButton"' in html
 
 
 def test_player_buttons_tell_the_page_why_not(client, monkeypatch):
@@ -935,7 +984,7 @@ def test_device_info(pi, client, tmp_path, monkeypatch):
 def test_start_up_settings(pi, client):
     html = client.get('/').data.decode()
     assert '<option value="2" selected>Play twice (default)</option>' in html
-    assert '<option value="yes" selected>Show (default)</option>' in html
+    assert '<option value="yes" selected>Show (default)</option>' in html and 'Show network address on boot' in html
     r = client.post('/set_boot_video_plays', data={'boot_video_plays': '0'}, follow_redirects=True)
     assert b"boot video won&#39;t play" in r.data
     assert b'will play once' in client.post('/set_boot_video_plays', data={'boot_video_plays': '1'}, follow_redirects=True).data

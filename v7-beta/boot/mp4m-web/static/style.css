@@ -345,8 +345,6 @@ a {
 pre.log {
   max-height: 320px;
   overflow-y: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {
@@ -452,7 +450,9 @@ pre {
   border-radius: var(--radius-small);
   border: 1px solid var(--border);
   color: var(--muted);
-  overflow-x: auto;
+  /* wrapped, not scrolled sideways (display and network details are long single lines) */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: 13px;
 }
@@ -711,11 +711,21 @@ select {
 }
 
 .transport {
+  /* back to the start on its own at the left, apart from previous, pause and next in the middle */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 16px 24px 24px;
+}
+
+.transport-side {
+  justify-self: start;
+}
+
+.transport-main {
   display: flex;
-  justify-content: center;
   align-items: center;
   gap: 16px;
-  padding: 16px 24px 24px;
 }
 
 .transport form {
@@ -742,6 +752,16 @@ select {
 
 .round-button:active {
   transform: scale(0.94);
+}
+
+.round-button.small {
+  width: 40px;
+  height: 40px;
+}
+
+.round-button.small .icon {
+  width: 17px;
+  height: 17px;
 }
 
 .round-button.big {

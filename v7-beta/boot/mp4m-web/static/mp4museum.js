@@ -120,6 +120,8 @@ function showPlayer(view) {
   const controls = view.running && ['playing', 'paused'].includes(state) && !playerBusy;
   document.getElementById('pauseButton').disabled = !controls;
   document.getElementById('nextButton').disabled = !controls;
+  // an older player script can't be asked for a file
+  document.getElementById('previousButton').disabled = !controls || !view.play_file;
   // an older player script can't go back to the start
   document.getElementById('rewindButton').disabled = !controls || !view.rewind;
   document.querySelectorAll('.playlist-item').forEach(item => {
