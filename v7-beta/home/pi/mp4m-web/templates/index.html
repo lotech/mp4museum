@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block header %}
+<div class="page-header">
+  <h1>MP4Museum <span class="hint">{{ hostname }}.local</span></h1>
+  <form method="post" action="{{ url_for('logout') }}">
+    <button type="submit" class="link-button" title="Log out of the web interface">Log out</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="tabs">
+  <button class="tab active" data-tab="media" onclick="showTab('media')" title="Manage media files, upload, download, and delete content">Media</button>
+  <button class="tab" data-tab="sound" onclick="showTab('sound')" title="Configure audio output device and sound settings">Sound</button>
+  <button class="tab" data-tab="video" onclick="showTab('video')" title="Set display resolution and video output mode">Video</button>
+  <button class="tab" data-tab="script" onclick="showTab('script')" title="Edit the Python script for custom functionality">Script</button>
+  <button class="tab" data-tab="system" onclick="showTab('system')" title="Network name, password and network information">System</button>
+</div>
+
+<div id="media" class="tab-content active">
+  <h2>Files in {{ media_path }}</h2>
+
+  {% if is_available %}
+  <div class="form-group">
+    <h3>Upload File</h3>
+    <form method="post" action="{{ url_for('upload_file') }}" enctype="multipart/form-data" class="upload-form"
+          data-free-space="{{ free_space }}" data-free-space-text="{{ free_space_text }}" onsubmit="return checkUploadSize(this)">
+      <input type="file" name="file" required title="Select a file from your computer to upload (supported formats: MP4, MP3, WAV, etc.)">
+      <input type="submit" value="Upload" class="button" title="Upload the selected file to the media directory">
+    </form>
+    <p class="hint">{{ free_space_text }} free. Files play in alphabetical order.</p>
+  </div>
+  {% else %}
+  <div class="form-group">
+    <h3>Upload File</h3>
+    <div class="info-box" title="The media partition is missing">
+      The media partition {{ media_path }} is not mounted, so files can't be uploaded.
+    </div>
+  </div>
+  {% endif %}
+
+  <ul class="file-list">
+    {% for file in files %}
+      <li>
+        <span>{{ file }}</span>
+        <div class="file-actions">
+          <a href="{{ url_for('download_file', filename=file) }}" title="Download this file to your computer">Download</a>
+          <form method="post" action="{{ url_for('delete_file') }}" onsubmit="return confirm('Are you sure you want to delete ' + this.filename.value + '?')">
+            <input type="hidden" name="filename" value="{{ file }}">
+            <button type="submit" class="link-button" title="Permanently delete this file">Delete</button>
+          </form>
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <div class="form-group">
+    <button class="button" onclick="reboot(true)" title="Restart the system to apply all changes">Reboot System</button>
+  </div>
+</div>
+
+<div id="sound" class="tab-content">
+  <h2>Sound Device</h2>
+
+  <div class="form-group">
+    <h3>Select Sound Device</h3>
+    <form method="post" action="{{ url_for('set_sound_device') }}" class="sound-form" onsubmit="return validateSoundDevice()">
+      <div>
+        <label for="device" title="Enter the card number from the list below">Card Number:</label>
+        <input type="text" name="device" id="device" required title="Enter the number shown in 'card X' in the list below"
+               value="{{ current_sound_card }}"
+               onfocus="if(this.value === 'auto') this.value = '';"
+               onblur="if(this.value === '') this.value = 'auto';">
+        <div id="deviceError" class="field-error"></div>
+      </div>
+      <input type="submit" value="Set Card" class="button" title="Set this card as the default audio output">
+      {% if current_sound_card != "auto" %}
+      <button type="submit" class="button" formaction="{{ url_for('set_auto_sound') }}" formnovalidate onclick="document.getElementById('device').value = 'auto'" title="Enable automatic sound device selection">Auto Mode</button>
+      {% endif %}
+    </form>
+  </div>
+
+  <div class="form-group">
+    <h3>Available Sound Devices</h3>
+    <pre title="List of all sound devices connected to the system. Use the card number from this list to set the audio output.">{{ sound_devices_text }}</pre>
+  </div>
+</div>
+
+<div id="video" class="tab-content">
+  <h2>Video Mode</h2>
+
+  <div class="form-group">
+    <h3>Display Information</h3>
+    <pre title="Current display configuration and status information">{{ display_info }}</pre>
+  </div>
+
+  <div class="form-group">
+    <h3>Current Video Mode: <span title="The currently active display resolution and refresh rate">{{ current_mode }}</span></h3>
+  </div>
+
+  <div class="form-group">
+    <h3>Select Video Mode</h3>
+    <form method="post" action="{{ url_for('set_video_mode') }}" class="video-form">
+      <div>
+        <label for="mode" title="Choose the display resolution and refresh rate">Video Mode:</label>
+        <select name="mode" id="mode" required title="Select the desired video output mode. Changes require a system reboot to take effect.">
+          {% if not current_mode_key %}
+          <option value="" selected disabled>Custom (current settings)</option>
+          {% endif %}
+          {% for key, mode in video_modes.items() %}
+          <option value="{{ key }}" {% if key == current_mode_key %}selected{% endif %}>{{ mode.description }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <input type="submit" value="Apply Video Mode" class="button" title="Apply the selected video mode (requires system reboot)">
+    </form>
+    <p class="hint">Only the video lines in /boot/config.txt are changed, your other settings are kept.
+      NTSC and PAL use the composite (3.5mm AV) output, which is only active when no HDMI display is connected.</p>
+  </div>
+</div>
+
+<div id="script" class="tab-content">
+  <h2>Python Script Editor</h2>
+
+  <div class="form-group">
+    <h3>Edit MP4Museum Script</h3>
+    <form method="post" action="{{ url_for('save_script') }}" id="scriptForm" class="script-form">
+      <label for="script_content" class="visually-hidden">Script Content:</label>
+      <textarea name="script_content" id="script_content" class="script-editor" rows="20" cols="80"
+                title="Edit the Python script. This file is located at {{ script_file }}">{{ script_content }}</textarea>
+      <div class="script-actions">
+        <input type="submit" value="Save Script" class="button" title="Save the script to {{ script_file }}">
+        <button type="button" class="button" onclick="loadScript()" title="Discard unsaved changes and reload from disk">Discard Changes</button>
+        <button type="button" class="button" onclick="saveAndReboot()" title="Save the script and reboot the system">Save and Reboot</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="form-group">
+    <h3>Script Information</h3>
+    <div class="info-box">
+      <strong>File:</strong> {{ script_file }}<br>
+      <strong>What it does:</strong> This is your custom Python script for adding extra features to your MP4Museum system.<br>
+      <strong>Important:</strong> Changes are saved only when you click "Save Script" or "Save and Reboot". You need to reboot the player for the changes to take effect.
+    </div>
+  </div>
+</div>
+
+<div id="system" class="tab-content">
+  <h2>System</h2>
+
+  <div class="form-group">
+    <h3>Network Name</h3>
+    <p class="hint">This player is at <strong>http://{{ hostname }}.local</strong>.
+      Give each player on the same network a different name.
+      {% if hostname_is_default %}This is the default name, made from the Pi's serial number.{% endif %}</p>
+    <form method="post" action="{{ url_for('set_hostname') }}" class="stacked-form"
+          onsubmit="return confirm('Change the network name? The page will move to the new address.')">
+      <label for="hostname">New name (letters, numbers and -). Leave empty to go back to the default.</label>
+      <input type="text" name="hostname" id="hostname" value="{{ hostname }}" maxlength="63"
+             pattern="[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?" title="Letters, numbers and hyphens, not starting or ending with a hyphen">
+      <input type="submit" value="Change Name" class="button">
+    </form>
+  </div>
+
+  <div class="form-group">
+    <h3>Password</h3>
+    {% if using_default_password %}
+    <p class="hint">The password is still the default (mp4museum).</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('set_password') }}" class="stacked-form">
+      <label for="current_password">Current password</label>
+      <input type="password" name="current_password" id="current_password" required>
+      <label for="new_password">New password</label>
+      <input type="password" name="new_password" id="new_password" required>
+      <label for="confirm_password">New password again</label>
+      <input type="password" name="confirm_password" id="confirm_password" required>
+      <input type="submit" value="Change Password" class="button">
+    </form>
+    <p class="hint">Forgot it? Delete mp4m-password.txt from the SD card's boot partition to reset it to the default.</p>
+  </div>
+
+  <div class="form-group">
+    <h3>Network Configuration</h3>
+    <pre title="Network configuration and MAC addresses">{{ network_status }}</pre>
+  </div>
+</div>
+{% endblock %}

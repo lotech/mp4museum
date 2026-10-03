@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}MP4Museum - Log in{% endblock %}
+{% block container_class %}login{% endblock %}
+
+{% block header %}
+<h1>MP4Museum</h1>
+<p class="hint">{{ hostname }}.local</p>
+{% endblock %}
+
+{% block content %}
+<form method="post" action="{{ url_for('login') }}" class="form-group">
+  <label for="password">Password</label>
+  <input type="password" name="password" id="password" autofocus required>
+  <input type="submit" value="Log in" class="button">
+</form>
+<p class="hint">
+  The default password is <code>mp4museum</code>.
+  Forgot it? Delete <code>mp4m-password.txt</code> from the SD card's boot partition to reset it.
+</p>
+{% endblock %}

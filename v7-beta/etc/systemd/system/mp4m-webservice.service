@@ -1,0 +1,13 @@
+[Unit]
+Description=MP4MUSEUM web interface
+# Wait for the media partition, so files are never listed or deleted on the empty mount point
+After=network.target avahi-daemon.service media-internal.mount
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/mp4m-web/webservice.py
+WorkingDirectory=/home/pi/mp4m-web
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

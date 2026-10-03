@@ -17,8 +17,9 @@ The player is meant to run offline. A network is optional and only needed for th
 | Path | Purpose |
 |---|---|
 | `boot/mp4museum.py` | Player (v6 player with sync mode removed; logo is now `mp4m-v7beta.jpg`) |
-| `home/pi/mp4m-webservice.py` | Web interface (Flask, port 80, runs as root) |
-| `home/pi/.bashrc` | Autostart on tty1: web service in background, then `/boot/mp4museum.py` |
+| `home/pi/mp4m-web/` | Web interface (Flask, port 80, runs as root): `webservice.py` (routes), `system.py` (partitions, config.txt, network name, password), `templates/`, `static/` |
+| `etc/systemd/system/mp4m-webservice.service` | Starts the web interface at boot |
+| `home/pi/.bashrc` | Autostart on tty1: runs `/boot/mp4museum.py` |
 | `home/pi/mp4m-v7beta.jpg` | Logo screen shown after boot |
 | `home/pi/mp4museum-boot.mp4` | Boot video |
 | `boot/config.txt` | Video/audio config (video lines set by the web UI video presets) |
@@ -37,37 +38,56 @@ Open `http://<network name>.local` in a browser on the same network.
 - **Network name:** each player calls itself `mp4museum-xxxx.local`, where `xxxx` is made
   from the Pi's serial number, so several players can share a network. Change it on the
   System tab, or put the name in `/boot/hostname.txt` from a computer.
-  The name is logged in `/tmp/mp4m-webservice.log` at startup.
+  The name is logged at startup; see `journalctl -u mp4m-webservice`.
 - **Read-only storage:** `/boot` and `/media/internal` stay read-only, and are only made
   writable while the web interface saves something.
 - **Video presets** only change the video lines in `/boot/config.txt`; other settings are kept.
 
 Files the web interface may create in `/boot`: `mp4m-password.txt`, `hostname.txt`, `alsa.txt`.
 
-## Trying out a change on the Pi
+## Getting the code onto the Pi
 
-The root filesystem is a RAM overlay, so anything copied to `/home/pi` disappears at the
-next reboot. That makes it safe for testing. From your computer:
+The Pi can download the repository itself into `~/mp4m-src` (replace `master` with a
+branch name to try a branch):
 
 ```bash
-scp v7-beta/home/pi/mp4m-webservice.py pi@mp4museum.local:
-ssh pi@mp4museum.local
-sudo pkill -f 'mp4m-webservice[.]py'
-sudo python3 ~/mp4m-webservice.py
+BRANCH=master
+sudo rm -rf ~/mp4m-src && mkdir ~/mp4m-src
+curl -fL https://github.com/lotech/mp4museum/archive/refs/heads/$BRANCH.tar.gz | tar xz -C ~/mp4m-src --strip-components=1
 ```
 
-The new version changes the player's network name straight away; the terminal shows it,
-e.g. `Network name: mp4museum-1a2b.local`. Use that name (or the IP address) from then on.
+Without internet on the Pi, download the same file on a computer, copy it over with `scp`,
+and unpack it with `tar xzf <file> -C ~/mp4m-src --strip-components=1`.
+
+## Trying out a change
+
+The root filesystem is a RAM overlay, so anything copied to `/home/pi` disappears at the
+next reboot. That makes it safe for testing. After downloading as above:
+
+```bash
+sudo systemctl stop mp4m-webservice 2>/dev/null; sudo pkill -f 'mp4m-webservice[.]py'
+sudo python3 -B ~/mp4m-src/v7-beta/home/pi/mp4m-web/webservice.py
+```
+
+The terminal shows the player's network name, e.g. `Network name: mp4museum-1a2b.local`.
 It stops when you close the SSH session; reboot to go back to the installed version.
 
 ## Installing permanently
 
-1. `ssh pi@<name>.local`, run `sudo raspi-config`, open **Overlay File System**
-   (under Performance Options or Advanced Options) and disable it. Reboot.
-2. Copy the changed files into place, e.g.
-   `scp v7-beta/home/pi/mp4m-webservice.py v7-beta/home/pi/mp4museum-boot.mp4 pi@<name>.local:`
-3. Run `sudo raspi-config` again, enable the overlay file system, and answer **yes** to
+1. Run `sudo raspi-config`, open **Overlay File System** (under Performance Options or
+   Advanced Options) and turn it off. Reboot.
+2. Download the code as above, then run the install script:
+   ```bash
+   cd ~/mp4m-src/v7-beta
+   sudo ./install.sh
+   ```
+   It installs the web interface to `/home/pi/mp4m-web`, the boot video, logo and `.bashrc`
+   to `/home/pi`, and the `mp4m-webservice` service. It doesn't change anything in `/boot`.
+3. Run `sudo raspi-config` again, turn the overlay file system back on, and answer **yes** to
    write-protecting the boot partition. Reboot.
+
+Check the web interface with `systemctl status mp4m-webservice`, and its log with
+`journalctl -u mp4m-webservice`.
 
 ## License
 

@@ -115,8 +115,7 @@ fi
 # only run local
 if [[ $(tty) == /dev/tty* ]]; then
 
-# this shall be a service soon
-sudo python3 /home/pi/mp4m-webservice.py > /tmp/mp4m-webservice.log 2>&1 &
+# the web interface runs as a service: systemctl status mp4m-webservice
 
 # mp4museum autostart
 setterm -cursor off

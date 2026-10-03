@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <title>{% block title %}MP4Museum{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {% block head %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='mp4museum.js') }}"></script>
+    {% endblock %}
+  </head>
+  <body data-reboot-url="{{ url_for('reboot_system') }}">
+    <div class="container {% block container_class %}{% endblock %}">
+      {% block header %}{% endblock %}
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, msg in messages %}
+          <div class="flash {{ category }}">{{ msg }}</div>
+        {% endfor %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </div>
+
+    <footer class="footer">
+      Based on <a href="{{ project_url }}" target="_blank" rel="noopener">MP4MUSEUM</a> by Julius Schmiedel
+      (<a href="{{ upstream_repo_url }}" target="_blank" rel="noopener">original source</a>).
+      This version: <a href="{{ repo_url }}" target="_blank" rel="noopener">{{ repo_url.split('//')[1] }}</a>
+    </footer>
+
+    <div id="rebootScreen" class="reboot-screen">
+      <div class="reboot-message">
+        <h2>System is rebooting...</h2>
+        <p>Please wait while the system restarts.</p>
+        <p>You will be redirected automatically.</p>
+      </div>
+    </div>
+  </body>
+</html>
