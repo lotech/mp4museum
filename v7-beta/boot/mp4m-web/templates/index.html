@@ -323,36 +323,14 @@
         <p class="current">This player is at <strong>http://{{ hostname }}.local</strong></p>
         <form method="post" action="{{ url_for('set_hostname') }}" class="setting"
               onsubmit="return confirm('Change the network name? The page will move to the new address.')">
-          <label for="hostname">New name</label>
           <div class="input-row">
-            <input type="text" name="hostname" id="hostname" value="{{ hostname }}" maxlength="63"
+            <input type="text" name="hostname" id="hostname" value="{{ hostname }}" aria-label="Network name" maxlength="63"
                    pattern="[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?" title="Letters, numbers and hyphens, not starting or ending with a hyphen">
             <button type="submit" class="button">Change</button>
           </div>
         </form>
         <p class="hint">Letters, numbers and -. Give each player on the same network a different name; leave it empty to go back to the default.
           {% if hostname_is_default %}This is the default name, made from the Pi's serial number.{% endif %}</p>
-      </section>
-
-      <section class="card">
-        <h3>{{ icon('cloud-download') }}Software update</h3>
-        <p class="current">Installed: <strong>{% if installed.commit == 'local' %}local copy{% else %}{{ (installed.commit or 'unknown')[:7] }}{% endif %}</strong>{% if installed.date %} ({{ installed.date[:10] }}{% if installed.branch %}, branch {{ installed.branch }}{% endif %}){% endif %}</p>
-        {% if update_ready %}
-        <p>New version <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}): {{ update_available.message }}</p>
-        {% endif %}
-        <div class="button-row">
-          {% if update_ready %}
-          <form method="post" action="{{ url_for('install_update') }}"
-                onsubmit="return confirm('Install the update? The web interface restarts afterwards.')">
-            <button type="submit" class="button primary">{{ icon('download') }}<span>Install Update</span></button>
-          </form>
-          {% endif %}
-          <form method="post" action="{{ url_for('check_update') }}">
-            <button type="submit" class="button">{{ icon('refresh-cw') }}<span>Check for Updates</span></button>
-          </form>
-        </div>
-        <p class="hint">From {{ update_config.repo }}{% if update_config.branch != 'master' %} (branch {{ update_config.branch }}){% endif %}.
-          Custom player script is untouched. Over SSH: <code>sudo mp4m-update</code></p>
       </section>
 
       <section class="card">
@@ -417,6 +395,27 @@
       <section class="card">
         <h3>{{ icon('network') }}Network</h3>
         <pre>{{ network_status }}</pre>
+      </section>
+
+      <section class="card">
+        <h3>{{ icon('cloud-download') }}Software update</h3>
+        <p class="current">Installed: <strong>{% if installed.commit == 'local' %}local copy{% else %}{{ (installed.commit or 'unknown')[:7] }}{% endif %}</strong>{% if installed.date %} ({{ installed.date[:10] }}{% if installed.branch %}, branch {{ installed.branch }}{% endif %}){% endif %}</p>
+        {% if update_ready %}
+        <p>New version <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}): {{ update_available.message }}</p>
+        {% endif %}
+        <div class="button-row">
+          {% if update_ready %}
+          <form method="post" action="{{ url_for('install_update') }}"
+                onsubmit="return confirm('Install the update? The web interface restarts afterwards.')">
+            <button type="submit" class="button primary">{{ icon('download') }}<span>Install Update</span></button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('check_update') }}">
+            <button type="submit" class="button">{{ icon('refresh-cw') }}<span>Check for Updates</span></button>
+          </form>
+        </div>
+        <p class="hint">From {{ update_config.repo }}{% if update_config.branch != 'master' %} (branch {{ update_config.branch }}){% endif %}.
+          Custom player script is untouched. Over SSH: <code>sudo mp4m-update</code></p>
       </section>
     </div>
   </div>
