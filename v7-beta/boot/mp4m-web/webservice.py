@@ -13,6 +13,7 @@ import signal
 import socket
 import time
 import tempfile
+import threading
 from datetime import timedelta
 
 from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, g
@@ -332,23 +333,30 @@ def set_loop_player():
 
 
 # ----- Media files ----- #
-def upload_result():
-    """Back to the page; the page's JavaScript gets {'ok': ...} and reloads it to show the messages."""
+def upload_message(message, category):
+    """For the page's JavaScript, which shows the messages itself (kept out of the session cookie,
+    which would grow with every file); a plain form gets them on the page as usual."""
     if is_fetch():
-        new = session.get('_flashes', [])[g.get('flashes_before', 0):]
-        errors = [message for category, message in new if category == 'error']
-        return {'ok': not errors, 'error': errors[-1] if errors else None}, 400 if errors else 200
+        g.setdefault('upload_messages', []).append([category, message])
+    else:
+        flash(message, category)
+
+def upload_result():
+    if is_fetch():
+        messages = g.get('upload_messages', [])
+        errors = [message for category, message in messages if category == 'error']
+        return ({'ok': not errors, 'error': errors[-1] if errors else None, 'messages': messages},
+                400 if errors else 200)
     return redirect(url_for('index'))
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    g.flashes_before = len(session.get('_flashes', []))
     if not system.media_available():
-        flash(f"The media partition {system.MEDIA_PATH} is not mounted.", "error")
+        upload_message(f"The media partition {system.MEDIA_PATH} is not mounted.", "error")
         return upload_result()
     # Browsers always send the size; without it the space check can't work
     if not request.content_length:
-        flash("Upload refused: the browser didn't say how big the file is.", "error")
+        upload_message("Upload refused: the browser didn't say how big the file is.", "error")
         return upload_result()
     try:
         with system.writable(system.MEDIA_PATH):
@@ -359,20 +367,20 @@ def upload_file():
                 try:
                     file = request.files.get('file')
                     if not file or not file.filename:
-                        flash("No file selected.", "error")
+                        upload_message("No file selected.", "error")
                     elif not system.is_valid_filename(file.filename):
-                        flash("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
+                        upload_message("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
                     else:
                         file.stream.flush()
                         os.replace(file.stream.name, os.path.join(system.MEDIA_PATH, file.filename))
-                        flash(f"File '{file.filename}' uploaded successfully.", "success")
+                        upload_message(f"File '{file.filename}' uploaded successfully.", "success")
                 finally:
                     # Close the temp files before the partition goes back to read-only
                     discard_upload_temp_files()
     except system.NotEnoughSpace:
-        flash("Not enough free space for this file.", "error")
+        upload_message("Not enough free space for this file.", "error")
     except Exception as e:
-        flash(f"File upload failed: {e}", "error")
+        upload_message(f"File upload failed: {e}", "error")
     return upload_result()
 
 @app.route('/download/<filename>')
@@ -526,14 +534,25 @@ def set_hostname():
 AUTO_CHECK_INTERVAL = 6 * 3600
 AUTO_CHECK_RETRY = 3600
 _auto_check = {'time': None, 'ok': False, 'latest': None}
+# one check at a time: pages opened together get the last answer instead of all asking GitHub
+_auto_check_lock = threading.Lock()
 
 @app.route('/check_update', methods=['POST'])
 def check_update():
-    auto = request.form.get('auto') == '1'
-    if auto and _auto_check['time'] is not None:
-        age = time.monotonic() - _auto_check['time']
-        if age < (AUTO_CHECK_INTERVAL if _auto_check['ok'] else AUTO_CHECK_RETRY):
-            return update_answer(_auto_check['latest'])
+    if request.form.get('auto') != '1':
+        return check_for_update(auto=False)
+    if not _auto_check_lock.acquire(blocking=False):
+        return update_answer(_auto_check['latest'])
+    try:
+        if _auto_check['time'] is not None:
+            age = time.monotonic() - _auto_check['time']
+            if age < (AUTO_CHECK_INTERVAL if _auto_check['ok'] else AUTO_CHECK_RETRY):
+                return update_answer(_auto_check['latest'])
+        return check_for_update(auto=True)
+    finally:
+        _auto_check_lock.release()
+
+def check_for_update(auto):
     config = updater.read_config()
     try:
         latest = updater.latest_commit(config['repo'], config['branch'])

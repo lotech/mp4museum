@@ -227,19 +227,24 @@ function uploadFiles(input) {
     return;
   }
   document.getElementById('uploadProgress').hidden = false;
-  let failed = false;
-  // One at a time; then reload the page to show the new files and the messages
+  const messages = [];
+  // One at a time; then reload the page to show the new files, and the messages after it
   const next = index => {
     if (index >= files.length) {
-      // Leave time to read an error the reloaded page won't show
-      setTimeout(() => window.location.reload(), failed ? 6000 : 0);
+      let kept = false;
+      try {
+        sessionStorage.setItem('toasts', JSON.stringify(messages));
+        kept = true;
+      } catch (e) {
+        // Storage can be unavailable, e.g. in private browsing: show them before reloading
+        messages.forEach(([category, message]) => showToast(message, category));
+      }
+      setTimeout(() => window.location.reload(), kept ? 0 : 5000);
       return;
     }
     uploadFile(form.action, files[index], index, files.length)
-      .catch(error => {
-        failed = true;
-        showToast(error, 'error');
-      })
+      .then(answer => messages.push(...answer))
+      .catch(error => messages.push(['error', error]))
       .then(() => next(index + 1));
   };
   next(0);
@@ -274,9 +279,8 @@ function uploadFile(url, file, index, count) {
       } catch (e) {
         // Not JSON: the page shows what went wrong after the reload
       }
-      if ((request.status === 200 && answer.ok) || answer.error) {
-        // An error the server reports is also shown when the page reloads
-        resolve();
+      if (Array.isArray(answer.messages)) {
+        resolve(answer.messages);
       } else {
         reject('Uploading ' + file.name + ' failed (error ' + request.status + ').');
       }
@@ -419,8 +423,19 @@ function saveAndReboot() {
     .catch(error => alert('Error saving script: ' + error));
 }
 
+function showStoredToasts() {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem('toasts') || '[]');
+    sessionStorage.removeItem('toasts');
+    stored.forEach(([category, message]) => showToast(message, category));
+  } catch (e) {
+    // Nothing stored, or storage unavailable
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.toast').forEach(setUpToast);
+  showStoredToasts();
   if (document.querySelector('.tabs')) {
     restoreActiveTab();
   }

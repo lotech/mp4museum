@@ -498,13 +498,19 @@ def test_player_buttons_tell_the_page_why_not(client, monkeypatch):
 def test_upload_from_the_page_gets_json(pi, client):
     fetch = {'X-Requested-With': 'fetch'}
     r = client.post('/upload', data={'file': (io.BytesIO(b'video'), 'clip.mp4')}, headers=fetch)
-    assert r.status_code == 200 and r.get_json() == {'ok': True, 'error': None}
+    assert r.status_code == 200 and r.get_json()['ok'] is True
+    assert r.get_json()['messages'] == [['success', "File 'clip.mp4' uploaded successfully."]]
     assert (pi.media / 'clip.mp4').read_bytes() == b'video'
     r = client.post('/upload', data={'file': (io.BytesIO(b'x'), '.hidden')}, headers=fetch)
     assert r.status_code == 400 and 'Invalid filename' in r.get_json()['error']
-    # the messages are shown when the page reloads
-    html = client.get('/').data.decode()
-    assert "uploaded successfully" in html and 'Invalid filename' in html
+    # the page shows the messages itself: they don't pile up in the login cookie, file after file
+    for n in range(30):
+        client.post('/upload', data={'file': (io.BytesIO(b'x'), 'clip-%d with a long name.mp4' % n)}, headers=fetch)
+    with client.session_transaction() as session:
+        assert not session.get('_flashes')
+    # a form without JavaScript still gets the message on the page
+    html = client.post('/upload', data={'file': (io.BytesIO(b'x'), 'form.mp4')}, follow_redirects=True).data.decode()
+    assert "form.mp4&#39; uploaded successfully" in html
 
 
 # ----- Sound ----- #

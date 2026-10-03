@@ -455,3 +455,24 @@ def test_page_check_is_quiet_offline(client, monkeypatch):
     client.post('/check_update', data={'auto': '1'}, headers=fetch)
     assert len(calls) == 2          # but again after an hour
     assert b'reach GitHub' not in client.get('/').data
+
+
+def test_page_checks_one_at_a_time(client, monkeypatch):
+    # pages opened together don't all ask GitHub
+    calls = []
+    def slow(repo, ref):
+        calls.append(repo)
+        time.sleep(0.3)
+        return {'commit': 'bbb1111', 'date': '2026-10-04T00:00:00Z', 'message': 'New'}
+    monkeypatch.setattr(updater, 'latest_commit', slow)
+    answers = []
+    def page():
+        c = webservice.app.test_client()
+        c.post('/login', data={'password': 'mp4museum'})
+        answers.append(c.post('/check_update', data={'auto': '1'}, headers={'X-Requested-With': 'fetch'}).get_json())
+    threads = [threading.Thread(target=page) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1 and len(answers) == 4
