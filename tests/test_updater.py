@@ -271,21 +271,31 @@ def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     r = client.post('/install_update')
     assert ['systemd-run', '--on-active=2', 'systemctl', 'restart', 'mp4m-webservice'] in pi.commands
     assert b'waitForNewVersion' in r.data
-    # it goes on to the reboot page by itself: no Reboot button here leading to it (two pages
-    # asking to reboot, one after the other)
-    assert b'/confirm_reboot' in r.data and b'href="/confirm_reboot"' not in r.data and b'Later' in r.data
-    # unless the new version doesn't answer within a minute: then it can reboot from here
-    assert b'id="rebootAnyway" hidden' in r.data and b'60000' in r.data
+    # one page: it says the web interface is restarting, then offers the reboot itself (not on
+    # another page, which asked again), and reboots from here; also if the new version doesn't
+    # answer within a minute
+    page = r.data.decode()
+    assert 'Restarting the web interface with the new version' in page and 'confirm_reboot' not in page
+    assert 'id="rebootButtons" class="button-row" hidden' in page and "fetch('/reboot', {method: 'POST'" in page
+    # a minute by the clock (a timer of its own), and each check gives up after 5 s
+    assert '}, 60000);' in page and page.count('AbortSignal.timeout(5000)') == 2 and 'Later' in page
+    # logged out: says so, instead of waiting for a reboot that isn't coming
+    assert 'response.status === 401' in page and 'AbortSignal.timeout(5000)' in page
+    # a failed reboot command: said, and offered again (not waited on)
+    assert '} else if (!response.ok) {' in page
+    # tried again after a failure: that attempt is waited for
+    assert page.index('stopWaiting = false;') < page.index("fetch('/reboot', {method: 'POST'")
 
-    # if the restart can't be scheduled, the page doesn't pretend it is restarting
+    # if the restart can't be scheduled, the page doesn't pretend it is restarting: the reboot
+    # is offered straight away
     monkeypatch.setattr(system, 'run_command',
                         lambda cmd: (False, 'dbus error') if cmd[0] == 'systemd-run' else pi.run_command(cmd))
     github.release('ccc2222')
     client.post('/check_update')
     r = client.post('/install_update')
-    assert b'Update installed' in r.data and b'waitForNewVersion' not in r.data
-    # and its Reboot button reboots, without another page asking again
-    assert b'action="/reboot"' in r.data and b'href="/confirm_reboot"' not in r.data
+    page = r.data.decode()
+    assert 'Update installed' in page and 'waitForNewVersion' not in page and 'Restarting' not in page
+    assert 'id="rebootButtons" class="button-row" >' in page and 'confirm_reboot' not in page
     client.post('/reboot')
     assert ['reboot'] in pi.commands
 

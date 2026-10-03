@@ -296,6 +296,8 @@ def player_play():
     entry = next((e for e in system.get_playlist() if e['path'] == path and e['plays']), None)
     if not entry:
         error = "That file isn't in the playlist."
+    elif entry['disabled']:
+        error = "That file is switched off. Switch it on to play it."
     elif not status:
         error = "The player is not running."
     elif status.get('state') == 'sync':
@@ -523,8 +525,46 @@ def delete_file():
             flash(f"File '{filename}' deleted successfully.", "success")
         except Exception as e:
             flash(f"Failed to delete file: {e}", "error")
+            return redirect(url_for('index'))
+        # a file of the same name added later is played
+        try:
+            system.update_disabled_files(remove=[file_path])
+        except Exception as e:
+            flash(f"Couldn't take it off the list of switched-off files: {e}", "error")
     else:
         flash("File not found.", "error")
+    return redirect(url_for('index'))
+
+
+@app.route('/switch_file', methods=['POST'])
+def switch_file():
+    """Switch a file off (the player leaves it out) or on again, without changing the file."""
+    path = request.form.get('file', '')
+    entry = next((e for e in system.get_playlist() if e['path'] == path and e['plays']), None)
+    if not entry and path not in system.get_disabled_files():
+        flash("That file isn't in the playlist.", "error")
+        return redirect(url_for('index'))
+    off = request.form.get('off') == '1'
+    try:
+        system.update_disabled_files(add=[path] if off else [], remove=[] if off else [path])
+    except Exception as e:
+        flash(f"Failed to save the setting: {e}", "error")
+        return redirect(url_for('index'))
+    name = os.path.basename(path)
+    status = system.get_player_status() or {}
+    if not system.player_reads_disabled_files():
+        flash(f"{name} is marked {'off' if off else 'on'}, but the player script on this Pi was edited before "
+              "switching files off existed, so it plays every file. Updates keep an edited script and save "
+              "the new one as /boot/mp4museum.py.new.", "warning")
+    elif off and status.get('file') == path and status.get('state') == 'sync':
+        # omxplayer-sync runs until the player stops
+        flash(f"{name} is switched off: sync mode stops from the next start. Reboot to stop it now.", "success")
+    elif off and status.get('file') == path and status.get('state') in ('playing', 'paused'):
+        # playing now (a loop would go on until next): the player moves on
+        system.signal_player(signal.SIGUSR1)
+        flash(f"{name} is switched off: the player moves on and leaves it out.", "success")
+    else:
+        flash(f"{name} is switched off: the player leaves it out." if off else f"{name} is switched on again.", "success")
     return redirect(url_for('index'))
 
 
@@ -571,6 +611,12 @@ def rename_file():
         except Exception as e:
             flash(f"Failed to rename the file: {e}", "error")
             return redirect(url_for('index'))
+        # switched off: it stays off under its new name
+        if old_path in system.get_disabled_files():
+            try:
+                system.update_disabled_files(add=[new_path], remove=[old_path])
+            except Exception as e:
+                flash(f"Couldn't keep it switched off: {e}", "error")
     flash(f"Renamed '{filename}' to '{new_name}'.", "success")
     if '.' not in new_name:
         flash(f"'{new_name}' has no extension, so the player won't play it.", "warning")
@@ -581,6 +627,9 @@ def rename_file():
 @app.route('/reboot', methods=['POST'])
 def reboot_system():
     status, output = system.run_command(["reboot"])
+    if is_fetch():
+        # the page's script shows a failure (a redirect would hide it)
+        return ("Rebooting.", 200) if status else (f"Failed to reboot: {output}", 500)
     if status:
         flash("System is rebooting...", "success")
     else:
@@ -839,34 +888,74 @@ UPDATED_PAGE = """<!doctype html>
     <style>{{ inline_css|safe }}</style>
   </head>
   <body>
-    <div class="container">
+    <div class="container narrow-page">
       <h2>Update installed</h2>
       {% for line in lines %}<p>{{ line }}</p>{% endfor %}
-      {% if restarting %}
-      <p id="status" class="hint">The web interface is restarting with the new version, then it offers to reboot...</p>
-      <form method="post" action="{{ url_for('reboot_system') }}" id="rebootAnyway" hidden>
-        <p class="hint">The new version hasn't answered yet.</p>
-        <button type="submit" class="button primary">Reboot now</button>
-      </form>
-      <p><a href="{{ url_for('index') }}" class="button button-link">Later</a></p>
-      {% else %}
-      <p class="hint">Reboot to use the new version.</p>
-      <form method="post" action="{{ url_for('reboot_system') }}">
-        <button type="submit" class="button primary">Reboot now</button>
+      {# One page: while the web interface restarts with the new version it says so, then it offers
+         the reboot here (not on another page); the reboot is done from here too #}
+      <p id="status" class="update-status">
+        {% if restarting %}<span class="spinner"></span>Restarting the web interface with the new version...
+        {% else %}Reboot the player to finish the update.{% endif %}</p>
+      <div id="rebootButtons" class="button-row" {% if restarting %}hidden{% endif %}>
+        <button type="button" class="button primary" onclick="rebootNow()">Reboot now</button>
         <a href="{{ url_for('index') }}" class="button button-link">Later</a>
-      </form>
+      </div>
+      {% if restarting %}
+      <p id="laterOnly"><a href="{{ url_for('index') }}" class="button button-link">Later</a></p>
       {% endif %}
     </div>
-    {% if restarting %}
     <script>
-      // Wait for the new version to answer, then offer the reboot (on one page, the new version's;
-      // a Reboot button here only led to that page)
+      const statusLine = document.getElementById('status');
+      function offerReboot(text) {
+        statusLine.textContent = text;
+        document.getElementById('rebootButtons').hidden = false;
+        const later = document.getElementById('laterOnly');
+        if (later) later.hidden = true;
+      }
+      function rebootNow() {
+        // (again after a failed attempt: this one is waited for)
+        stopWaiting = false;
+        document.getElementById('rebootButtons').hidden = true;
+        statusLine.innerHTML = '<span class="spinner"></span>Rebooting... This page goes back to the web interface when the player has started again.';
+        fetch('{{ url_for('reboot_system') }}', {method: 'POST', headers: {'X-Requested-With': 'fetch'}})
+          .then(response => {
+            if (response.status === 401) {
+              // logged out (e.g. the password was changed): nothing was rebooted
+              stopWaiting = true;
+              statusLine.textContent = 'You have been logged out, so the player was not rebooted. Log in again and reboot it.';
+            } else if (!response.ok) {
+              // the reboot command failed: say so, and offer it again
+              stopWaiting = true;
+              response.text().then(text => offerReboot(text || "The player couldn't reboot."));
+            }
+          })
+          .catch(() => {});
+        // give it time to go down, then wait for it to answer again
+        setTimeout(waitForPlayer, 15000);
+      }
+      let stopWaiting = false;
+      function waitForPlayer() {
+        if (stopWaiting) {
+          return;
+        }
+        fetch('{{ url_for('version') }}', {cache: 'no-store', signal: AbortSignal.timeout(5000)})
+          .then(response => { if (response.ok) { window.location = '{{ url_for('index') }}'; } else { throw 0; } })
+          .catch(() => setTimeout(waitForPlayer, 2000));
+      }
+      {% if restarting %}
+      let offered = false;
       function waitForNewVersion() {
-        fetch('{{ url_for('version') }}', {headers: {'X-Requested-With': 'fetch'}})
+        if (offered) {
+          return;
+        }
+        // (a request that never answers gives up, so the page doesn't wait on it)
+        fetch('{{ url_for('version') }}', {headers: {'X-Requested-With': 'fetch'}, cache: 'no-store',
+                                           signal: AbortSignal.timeout(5000)})
           .then(response => response.ok ? response.json() : {})
           .then(data => {
             if (data.commit === {{ new_commit|tojson }}) {
-              window.location = '{{ url_for('confirm_reboot') }}';
+              offered = true;
+              offerReboot('Ready. Reboot the player to finish the update.');
             } else {
               setTimeout(waitForNewVersion, 2000);
             }
@@ -874,10 +963,15 @@ UPDATED_PAGE = """<!doctype html>
           .catch(() => setTimeout(waitForNewVersion, 2000));
       }
       setTimeout(waitForNewVersion, 3000);
-      // still no answer after a minute: offer to reboot from here
-      setTimeout(() => { document.getElementById('rebootAnyway').hidden = false; }, 60000);
+      // a minute on the clock without an answer: the reboot starts the new version anyway
+      setTimeout(() => {
+        if (!offered) {
+          offered = true;
+          offerReboot("The web interface hasn't come back yet. Reboot the player to finish the update.");
+        }
+      }, 60000);
+      {% endif %}
     </script>
-    {% endif %}
   </body>
 </html>
 """

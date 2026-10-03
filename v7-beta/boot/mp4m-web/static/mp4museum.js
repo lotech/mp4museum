@@ -365,6 +365,7 @@ function reboot(askFirst) {
   if (askFirst && !confirm('Are you sure you want to reboot the system?')) {
     return;
   }
+  rebootFailed = false;
   document.getElementById('rebootScreen').classList.add('active');
 
   // Start checking for when the player is back
@@ -375,12 +376,19 @@ function reboot(askFirst) {
       if (response.status === 401) {
         alert('You have been logged out. Please log in again.');
         window.location = '/';
+      } else if (!response.ok) {
+        // the reboot command failed: the player is still running
+        rebootFailed = true;
+        document.getElementById('rebootScreen').classList.remove('active');
+        response.text().then(text => showToast(text || "The player couldn't reboot.", 'error'));
       }
     })
     .catch(() => {
       // Expected: the connection drops while the player reboots
     });
 }
+
+let rebootFailed = false;
 
 function checkServerAndRedirect() {
   const serverUrl = window.location.origin || window.location.protocol + '//' + window.location.host;
@@ -389,6 +397,9 @@ function checkServerAndRedirect() {
 }
 
 function tryReconnect(serverUrl) {
+  if (rebootFailed) {
+    return;
+  }
   fetch(serverUrl, {signal: AbortSignal.timeout(5000)})
     .then(response => {
       if (response.ok) {

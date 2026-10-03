@@ -914,6 +914,15 @@ select {
   color: var(--faint);
 }
 
+.icon-button.placeholder {
+  visibility: hidden;
+}
+
+.switched-off .item-meta > .icon,
+.switched-off .item-meta > span:not(.badge) {
+  opacity: 0.6;
+}
+
 .item-meta {
   display: flex;
   align-items: center;
@@ -1170,6 +1179,24 @@ select {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* the update page: what it's doing, with a small spinner while it waits */
+.update-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
 }
 
 /* ----- Login and other small pages ----- */

@@ -1005,3 +1005,93 @@ def test_start_up_settings(pi, client):
     with open(system.SCRIPT_FILE, 'w') as f:
         f.write("settings = {'boot_video_plays': 1, 'show_address': True}\n")
     assert system.get_boot_video_plays() == 1
+
+
+def test_switch_files_off_and_on(pi, client):
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    (pi.media / 'b.mp4').write_bytes(b'x')
+    usb = pi.media.parent / 'usb0'
+    usb.mkdir()
+    (usb / 'c.mp4').write_bytes(b'x')
+    a, c = str(pi.media / 'a.mp4'), str(usb / 'c.mp4')
+    # off: written for the player, the file itself untouched; USB sticks (read-only) too
+    for path in (a, c):
+        r = client.post('/switch_file', data={'file': path, 'off': '1'}, follow_redirects=True)
+        assert b'switched off' in r.data
+    assert open(system.DISABLED_FILE).read() == '%s\n%s\n' % tuple(sorted([a, c]))
+    assert (pi.media / 'a.mp4').read_bytes() == b'x' and ['mount', '-o', 'remount,rw', str(pi.boot)] in pi.commands
+    entries = {e['name']: e for e in system.get_playlist()}
+    assert entries['a.mp4']['disabled'] and not entries['b.mp4']['disabled'] and entries['c.mp4']['disabled']
+    html = client.get('/').data.decode()
+    assert html.count('switched-off') == 2 and 'Switch on a.mp4' in html and 'Switch off b.mp4' in html
+    # not played from the web interface while off
+    r = client.post('/player/play', data={'file': a}, headers={'X-Requested-With': 'fetch'})
+    assert r.status_code == 409 and 'switched off' in r.get_json()['error']
+    # renamed: still off under its new name; deleted: off no more (a new file of that name plays)
+    client.post('/rename', data={'filename': 'a.mp4', 'new_name': 'a2.mp4'})
+    assert str(pi.media / 'a2.mp4') in system.get_disabled_files() and a not in system.get_disabled_files()
+    client.post('/delete', data={'filename': 'a2.mp4'})
+    assert system.get_disabled_files() == {c}
+    # on again
+    assert b'switched on again' in client.post('/switch_file', data={'file': c, 'off': '0'}, follow_redirects=True).data
+    assert system.get_disabled_files() == set()
+    # only files in the playlist
+    r = client.post('/switch_file', data={'file': '/etc/passwd', 'off': '1'}, follow_redirects=True)
+    assert b"t in the playlist" in r.data and system.get_disabled_files() == set()
+
+
+def test_switching_off_the_file_playing_moves_on(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    (pi.media / 'loop-a.mp4').write_bytes(b'x')
+    (pi.media / 'b.mp4').write_bytes(b'x')
+    a = str(pi.media / 'loop-a.mp4')
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': a, 'since': time.time(), 'pid': 4242, 'play_file': True}, f)
+    # (a loop would go on until next): the player is told to move on
+    r = client.post('/switch_file', data={'file': a, 'off': '1'}, follow_redirects=True)
+    assert b'the player moves on' in r.data and sent == [(4242, signal.SIGUSR1)]
+    # sync mode (omxplayer-sync runs until the player stops): from the next start
+    sent.clear()
+    (pi.media / 'sync.mp4').write_bytes(b'x')
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'sync', 'file': str(pi.media / 'sync.mp4'), 'since': time.time(), 'pid': 4242}, f)
+    r = client.post('/switch_file', data={'file': str(pi.media / 'sync.mp4'), 'off': '1'}, follow_redirects=True)
+    assert b'sync mode stops from the next start' in r.data and sent == []
+    # another file: nothing is sent
+    sent.clear()
+    client.post('/switch_file', data={'file': str(pi.media / 'b.mp4'), 'off': '1'})
+    assert sent == []
+
+
+def test_switching_off_with_an_edited_player_says_it_wont_work(pi, client):
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write('# edited before switching files off existed\n')
+    r = client.post('/switch_file', data={'file': str(pi.media / 'a.mp4'), 'off': '1'}, follow_redirects=True)
+    assert b'edited before switching files off existed' in r.data and b'plays every file' in r.data
+
+
+def test_disabled_list_from_windows_and_deleting(pi, client, monkeypatch):
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    a = str(pi.media / 'a.mp4')
+    (pi.boot / 'mp4m-disabled.txt').write_bytes(('%s\r\n' % a).encode())
+    assert system.get_disabled_files() == {a} and system.get_playlist()[0]['disabled']
+    # deleted, but the list can't be written: the delete still reported as done
+    def fails(**kwargs):
+        raise OSError('read-only')
+    monkeypatch.setattr(system, 'update_disabled_files', fails)
+    r = client.post('/delete', data={'filename': 'a.mp4'}, follow_redirects=True).data
+    assert b'deleted successfully' in r and b'Failed to delete' not in r and b"Couldn&#39;t take it off" in r
+
+
+def test_reboot_from_the_page_says_when_it_failed(pi, client, monkeypatch):
+    fetch = {'X-Requested-With': 'fetch'}
+    r = client.post('/reboot', headers=fetch)
+    assert r.status_code == 200 and ['reboot'] in pi.commands
+    # the page's script gets the failure (a redirect would hide it behind the page it waits for)
+    monkeypatch.setattr(system, 'run_command', lambda cmd: (False, 'not allowed') if cmd == ['reboot'] else pi.run_command(cmd))
+    r = client.post('/reboot', headers=fetch)
+    assert r.status_code == 500 and r.data == b'Failed to reboot: not allowed'
+    assert b'Failed to reboot: not allowed' in client.post('/reboot', follow_redirects=True).data

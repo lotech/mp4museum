@@ -12,7 +12,7 @@
 # when it is installed; position for the web interface, which can also choose
 # the file to play; exit code 0 only when stopped on purpose (.bashrc restarts it);
 # how often the boot video plays and the player's address on the logo screen (settings);
-# previous file; the button on pin 13 pressed once, twice or held
+# previous file; the button on pin 13 pressed once, twice or held; files switched off
 
 import signal, sys
 # stopped on purpose (Ctrl-C on the console, SIGTERM, SIGHUP): exit code 0, so .bashrc doesn't
@@ -38,6 +38,8 @@ ALSA_FILE = '/boot/alsa.txt'
 SETTINGS_FILE = '/boot/mp4m-player.txt'
 # the network name set in the web interface (else the web interface sets a default one)
 HOSTNAME_FILE = '/boot/hostname.txt'
+# files switched off in the web interface, one path per line: left out of the playlist
+DISABLED_FILE = '/boot/mp4m-disabled.txt'
 # what is playing, for the web interface
 STATUS_FILE = '/tmp/mp4museum-status.json'
 # from the web interface, followed by SIGUSR1: {"id": ..., "file": ...} plays that file;
@@ -715,6 +717,10 @@ def search_file(file_name):
 # sync mode (from v6): several players play sync.mp4 in sync with omxplayer-sync
 def sync_mode():
     sync_file = search_file("sync.mp4")
+    if sync_file and sync_file in read_disabled():
+        # switched off in the web interface: the playlist plays instead (without it)
+        print("%s is switched off: no sync mode" % sync_file, flush=True)
+        return
     for role, flag in (("leader", "-m"), ("player", "-l")):
         if sync_file and search_file(f"sync-{role}.txt"):
             if not shutil.which("omxplayer-sync"):
@@ -819,8 +825,17 @@ class LogoAddress:
                     # VLC can't show it here: not tried again (it says why in the log once)
                     self.failed = True
 
+def read_disabled():
+    try:
+        with open(DISABLED_FILE, 'r') as f:
+            return {line.rstrip('\n') for line in f if line.strip()}
+    except OSError:
+        return set()
+
 # whether the loop below passes over a file without playing it (it says why there)
-def would_skip(file, try_skipped):
+def would_skip(file, try_skipped, disabled):
+    if file in disabled:
+        return True
     if file in skipped and not try_skipped:
         version, count = skipped[file]
         if count >= SKIP_AFTER and version == file_version(file):
@@ -898,13 +913,15 @@ try:
             back, previous_requested = previous_requested, 0
             skip_requested = False
             signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
+            # switched off in the web interface: read for every file, so a change applies straight away
+            disabled = read_disabled()
             if back and files:
                 # previous: back from the file that was playing (files[index - 1]; the last one
                 # at the start of a round), over the files this round skips, around the end
                 position = (index - 1) % len(files)
                 for _ in range(len(files)):
                     position = (position - 1) % len(files)
-                    if not would_skip(files[position], try_skipped):
+                    if not would_skip(files[position], try_skipped, disabled):
                         back -= 1
                         if not back:
                             break
@@ -921,6 +938,8 @@ try:
                 break
             file = files[index]
             index += 1
+            if file in disabled:
+                continue
             if file in skipped:
                 version, count = skipped[file]
                 if version != file_version(file):

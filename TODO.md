@@ -34,7 +34,8 @@ a network is optional.
 - [x] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround). Setting for it in System → Start-up (`boot_video_plays`: 2, 1, 0). Pi 3 B+: with no boot video, a reboot and 4 cold starts (unplugged) all showed the logo with the address, then the first file properly. Sound not checked (no clip with sound, nothing plugged in)
 - [x] The boot video plays once by default (setting in System → Start-up: once, twice, not at all)
 - [x] One button (pin 13) does three things: pressed once next (or play when paused), twice previous, held back to the start
-- [ ] Test the button on the Pi: are 0.4 s (twice) and 1 s (held) right? Does a single press feel slow?
+- [x] Switch a file off without removing it (eye button in the playlist; `/boot/mp4m-disabled.txt`, so USB sticks work too and files aren't changed)
+- [x] Tested on the Pi in the exhibition case: once, twice and held work as expected with 0.4 s and 1 s
 - [x] New logo screen: a frame from the boot video with the credits (`boot/mp4m-web/static/logo.jpg`, so updates bring it); the address text scaled to the picture
 - [ ] Show the logo instead of the console text while the Pi starts. No Plymouth on the image (it would need internet to install), so: a systemd service early in boot that draws the image on the framebuffer (e.g. a raw dump in the framebuffer's format, `/dev/fb0`, 1920x1080 from `cmdline.txt`), and keep the console text off the screen (`console=tty3` or `vt.global_cursor_default=0` in `cmdline.txt`; tty1 still runs the player). Outside `/boot`, so it comes with `install.sh`. Test on the Pi
 - [x] Previous file button; back to the start (rewind) moved apart from the other buttons, with its own icon

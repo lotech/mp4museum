@@ -142,17 +142,18 @@
 
       <ul class="playlist" id="playlist">
         {% for entry in playlist %}
-        <li class="playlist-item{% if not entry.plays %} not-played{% endif %}" data-path="{{ entry.path }}">
+        {% set playable = entry.plays and not entry.disabled %}
+        <li class="playlist-item{% if not playable %} not-played{% endif %}{% if entry.disabled %} switched-off{% endif %}" data-path="{{ entry.path }}">
           <form method="post" action="{{ url_for('player_play') }}" class="js-player" id="play-{{ loop.index }}">
             <input type="hidden" name="file" value="{{ entry.path }}">
-            <button type="submit" class="item-play js-play" {% if entry.plays %}title="Play this file now"{% else %}disabled title="Not played: the name has no extension"{% endif %}
+            <button type="submit" class="item-play js-play" {% if playable %}title="Play this file now"{% elif entry.disabled %}disabled title="Switched off: switch it on to play it"{% else %}disabled title="Not played: the name has no extension"{% endif %}
                     aria-label="Play {{ entry.name }}">
               <span class="item-index">{{ loop.index }}</span>{{ icon('play', 'item-play-icon') }}
             </button>
           </form>
           <div class="item-main">
             <button type="submit" form="play-{{ loop.index }}" class="item-name js-play" title="{{ entry.name }}"
-                    {% if not entry.plays %}disabled{% endif %}>{{ entry.name }}</button>
+                    {% if not playable %}disabled{% endif %}>{{ entry.name }}</button>
             <div class="item-meta">
               {{ icon(kind_icons[entry.kind]) }}<span>{{ entry.size|size }}</span>
               {% if entry.pixels %}<span>{{ entry.pixels[0] }}×{{ entry.pixels[1] }}</span>{% endif %}
@@ -161,6 +162,7 @@
               {% if not entry.internal %}<span class="badge">{{ icon('usb') }}{{ entry.folder }}</span>{% endif %}
               {% if entry.loop %}<span class="badge">{{ icon('repeat') }}loop</span>{% endif %}
               {% if not entry.plays %}<span class="badge muted">not played: no extension</span>{% endif %}
+              {% if entry.disabled %}<span class="badge muted" title="The player leaves it out. The file isn't changed.">{{ icon('eye-off') }}off</span>{% endif %}
             </div>
           </div>
           <div class="item-actions">
@@ -175,6 +177,20 @@
               <input type="hidden" name="filename" value="{{ entry.name }}">
               <button type="submit" class="icon-button danger" title="Delete" aria-label="Delete {{ entry.name }}">{{ icon('trash-2') }}</button>
             </form>
+            {% endif %}
+            {# last, so it lines up on every row (USB sticks only have this one) #}
+            {% if entry.plays %}
+            <form method="post" action="{{ url_for('switch_file') }}">
+              <input type="hidden" name="file" value="{{ entry.path }}">
+              <input type="hidden" name="off" value="{{ '0' if entry.disabled else '1' }}">
+              {% if entry.disabled %}
+              <button type="submit" class="icon-button" title="Switch on: play it again" aria-label="Switch on {{ entry.name }}">{{ icon('eye') }}</button>
+              {% else %}
+              <button type="submit" class="icon-button" title="Switch off: leave it out of the playlist, without changing the file" aria-label="Switch off {{ entry.name }}">{{ icon('eye-off') }}</button>
+              {% endif %}
+            </form>
+            {% else %}
+            <span class="icon-button placeholder" aria-hidden="true"></span>
             {% endif %}
           </div>
         </li>
@@ -323,36 +339,14 @@
         <p class="current">This player is at <strong>http://{{ hostname }}.local</strong></p>
         <form method="post" action="{{ url_for('set_hostname') }}" class="setting"
               onsubmit="return confirm('Change the network name? The page will move to the new address.')">
-          <label for="hostname">New name</label>
           <div class="input-row">
-            <input type="text" name="hostname" id="hostname" value="{{ hostname }}" maxlength="63"
+            <input type="text" name="hostname" id="hostname" value="{{ hostname }}" aria-label="Network name" maxlength="63"
                    pattern="[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?" title="Letters, numbers and hyphens, not starting or ending with a hyphen">
             <button type="submit" class="button">Change</button>
           </div>
         </form>
         <p class="hint">Letters, numbers and -. Give each player on the same network a different name; leave it empty to go back to the default.
           {% if hostname_is_default %}This is the default name, made from the Pi's serial number.{% endif %}</p>
-      </section>
-
-      <section class="card">
-        <h3>{{ icon('cloud-download') }}Software update</h3>
-        <p class="current">Installed: <strong>{% if installed.commit == 'local' %}local copy{% else %}{{ (installed.commit or 'unknown')[:7] }}{% endif %}</strong>{% if installed.date %} ({{ installed.date[:10] }}{% if installed.branch %}, branch {{ installed.branch }}{% endif %}){% endif %}</p>
-        {% if update_ready %}
-        <p>New version <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}): {{ update_available.message }}</p>
-        {% endif %}
-        <div class="button-row">
-          {% if update_ready %}
-          <form method="post" action="{{ url_for('install_update') }}"
-                onsubmit="return confirm('Install the update? The web interface restarts afterwards.')">
-            <button type="submit" class="button primary">{{ icon('download') }}<span>Install Update</span></button>
-          </form>
-          {% endif %}
-          <form method="post" action="{{ url_for('check_update') }}">
-            <button type="submit" class="button">{{ icon('refresh-cw') }}<span>Check for Updates</span></button>
-          </form>
-        </div>
-        <p class="hint">From {{ update_config.repo }}{% if update_config.branch != 'master' %} (branch {{ update_config.branch }}){% endif %}.
-          Custom player script is untouched. Over SSH: <code>sudo mp4m-update</code></p>
       </section>
 
       <section class="card">
@@ -417,6 +411,27 @@
       <section class="card">
         <h3>{{ icon('network') }}Network</h3>
         <pre>{{ network_status }}</pre>
+      </section>
+
+      <section class="card">
+        <h3>{{ icon('cloud-download') }}Software update</h3>
+        <p class="current">Installed: <strong>{% if installed.commit == 'local' %}local copy{% else %}{{ (installed.commit or 'unknown')[:7] }}{% endif %}</strong>{% if installed.date %} ({{ installed.date[:10] }}{% if installed.branch %}, branch {{ installed.branch }}{% endif %}){% endif %}</p>
+        {% if update_ready %}
+        <p>New version <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}): {{ update_available.message }}</p>
+        {% endif %}
+        <div class="button-row">
+          {% if update_ready %}
+          <form method="post" action="{{ url_for('install_update') }}"
+                onsubmit="return confirm('Install the update? The web interface restarts afterwards.')">
+            <button type="submit" class="button primary">{{ icon('download') }}<span>Install Update</span></button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('check_update') }}">
+            <button type="submit" class="button">{{ icon('refresh-cw') }}<span>Check for Updates</span></button>
+          </form>
+        </div>
+        <p class="hint">From {{ update_config.repo }}{% if update_config.branch != 'master' %} (branch {{ update_config.branch }}){% endif %}.
+          Custom player script is untouched. Over SSH: <code>sudo mp4m-update</code></p>
       </section>
     </div>
   </div>

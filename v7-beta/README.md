@@ -41,6 +41,11 @@ in alphabetical order, over and over.
   put it on the SD card's boot partition as `mp4museum-boot.mp4` (it shows up as a drive on
   a computer); delete it to go back to the original. It plays once; System → Start-up can
   make that twice (as in the original, a warm-up for the video output) or not at all.
+- **Switching files off:** the eye button next to a file in the playlist leaves it out without
+  changing or moving it (also on USB sticks); press it again to switch it back on. The list is
+  `/boot/mp4m-disabled.txt`. Renaming a switched-off file in the web interface keeps it off.
+  Switching off the file that is playing moves on to the next one. Files on USB sticks are
+  remembered by where the stick is mounted (`usb0` for the first one plugged in).
 - **Logo screen:** shows the player's address (`http://<name>.local` and its IP address) in the
   corner for its 10 seconds, so it's easy to find the web interface. It can be turned off in
   System → Start-up.
@@ -107,7 +112,7 @@ Open `http://<network name>.local` in a browser on the same network.
   the power supply has been too weak since it started, free space and OS version.
 
 Files the web interface may create in `/boot`: `mp4m-password.txt`, `hostname.txt`, `alsa.txt`,
-`mp4m-player.txt`, `mp4museum.py.new`. `mp4m-update.txt` is only read.
+`mp4m-player.txt`, `mp4m-disabled.txt`, `mp4museum.py.new`. `mp4m-update.txt` is only read.
 
 ## Getting the code onto the Pi
 
