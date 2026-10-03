@@ -371,7 +371,9 @@ def set_loop_player():
     # first frame is held, VLC shows it); older players only say which program shows it
     status = system.get_player_status() or {}
     playing = status.get('file') or ''
-    will_use = 'omxplayer' if choice == 'omxplayer' and system.omxplayer_installed() else 'vlc'
+    # (loop_omx_ok: whether omxplayer could loop this file at all: file type, codec)
+    will_use = ('omxplayer' if choice == 'omxplayer' and system.omxplayer_installed()
+                and status.get('loop_omx_ok') is not False else 'vlc')
     if (status.get('state') in ('playing', 'paused') and 'loop.' in playing and status.get('play_file') is True
             and (status.get('loop_player') or status.get('engine')) in ('vlc', 'omxplayer')
             and (status.get('loop_player') or status.get('engine')) != will_use

@@ -801,6 +801,13 @@ def test_loop_restarted_only_when_the_program_changes(pi, client, monkeypatch):
         json.dump({'state': 'paused', 'file': str(pi.media / 'a-loop.mp4'), 'since': time.time(), 'pid': 4242,
                    'play_file': True, 'engine': 'vlc', 'loop_player': 'omxplayer'}, f)
     assert b'has started again' in client.post('/set_loop_player', data={'loop_player': 'vlc'}, follow_redirects=True).data
+    # omxplayer chosen, but this loop can't use it (file type, codec): VLC carries on, nothing to restart
+    sent.clear()
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': str(pi.media / 'a-loop.mp4'), 'since': time.time(), 'pid': 4242,
+                   'play_file': True, 'engine': 'vlc', 'loop_player': 'vlc', 'loop_omx_ok': False}, f)
+    assert b'has started again' not in client.post('/set_loop_player', data={'loop_player': 'omxplayer'},
+                                                   follow_redirects=True).data and not sent
     # omxplayer chosen but not installed: VLC still plays it
     monkeypatch.setattr(system.shutil, 'which', lambda name: None)
     sent.clear()

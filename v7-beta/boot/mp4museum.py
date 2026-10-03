@@ -73,6 +73,9 @@ def read_settings():
 # the program looping the loop file playing now ('vlc', 'omxplayer'), else None: while an
 # omxplayer loop's first frame is held, VLC shows it (engine) but the loop is omxplayer's
 loop_engine = None
+# whether omxplayer could loop it (installed, file type, codec), so the web interface knows
+# if choosing omxplayer would change anything
+loop_omx_ok = None
 
 def write_status(state, source=None, position=None, length=None, temp='.tmp', engine='vlc'):
     # position and length in seconds, when known; play_file: this player reads PLAY_REQUEST_FILE.
@@ -83,7 +86,8 @@ def write_status(state, source=None, position=None, length=None, temp='.tmp', en
             # the Pi sets its time from the network (it has no clock of its own)
             json.dump({'state': state, 'file': source, 'since': time.time(), 'mono': time.monotonic(),
                        'pid': os.getpid(), 'position': position, 'length': length, 'play_file': True,
-                       'rewind': True, 'engine': engine, 'loop_player': loop_engine}, f)
+                       'rewind': True, 'engine': engine, 'loop_player': loop_engine,
+                       'loop_omx_ok': loop_omx_ok}, f)
         os.replace(STATUS_FILE + temp, STATUS_FILE)
     except OSError:
         pass
@@ -670,16 +674,18 @@ try:
             # read for every file, so a new image duration applies straight away
             settings = read_settings()
             options = [':image-duration=%d' % settings['image_duration']]
-            loop_engine = None
+            loop_engine = loop_omx_ok = None
             if "loop." in file:
                 # play it again and again until next is pressed
-                if (settings['loop_player'] == 'omxplayer' and file.lower().endswith(OMX_LOOP_TYPES)
-                        and shutil.which("omxplayer") and omx_can_play(file)):
+                loop_omx_ok = bool(file.lower().endswith(OMX_LOOP_TYPES) and shutil.which("omxplayer")
+                                   and omx_can_play(file))
+                if settings['loop_player'] == 'omxplayer' and loop_omx_ok:
                     loop_engine = 'omxplayer'
                     if omx_loop(file) != 'failed':
                         forgive(file)
                         continue
                     print("falling back to VLC for %s" % file, flush=True)
+                    loop_omx_ok = False
                 loop_engine = 'vlc'
                 # VLC starts it again in the same window each time it ends
                 while not skip_requested:

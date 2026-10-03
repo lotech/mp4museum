@@ -599,3 +599,13 @@ def test_status_says_which_program_loops_it(tmp_path):
             write={'/boot/mp4m-player.txt': 'loop_player=vlc\n'}, max_plays=6)
     assert {s['loop_player'] for s in r['statuses'] if (s['file'] or '').endswith('clip-loop.mp4')} == {'vlc'}
     assert {s['loop_player'] for s in r['statuses'] if (s['file'] or '').endswith('b.mp4')} == {None}
+
+
+def test_status_says_whether_omxplayer_could_loop_it(tmp_path):
+    # for the web interface: choosing omxplayer only changes anything for loops it can play
+    for name, codec, ok in (('clip-loop.mp4', 'h264', True), ('clip-loop.mp4', 'hevc', False), ('clip-loop.webm', 'h264', False)):
+        r = run(tmp_path, files=['/media/internal/' + name], installed=['omxplayer'], omx_codec=codec,
+                write={'/boot/mp4m-player.txt': 'loop_player=vlc\n'}, max_plays=5)
+        assert {s['loop_omx_ok'] for s in r['statuses'] if s['file'] == '/media/internal/' + name} == {ok}, (name, codec)
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], write={'/boot/mp4m-player.txt': 'loop_player=vlc\n'}, max_plays=5)
+    assert {s['loop_omx_ok'] for s in r['statuses'] if s['file'] == '/media/internal/clip-loop.mp4'} == {False}
