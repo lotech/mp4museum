@@ -937,7 +937,9 @@ def test_start_up_settings(pi, client):
     assert '<option value="2" selected>Play twice (default)</option>' in html
     assert '<option value="yes" selected>Show (default)</option>' in html
     r = client.post('/set_boot_video_plays', data={'boot_video_plays': '0'}, follow_redirects=True)
-    assert b'will play not at all' in r.data
+    assert b"boot video won&#39;t play" in r.data
+    assert b'will play once' in client.post('/set_boot_video_plays', data={'boot_video_plays': '1'}, follow_redirects=True).data
+    client.post('/set_boot_video_plays', data={'boot_video_plays': '0'})
     r = client.post('/set_show_address', data={'show_address': 'no'}, follow_redirects=True)
     assert b"won&#39;t be shown" in r.data
     # saved for the player, keeping the other settings
@@ -951,3 +953,8 @@ def test_start_up_settings(pi, client):
         r = client.post(route, data={field: bad}, follow_redirects=True)
         assert b'Please choose' in r.data
     assert system.get_boot_video_plays() == 0 and system.get_show_address() is False
+    # a player edited before these settings existed doesn't use them: said so
+    assert 'edited before these' not in client.get('/').data.decode()
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write('# edited\nimport vlc\n')
+    assert 'edited before these' in client.get('/').data.decode()

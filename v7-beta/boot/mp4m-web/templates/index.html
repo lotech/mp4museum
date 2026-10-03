@@ -135,6 +135,10 @@
           <p class="hint">The player's network name and IP address, in the corner of the logo screen for its
             10 seconds at start-up.</p>
         </form>
+        {% if not start_up_settings %}
+        <p class="hint">The player script on this Pi was edited before these two settings existed, so it doesn't
+          use them. Updates keep an edited script and save the new one as /boot/mp4museum.py.new.</p>
+        {% endif %}
       </div>
     </section>
 

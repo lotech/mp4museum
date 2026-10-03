@@ -19,7 +19,7 @@ import signal, sys
 for quit_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(quit_signal, lambda signum, frame: sys.exit(0))
 
-import time, vlc, os, glob, json, shutil, re, struct, socket
+import time, vlc, os, glob, json, shutil, re, struct, hashlib
 import RPi.GPIO as GPIO
 import subprocess
 
@@ -261,8 +261,9 @@ def pause_at_first_picture(started):
 # play media with vlc and wait until it has finished
 # returns 'ended', 'skipped' (next was pressed), 'rewind' (to be started again, held at its
 # first frame) or 'failed' (it didn't play)
-def vlc_play(source, options=(), limit=None):
-    """limit: seconds it may play (not counting pauses) before it is stopped."""
+def vlc_play(source, options=(), limit=None, while_playing=None):
+    """limit: seconds it may play (not counting pauses) before it is stopped. while_playing:
+    called with the time and length (ms) every time it is checked, while it plays."""
     media = vlc_instance.media_new(source, *options)
     player.set_media(media)
     player.play()
@@ -302,6 +303,8 @@ def vlc_play(source, options=(), limit=None):
             break
         state = 'paused' if current_state == vlc.State.Paused else 'playing'
         length = player.get_length()
+        if while_playing:
+            while_playing(player.get_time(), length)
         if state != shown_state or (length > 0 and length != shown_length):
             shown_state, shown_length = state, length
             write_status(state, source, max(0, player.get_time()) / 1000, length / 1000 if length > 0 else None)
@@ -607,18 +610,47 @@ def sync_mode():
             write_status('sync', sync_file, engine='omxplayer-sync')
             subprocess.run(["omxplayer-sync", "-u", flag, sync_file])
 
-# the address of the web interface, e.g. "http://mp4museum-1a2b.local" and "192.168.1.42" on a
-# second line (not there yet without a network)
-def address_text():
-    name = None
+# the network name the web interface gives the Pi (system.configured_hostname in mp4m-web): the
+# one set there, else mp4museum-xxxx from the serial number (or a MAC address). Worked out here
+# as the Pi may not have taken it yet when the logo screen shows
+def network_name():
     try:
         with open(HOSTNAME_FILE, 'r') as f:
             name = f.read().strip().lower()
+        if re.match(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$', name):
+            return name
     except OSError:
         pass
-    if not name or not re.match(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$', name):
-        name = socket.gethostname()
-    text = 'http://%s.local' % name
+    unique_id = ''
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            for line in f:
+                if line.startswith('Serial'):
+                    unique_id = line.split(':', 1)[1].strip()
+                    break
+    except OSError:
+        pass
+    if not unique_id:
+        try:
+            interfaces = sorted(name for name in os.listdir('/sys/class/net') if name != 'lo')
+        except OSError:
+            interfaces = []
+        for interface in interfaces:
+            try:
+                with open('/sys/class/net/%s/address' % interface, 'r') as f:
+                    unique_id = f.read().strip()
+            except OSError:
+                continue
+            if unique_id:
+                break
+    if not unique_id:
+        return 'mp4museum'
+    return 'mp4museum-' + hashlib.sha256(unique_id.encode()).hexdigest()[:4]
+
+# the address of the web interface, e.g. "http://mp4museum-1a2b.local" and "192.168.1.42" on a
+# second line (not there until the Pi has an address from the network)
+def address_text():
+    text = 'http://%s.local' % network_name()
     try:
         output = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=5).stdout
         addresses = [a for a in output.split() if '.' in a and not a.startswith('169.254.')]
@@ -628,18 +660,40 @@ def address_text():
         pass
     return text
 
-# shown in the bottom right corner of the logo screen, so it's easy to find the web interface
-def show_address(on):
+def set_marquee(text):
+    """Text in the bottom right corner of the picture, or None to take it off. VLC only sets it
+    on a picture being shown, so while a file plays."""
     try:
-        if on:
-            player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, address_text())
+        if text:
+            player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, text)
             player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, 30)
             player.video_set_marquee_int(vlc.VideoMarqueeOption.X, 30)
             player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, 30)
             player.video_set_marquee_int(vlc.VideoMarqueeOption.Position, 10)
-        player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1 if on else 0)
+        player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1 if text else 0)
+        return True
     except Exception as e:
         print("couldn't show the address on the logo screen: %s" % e, flush=True)
+        return False
+
+# the address on the logo screen, so it's easy to find the web interface: shown once the logo
+# is, and looked up again every 2 seconds until the Pi has an IP address
+class LogoAddress:
+    def __init__(self):
+        self.text = None
+        self.checked = 0
+        self.failed = False
+    def __call__(self, position, length):
+        if (position > 0 and not self.failed and time.time() - self.checked >= 2
+                and (self.text is None or '\n' not in self.text)):
+            self.checked = time.time()
+            text = address_text()
+            if text != self.text:
+                if set_marquee(text):
+                    self.text = text
+                else:
+                    # VLC can't show it here: not tried again (it says why in the log once)
+                    self.failed = True
 
 # *** run player ****
 
@@ -663,11 +717,13 @@ if boot_played and all(result == "ended" for result in boot_played):
 
 # please do not remove my logo screen
 skip_requested = False
-if settings['show_address']:
-    show_address(True)
-vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,) + IMAGE_OPTIONS)
-if settings['show_address']:
-    show_address(False)
+logo_address = LogoAddress() if settings['show_address'] else None
+vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,) + IMAGE_OPTIONS, while_playing=logo_address)
+if logo_address and logo_address.text is not None:
+    # once the logo has ended, VLC can't take the address off: it would stay on the next file.
+    # Stopping VLC drops its picture, and the address with it (a black moment, only at start-up)
+    set_marquee(None)
+    player.stop()
 
 # add event listener which reacts to GPIO signal
 GPIO.add_event_detect(11, GPIO.RISING, callback = buttonPause, bouncetime = 234)

@@ -191,6 +191,7 @@ def index():
                            loop_player=system.get_loop_player(),
                            boot_video_plays=system.get_boot_video_plays(),
                            show_address=system.get_show_address(),
+                           start_up_settings=system.player_has_start_up_settings(),
                            omxplayer_installed=system.omxplayer_installed())
 
 
@@ -374,8 +375,8 @@ def set_boot_video_plays():
         return redirect(url_for('index'))
     try:
         system.save_player_setting('boot_video_plays', int(value))
-        times = {2: "twice", 1: "once", 0: "not at all"}[int(value)]
-        flash(f"The boot video will play {times} from the next start.", "success")
+        flash("The boot video won't play from the next start." if int(value) == 0 else
+              f"The boot video will play {'once' if int(value) == 1 else 'twice'} from the next start.", "success")
     except Exception as e:
         flash(f"Failed to save the setting: {e}", "error")
     return redirect(url_for('index'))

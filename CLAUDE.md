@@ -40,8 +40,9 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   pin 11 pause, pin 13 next. `.bashrc` starts it again unless it exits with 0 (Ctrl-C, SIGTERM,
   SIGHUP); a file it was playing when it died is skipped until replaced (`/tmp/mp4museum-skipped.json`),
   so one bad file can't stop it again and again. VLC is not stopped when a file ends by itself (`stop()` closes
-  the video output: black frames), only on skip, failure, idle or before handing the screen to
-  omxplayer. `loop.` H.264/MPEG-4 videos (checked with `omxplayer -i`) are looped by `omxplayer --loop` when it is installed (it
+  the video output: black frames), only on skip, failure, idle, before handing the screen to
+  omxplayer, and after the logo screen when it showed the address (VLC's marquee can only be
+  changed on a picture being shown; stopping drops it). `loop.` H.264/MPEG-4 videos (checked with `omxplayer -i`) are looped by `omxplayer --loop` when it is installed (it
   holds the last frame; VLC still shows a black frame each time it starts a file again on
   the Pi). omxplayer is no longer developed and isn't on newer OS versions, so with
   `loop_player=vlc` or without omxplayer, the player restarts them in VLC (VLC's
