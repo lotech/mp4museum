@@ -386,26 +386,37 @@ def get_free_space():
 class NotEnoughSpace(Exception):
     pass
 
+class _Upload:
+    def __init__(self, size, bytes_written):
+        self.size = size
+        self.bytes_written = bytes_written
+
+    def still_needed(self):
+        # What it has written already is no longer in the free space
+        return max(0, self.size - self.bytes_written())
+
 _upload_space_lock = threading.Lock()
-_reserved_upload_space = 0
+_active_uploads = []
 
 @contextmanager
-def upload_space(size):
+def upload_space(size, bytes_written=lambda: 0):
     """Reserve room for an upload while it runs.
 
     Uploads can run at the same time, and each one must not count space that
-    another one is about to fill.
+    another one is about to fill. bytes_written tells how much of this upload
+    is already on the partition.
     """
-    global _reserved_upload_space
+    upload = _Upload(size, bytes_written)
     with _upload_space_lock:
-        if size > get_free_space() - _reserved_upload_space:
+        reserved = sum(other.still_needed() for other in _active_uploads)
+        if size > get_free_space() - reserved:
             raise NotEnoughSpace()
-        _reserved_upload_space += size
+        _active_uploads.append(upload)
     try:
         yield
     finally:
         with _upload_space_lock:
-            _reserved_upload_space -= size
+            _active_uploads.remove(upload)
 
 def format_size(size):
     for unit in ('bytes', 'KB', 'MB', 'GB'):
@@ -423,6 +434,19 @@ def remove_stale_uploads():
                 os.remove(path)
         except OSError:
             pass
+
+def uploaded_bytes(req):
+    """Returns a function telling how much of a request's upload is written so far."""
+    def bytes_written():
+        total = 0
+        for stream in list(req.upload_temp_files):
+            try:
+                total += os.path.getsize(stream.name)
+            except OSError:
+                # Already moved into place, so no longer an upload in progress
+                pass
+        return total
+    return bytes_written
 
 def discard_upload_temp_files():
     """Delete the request's upload temp files that weren't moved into place."""
@@ -1351,22 +1375,24 @@ def upload_file():
         flash(f"The media partition {MEDIA_PATH} is not mounted.", "error")
         return redirect(url_for('index'))
     try:
-        # Checked before receiving the file, it is written straight to the media partition
-        with upload_space(request.content_length or 0), writable(MEDIA_PATH):
+        with writable(MEDIA_PATH):
+            # Before the space check, so leftovers from a power cut can't block new uploads
             remove_stale_uploads()
-            try:
-                file = request.files.get('file')
-                if not file or not file.filename:
-                    flash("No file selected.", "error")
-                elif not is_valid_filename(file.filename):
-                    flash("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
-                else:
-                    file.stream.flush()
-                    os.replace(file.stream.name, os.path.join(MEDIA_PATH, file.filename))
-                    flash(f"File '{file.filename}' uploaded successfully.", "success")
-            finally:
-                # Close the temp files before the partition goes back to read-only
-                discard_upload_temp_files()
+            # Checked before receiving the file, it is written straight to the media partition
+            with upload_space(request.content_length or 0, uploaded_bytes(request._get_current_object())):
+                try:
+                    file = request.files.get('file')
+                    if not file or not file.filename:
+                        flash("No file selected.", "error")
+                    elif not is_valid_filename(file.filename):
+                        flash("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
+                    else:
+                        file.stream.flush()
+                        os.replace(file.stream.name, os.path.join(MEDIA_PATH, file.filename))
+                        flash(f"File '{file.filename}' uploaded successfully.", "success")
+                finally:
+                    # Close the temp files before the partition goes back to read-only
+                    discard_upload_temp_files()
     except NotEnoughSpace:
         flash("Not enough free space for this file.", "error")
     except Exception as e:
