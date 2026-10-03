@@ -19,6 +19,19 @@
 </div>
 
 <div id="media" class="tab-content active">
+  <div class="form-group">
+    <h3>Now Playing</h3>
+    <p id="nowPlayingText" data-status-url="{{ url_for('player_status') }}">{{ now_playing }}</p>
+    <div class="button-row">
+      <form method="post" action="{{ url_for('player_pause') }}">
+        <input type="submit" value="Pause / Resume" class="button" title="Same as the pause button on GPIO pin 11">
+      </form>
+      <form method="post" action="{{ url_for('player_next') }}">
+        <input type="submit" value="Next" class="button" title="Same as the next button on GPIO pin 13">
+      </form>
+    </div>
+  </div>
+
   <h2>Files in {{ media_path }}</h2>
 
   {% if is_available %}
@@ -54,6 +67,18 @@
       </li>
     {% endfor %}
   </ul>
+
+  <div class="form-group">
+    <h3>Images</h3>
+    <form method="post" action="{{ url_for('set_image_duration') }}" class="video-form">
+      <div>
+        <label for="seconds">Show each image for (seconds):</label>
+        <input type="number" name="seconds" id="seconds" min="1" max="86400" required value="{{ image_duration }}">
+      </div>
+      <input type="submit" value="Save" class="button">
+    </form>
+    <p class="hint">Applies from the next time the playlist starts over.</p>
+  </div>
 
   <div class="form-group">
     <button class="button" onclick="reboot(true)" title="Restart the system to apply all changes">Reboot System</button>

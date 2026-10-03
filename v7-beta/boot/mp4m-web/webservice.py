@@ -8,7 +8,9 @@
 # partitions restored after writes, video presets that keep config.txt
 import os
 import re
+import signal
 import socket
+import time
 import tempfile
 from datetime import timedelta
 
@@ -177,7 +179,68 @@ def index():
                            using_default_password=not system.read_password_hash(),
                            installed=RUNNING_VERSION,
                            update_config=updater.read_config(),
-                           update_available=session.get('update'))
+                           update_available=session.get('update'),
+                           now_playing=describe_player_status(system.get_player_status()),
+                           image_duration=system.get_image_duration())
+
+
+# ----- Player ----- #
+def describe_player_status(status):
+    """One line for the web interface, e.g. 'Playing intro.mp4 (internal) for 2 min'."""
+    if not status:
+        return "The player is not running."
+    state = status.get('state')
+    if state == 'idle':
+        return "Nothing to play: add files below or plug in a USB stick."
+    path = status.get('file') or ''
+    name = os.path.basename(path)
+    folder = os.path.basename(os.path.dirname(path))
+    if folder in ('internal',) or folder.startswith('usb'):
+        name += f" ({folder})"
+    minutes = int(max(0, time.time() - status.get('since', time.time())) // 60)
+    duration = f" for {minutes} min" if minutes else ""
+    if state == 'sync':
+        return f"Sync mode: playing {name} with omxplayer-sync."
+    return f"{'Paused' if state == 'paused' else 'Playing'} {name}{duration}"
+
+@app.route('/player/status')
+def player_status():
+    status = system.get_player_status()
+    return {'running': bool(status), 'state': status.get('state') if status else None,
+            'text': describe_player_status(status)}
+
+def control_player(signum, done):
+    if system.signal_player(signum):
+        # Give the player a moment so the status shows the change
+        time.sleep(0.5)
+        if not is_fetch():
+            flash(done, "success")
+    elif not is_fetch():
+        flash("The player is not running.", "error")
+    if is_fetch():
+        return player_status()
+    return redirect(url_for('index'))
+
+@app.route('/player/next', methods=['POST'])
+def player_next():
+    return control_player(signal.SIGUSR1, "Skipped to the next file.")
+
+@app.route('/player/pause', methods=['POST'])
+def player_pause():
+    return control_player(signal.SIGUSR2, "Paused or resumed playback.")
+
+@app.route('/set_image_duration', methods=['POST'])
+def set_image_duration():
+    seconds = request.form.get('seconds', '').strip()
+    if not seconds.isdigit() or not 1 <= int(seconds) <= 86400:
+        flash("Please enter a number of seconds from 1 to 86400.", "error")
+        return redirect(url_for('index'))
+    try:
+        system.save_image_duration(int(seconds))
+        flash(f"Images are shown for {int(seconds)} seconds from the next time the playlist starts over.", "success")
+    except Exception as e:
+        flash(f"Failed to save the image duration: {e}", "error")
+    return redirect(url_for('index'))
 
 
 # ----- Media files ----- #
@@ -266,9 +329,8 @@ def set_sound_device():
     device = request.form.get('device', '').strip()
     if device == 'auto':
         return set_auto_sound()
-    # The player reads a single digit from alsa.txt
-    if not re.fullmatch(r'[0-9]', device):
-        flash("Please enter a card number from 0 to 9.", "error")
+    if not re.fullmatch(r'[0-9]{1,2}', device):
+        flash("Please enter a card number from 0 to 99.", "error")
         return redirect(url_for('index'))
     try:
         with system.writable(system.BOOT_PATH):
@@ -370,6 +432,14 @@ def check_update():
     except updater.UpdateError as e:
         flash(str(e), "error")
         return redirect(url_for('index'))
+    global RUNNING_VERSION
+    if latest['commit'] != RUNNING_VERSION.get('commit') and RUNNING_VERSION.get('commit') == 'local':
+        # Installed with install.sh: find out whether it is this version already
+        try:
+            if updater.identify_local_copy(latest, config):
+                RUNNING_VERSION = updater.installed_version()
+        except updater.UpdateError:
+            pass
     if latest['commit'] == RUNNING_VERSION.get('commit'):
         session.pop('update', None)
         flash("The software is up to date.", "success")

@@ -279,6 +279,44 @@ def _install(source_root, version):
             system.write_file(system.SCRIPT_FILE + '.new', new_player_text)
             return 'kept'
 
+def _tree_hashes(root):
+    """{relative path: sha256} of a web interface folder, without the manifest and cached bytecode."""
+    hashes = {}
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d != '__pycache__']
+        for name in files:
+            if name.endswith('.pyc') or (folder == root and name == MANIFEST_NAME):
+                continue
+            path = os.path.join(folder, name)
+            hashes[os.path.relpath(path, root)] = file_sha256(path)
+    return hashes
+
+def matches_installed(source_root):
+    """True if the web interface and player in this copy are exactly what is installed."""
+    return (os.path.isdir(APP_DIR)
+            and _tree_hashes(os.path.join(source_root, APP_SOURCE)) == _tree_hashes(APP_DIR)
+            and os.path.isfile(system.SCRIPT_FILE)
+            and file_sha256(system.SCRIPT_FILE) == file_sha256(os.path.join(source_root, PLAYER_SOURCE)))
+
+def identify_local_copy(latest, config=None):
+    """install.sh can't tell which commit it installed ("local copy"). If the installed files
+    are exactly this commit, record it, so the update check doesn't offer the same version.
+    Returns True if it did."""
+    config = config or read_config()
+    archive = download(config['repo'], latest['commit'])
+    with tempfile.TemporaryDirectory(prefix='mp4m-update-') as temp:
+        source_root = extract(archive, temp)
+        with system.writable(system.BOOT_PATH):
+            previous = installed_version()
+            if previous.get('commit') != 'local' or not matches_installed(source_root):
+                return False
+            player_hash = file_sha256(system.SCRIPT_FILE)
+            manifest = dict(latest, repo=config['repo'], branch=config['branch'], player_sha256=player_hash,
+                            official_player_hashes=([player_hash] + [h for h in official_player_hashes(previous)
+                                                                     if h != player_hash])[:20])
+            system.write_file(os.path.join(APP_DIR, MANIFEST_NAME), json.dumps(manifest, indent=2))
+    return True
+
 def update(latest=None, config=None):
     """Download a commit (default: the newest on the configured branch) and install it.
 
@@ -347,6 +385,10 @@ def main():
         latest = latest_commit(config['repo'], config['branch'])
         print(f"Latest:    {latest['commit'][:7]} {latest['date'][:10]}  {latest['message']}")
 
+        if latest['commit'] != installed.get('commit') and installed.get('commit') == 'local' and not args.force:
+            print("Comparing the local copy with the latest version...")
+            if identify_local_copy(latest, config):
+                installed = installed_version()
         if latest['commit'] == installed.get('commit') and not args.force:
             print("Already up to date.")
             return

@@ -10,6 +10,7 @@ routes in webservice.py.
 import fcntl
 import hashlib
 import hmac
+import json
 import os
 import re
 import shutil
@@ -31,6 +32,10 @@ CONFIG_FILE = os.path.join(BOOT_PATH, "config.txt")
 SCRIPT_FILE = os.path.join(BOOT_PATH, "mp4museum.py")
 PASSWORD_FILE = os.path.join(BOOT_PATH, "mp4m-password.txt")
 HOSTNAME_FILE = os.path.join(BOOT_PATH, "hostname.txt")
+# Player settings and status, shared with /boot/mp4museum.py
+PLAYER_SETTINGS_FILE = os.path.join(BOOT_PATH, "mp4m-player.txt")
+PLAYER_STATUS_FILE = "/tmp/mp4museum-status.json"
+DEFAULT_IMAGE_DURATION = 10
 
 DEFAULT_PASSWORD = 'mp4museum'
 
@@ -346,6 +351,61 @@ def get_display_info():
         return result.stdout
     except:
         return "Error getting display information"
+
+# ----- Player ----- #
+def read_player_settings():
+    """key=value lines from mp4m-player.txt."""
+    settings = {}
+    try:
+        with open(PLAYER_SETTINGS_FILE, 'r') as f:
+            for line in f:
+                key, sep, value = line.partition('=')
+                if sep and key.strip():
+                    settings[key.strip()] = value.strip()
+    except OSError:
+        pass
+    return settings
+
+def get_image_duration():
+    value = read_player_settings().get('image_duration', '')
+    return max(1, int(value)) if value.isdigit() else DEFAULT_IMAGE_DURATION
+
+def save_image_duration(seconds):
+    settings = read_player_settings()
+    settings['image_duration'] = str(seconds)
+    with writable(BOOT_PATH):
+        write_file(PLAYER_SETTINGS_FILE, ''.join(f"{key}={value}\n" for key, value in settings.items()))
+
+def _is_player_process(pid):
+    """True if pid is the running player script (and not some other process that got its number)."""
+    try:
+        with open(f'/proc/{int(pid)}/cmdline', 'rb') as f:
+            arguments = f.read().split(b'\0')
+    except (OSError, ValueError, TypeError):
+        return False
+    return any(argument.endswith(b'mp4museum.py') for argument in arguments)
+
+def get_player_status():
+    """{'state': 'playing'|'paused'|'idle'|'sync', 'file', 'since', 'pid'}, or None if the player isn't running."""
+    try:
+        with open(PLAYER_STATUS_FILE, 'r') as f:
+            status = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(status, dict) or not _is_player_process(status.get('pid')):
+        return None
+    return status
+
+def signal_player(signum):
+    """Send the player a signal (SIGUSR1: next, SIGUSR2: pause/resume). False if it isn't running."""
+    status = get_player_status()
+    if not status:
+        return False
+    try:
+        os.kill(int(status['pid']), signum)
+        return True
+    except OSError:
+        return False
 
 def get_current_sound_card():
     """Get the current sound card configuration."""
