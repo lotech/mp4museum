@@ -1374,12 +1374,16 @@ def upload_file():
     if not media_available():
         flash(f"The media partition {MEDIA_PATH} is not mounted.", "error")
         return redirect(url_for('index'))
+    # Browsers always send the size; without it the space check can't work
+    if not request.content_length:
+        flash("Upload refused: the browser didn't say how big the file is.", "error")
+        return redirect(url_for('index'))
     try:
         with writable(MEDIA_PATH):
             # Before the space check, so leftovers from a power cut can't block new uploads
             remove_stale_uploads()
             # Checked before receiving the file, it is written straight to the media partition
-            with upload_space(request.content_length or 0, uploaded_bytes(request._get_current_object())):
+            with upload_space(request.content_length, uploaded_bytes(request._get_current_object())):
                 try:
                     file = request.files.get('file')
                     if not file or not file.filename:
