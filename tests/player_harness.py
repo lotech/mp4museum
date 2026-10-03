@@ -188,7 +188,9 @@ paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
          '/boot/alsa.txt': os.path.join(tmp, 'alsa.txt'), '/boot/mp4m-player.txt': os.path.join(tmp, 'mp4m-player.txt'),
          '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json'),
          '/tmp/mp4museum-play.json': os.path.join(tmp, 'play.json'),
-         '/tmp/mp4museum-skipped.json': os.path.join(tmp, 'skipped.json')}
+         '/tmp/mp4museum-skipped.json': os.path.join(tmp, 'skipped.json'),
+         # scenario write: {'/proc/device-tree/model': 'Raspberry Pi 3 Model B Rev 1.2'}
+         '/proc/device-tree/model': os.path.join(tmp, 'model')}
 for real, fake in paths.items():
     if real in scenario.get('write', {}):
         open(fake, 'w').write(scenario['write'][real])
@@ -206,6 +208,10 @@ _real_open = open
 def watching_open(path, *args, **kwargs):
     if path == paths['/boot/mp4m-player.txt']:
         fire_signals('settings')
+    # scenario contents: {media path: hex}, e.g. an image header for the player to read
+    if path in scenario.get('contents', {}):
+        import io
+        return io.BytesIO(bytes.fromhex(scenario['contents'][path]))
     return _real_open(path, *args, **kwargs)
 try:
     exec(compile(source, 'mp4museum.py', 'exec'), {'__name__': '__main__', 'open': watching_open})

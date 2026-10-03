@@ -589,13 +589,13 @@ def jpeg(width, height):
 
 def test_image_sizes(pi):
     files = {'a.png': png(1920, 1080), 'b.jpg': jpeg(6000, 4000), 'c.gif': b'GIF89a' + bytes([0x80, 0x07, 0x38, 0x04]),
-             'd.png': png(2160, 3840), 'e.png': png(2200, 4000), 'f.jpg': b'\xff\xd8\xff', 'g.mp4': png(9000, 9000)}
+             'd.png': png(2048, 2048), 'e.png': png(3300, 2550), 'f.jpg': b'\xff\xd8\xff', 'g.mp4': png(9000, 9000)}
     for name, data in files.items():
         (pi.media / name).write_bytes(data)
     found = {e['name']: (e['pixels'], e['large']) for e in system.get_playlist()}
     assert found == {'a.png': ((1920, 1080), False), 'b.jpg': ((6000, 4000), True), 'c.gif': ((1920, 1080), False),
-                     'd.png': ((2160, 3840), False),      # a 4K screen on its side
-                     'e.png': ((2200, 4000), True), 'f.jpg': (None, False),
+                     'd.png': ((2048, 2048), False), 'e.png': ((3300, 2550), True),   # scrambled on a Pi 3B
+                     'f.jpg': (None, False),
                      'g.mp4': (None, False)}              # only images are read
 
 
@@ -606,7 +606,7 @@ def test_very_large_image_gets_a_warning(pi, client):
     r = client.post('/upload', data={'file': (io.BytesIO(png(1920, 1080)), 'fine.png')}, headers=fetch).get_json()
     assert len(r['messages']) == 1
     html = client.get('/').data.decode()
-    assert '8000×6000' in html and 'very large' in html and html.count('very large</span>') == 1
+    assert '8000×6000' in html and html.count('too large</span>') == 1
 
 
 def test_player_log_on_the_system_tab(client):
@@ -622,7 +622,7 @@ def test_file_name_plays_the_file(pi, client):
     html = client.get('/').data.decode()
     # the name is a second button for the same play form
     assert 'id="play-1"' in html and 'form="play-1" class="item-name js-play"' in html
-    assert 'Reboot to start it again' in client.get('/player/status').get_json()['text']
+    assert 'reboot' in client.get('/player/status').get_json()['text']
 
 
 def test_files_the_player_skips_are_marked(pi, client):
@@ -630,9 +630,24 @@ def test_files_the_player_skips_are_marked(pi, client):
     (pi.media / 'ok.mp4').write_bytes(b'x')
     info = os.stat(pi.media / 'big.png')
     with open(system.PLAYER_SKIPPED_FILE, 'w') as f:
-        json.dump([[str(pi.media / 'big.png'), [info.st_size, int(info.st_mtime)]]], f)
+        json.dump([[str(pi.media / 'big.png'), [info.st_size, int(info.st_mtime)], 2],
+                   [str(pi.media / 'ok.mp4'), [1, int(info.st_mtime)], 1]], f)   # once doesn't count
     assert [e['skipped'] for e in system.get_playlist()] == [True, False]
     assert 'skipped</span>' in client.get('/').data.decode()
     # replaced (another size or time): the player plays it again, so it isn't marked
     (pi.media / 'big.png').write_bytes(png(1920, 1080) + b'more')
     assert [e['skipped'] for e in system.get_playlist()] == [False, False]
+
+
+def test_image_size_odd_headers(pi):
+    import struct
+    # fill bytes before a JPEG marker are allowed
+    jpg = b'\xff\xd8\xff\xff\xff\xc0' + struct.pack('>HBHH', 11, 8, 600, 800) + b'\x03'
+    (pi.media / 'fill.jpg').write_bytes(jpg)
+    assert system.image_size(str(pi.media / 'fill.jpg')) == (800, 600)
+    bmp = b'BM' + bytes(16) + struct.pack('<ii', -640, -480)
+    (pi.media / 'neg.bmp').write_bytes(bmp)
+    assert system.image_size(str(pi.media / 'neg.bmp')) == (640, 480)
+    for junk in (b'', b'\xff\xd8', b'\xff\xd8\xff\xe0\x00\x01', b'\x89PNG\r\n\x1a\n', b'GIF89a\x01'):
+        (pi.media / 'junk.jpg').write_bytes(junk)
+        assert system.image_size(str(pi.media / 'junk.jpg')) is None

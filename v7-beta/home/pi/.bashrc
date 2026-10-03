@@ -113,8 +113,8 @@ if ! shopt -oq posix; then
 fi
 
 # mp4museum, modified 2026 in https://github.com/lotech/mp4museum (see git history)
-# only run local
-if [[ $(tty) == /dev/tty* ]]; then
+# only on the screen's console (not over SSH, and only one player: not on tty2 and so on)
+if [[ $(tty) == /dev/tty1 ]]; then
 
 # the web interface runs as a service: systemctl status mp4m-webservice
 
@@ -124,12 +124,24 @@ if [[ $(tty) == /dev/tty* ]]; then
 setterm -cursor off
 clear
 : > /tmp/mp4museum.log
+wait=3
 while true; do
+  started=$SECONDS
   python3 /boot/mp4museum.py >> /tmp/mp4museum.log 2>&1
   status=$?
   [ $status -eq 0 ] && break
   echo "$(date '+%F %T') the player stopped (exit code $status), starting it again" >> /tmp/mp4museum.log
-  sleep 3
+  # the log is in memory: keep the end of it
+  if [ "$(stat -c %s /tmp/mp4museum.log)" -gt 1000000 ]; then
+    tail -c 200000 /tmp/mp4museum.log > /tmp/mp4museum.log.tmp && mv /tmp/mp4museum.log.tmp /tmp/mp4museum.log
+  fi
+  # stopping again straight away (e.g. an error in an edited script): wait longer each time, up to a minute
+  if [ $((SECONDS - started)) -lt 60 ]; then
+    wait=$((wait * 2 > 60 ? 60 : wait * 2))
+  else
+    wait=3
+  fi
+  sleep $wait
 done
 setterm -cursor on
 

@@ -12,7 +12,13 @@
 # when it is installed; position for the web interface, which can also choose
 # the file to play; exit code 0 only when stopped on purpose (.bashrc restarts it)
 
-import time, vlc, os, glob, json, signal, shutil, sys, re
+import signal, sys
+# stopped on purpose (Ctrl-C on the console, SIGTERM, SIGHUP): exit code 0, so .bashrc doesn't
+# start it again. Set first, as the imports below take a few seconds; replaced further down.
+for quit_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(quit_signal, lambda signum, frame: sys.exit(0))
+
+import time, vlc, os, glob, json, shutil, re, struct
 import RPi.GPIO as GPIO
 import subprocess
 
@@ -37,6 +43,9 @@ OPEN_TIMEOUT = 20
 # can take VLC a long time on a Pi, and come out scrambled)
 IMAGE_GRACE = 20
 IMAGE_TYPES = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff')
+# the largest image (pixels on each side) a Pi 3 or older can show: bigger ones come out
+# scrambled (seen on a Pi 3B with 3300 x 2550) and are skipped. Not known for a Pi 4 or 5.
+OLD_PI_IMAGE_LIMIT = 2048
 
 # read audio device config: the card number, "0" if not set
 audiodevice = "0"
@@ -60,18 +69,19 @@ def read_settings():
         pass
     return settings
 
-def write_status(state, source=None, position=None, length=None):
-    # position and length in seconds, when known; play_file: this player reads PLAY_REQUEST_FILE
+def write_status(state, source=None, position=None, length=None, temp='.tmp'):
+    # position and length in seconds, when known; play_file: this player reads PLAY_REQUEST_FILE.
+    # temp: the quit signal handler uses its own temp file, as it can interrupt this one
     try:
-        with open(STATUS_FILE + '.tmp', 'w') as f:
+        with open(STATUS_FILE + temp, 'w') as f:
             # mono: the clock the web interface uses for how long since, which doesn't jump when
             # the Pi sets its time from the network (it has no clock of its own)
             json.dump({'state': state, 'file': source, 'since': time.time(), 'mono': time.monotonic(),
                        'pid': os.getpid(), 'position': position, 'length': length, 'play_file': True}, f)
-        os.replace(STATUS_FILE + '.tmp', STATUS_FILE)
+        os.replace(STATUS_FILE + temp, STATUS_FILE)
     except OSError:
         pass
-    # (only called from the main loop, never from button or signal handlers)
+    # (called from the main loop, and once from the quit signal handler)
 
 # one VLC instance and player for everything
 vlc_instance = vlc.Instance('-q -A alsa --alsa-audio-device hw:' + audiodevice)
@@ -158,11 +168,11 @@ def pause_toggle():
 signal.signal(signal.SIGUSR1, lambda signum, frame: next_file())
 signal.signal(signal.SIGUSR2, lambda signum, frame: pause_toggle())
 
-# stopped on purpose (Ctrl-C on the console, SIGTERM, SIGHUP): exit code 0, so .bashrc doesn't
-# start it again, and omxplayer is stopped too (see the end) so it isn't left looping on screen
+# stopped on purpose: as at the top, and omxplayer is stopped too (see the end) so it isn't left
+# looping on screen
 def quit_player(signum, frame):
     # so the file playing now isn't taken for the one that stopped the player
-    write_status('stopped')
+    write_status('stopped', temp='.stop.tmp')
     sys.exit(0)
 for quit_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(quit_signal, quit_player)
@@ -304,9 +314,10 @@ def omx_loop(source):
             return 'failed'
     return 'skipped'
 
-# A file that was playing when the player stopped by itself (e.g. an image too big for the
-# memory) is skipped until it is replaced or chosen in the web interface, so it can't stop the
-# player again each time round. /tmp is emptied at boot, so a reboot tries everything again.
+# A file that was playing when the player stopped by itself twice (e.g. an image too big for
+# the memory) is skipped until it is replaced or chosen in the web interface, so it can't stop
+# the player again each time round. Once could be chance. /tmp is emptied at boot, so a reboot
+# tries everything again. SKIPPED_FILE: [[path, [size, mtime], times it stopped the player], ...]
 def file_version(path):
     try:
         info = os.stat(path)
@@ -314,31 +325,100 @@ def file_version(path):
     except OSError:
         return None
 
+SKIP_AFTER = 2
+
 def read_skipped():
     try:
         with open(SKIPPED_FILE, 'r') as f:
-            return {path: version for path, version in json.load(f)}
+            return {path: [version, int(count)] for path, version, count in json.load(f)}
     except (OSError, ValueError, TypeError):
         return {}
 
 def save_skipped():
     try:
         with open(SKIPPED_FILE + '.tmp', 'w') as f:
-            json.dump([[path, version] for path, version in skipped.items()], f)
+            json.dump([[path, version, count] for path, (version, count) in skipped.items()], f)
         os.replace(SKIPPED_FILE + '.tmp', SKIPPED_FILE)
     except OSError:
         pass
+
+def is_player(pid):
+    """True if pid is a running player (this script)."""
+    try:
+        with open('/proc/%d/cmdline' % int(pid), 'rb') as f:
+            return any(argument.endswith(b'mp4museum.py') for argument in f.read().split(b'\0'))
+    except (OSError, ValueError, TypeError):
+        return False
 
 skipped = read_skipped()
 try:
     with open(STATUS_FILE, 'r') as f:
         last_status = json.load(f)
-    if last_status.get('state') in ('playing', 'paused') and last_status.get('pid') != os.getpid() and last_status.get('file'):
-        skipped[last_status['file']] = file_version(last_status['file'])
-        print("%s was playing when the player stopped: it is skipped until it is replaced" % last_status['file'], flush=True)
+    last_file, last_pid = last_status.get('file'), last_status.get('pid')
+    if (last_status.get('state') in ('playing', 'paused') and last_file and last_pid != os.getpid()
+            and not is_player(last_pid)):
+        version = file_version(last_file)
+        old_version, count = skipped.get(last_file, (None, 0))
+        count = count + 1 if old_version == version else 1
+        skipped[last_file] = [version, count]
         save_skipped()
+        print("%s was playing when the player stopped (%d time%s)%s" % (
+            last_file, count, '' if count == 1 else 's',
+            ': it is skipped until it is replaced' if count >= SKIP_AFTER else ''), flush=True)
 except (OSError, ValueError, TypeError, AttributeError):
     pass
+
+# omxplayer runs on its own: one left from a player that was killed would stay on top of the screen
+for process in os.listdir('/proc'):
+    try:
+        if process.isdigit():
+            with open('/proc/%s/comm' % process, 'r') as f:
+                if f.read().strip() == 'omxplayer.bin':
+                    os.kill(int(process), signal.SIGKILL)
+    except (OSError, ValueError):
+        pass
+
+def find_image_limit():
+    try:
+        with open('/proc/device-tree/model', 'r', errors='replace') as f:
+            model = f.read()
+    except OSError:
+        return None
+    if any(newer in model for newer in ('Pi 4', 'Pi 5', 'Pi 400', 'Pi 500', 'Compute Module 4', 'Compute Module 5')):
+        return None
+    return OLD_PI_IMAGE_LIMIT if 'Raspberry Pi' in model else None
+
+image_limit = find_image_limit()
+
+def image_size(path):
+    """(width, height) of a PNG, JPEG, GIF or BMP from its header, or None."""
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(26)
+            if head[:8] == b'\x89PNG\r\n\x1a\n':
+                return struct.unpack('>II', head[16:24])
+            if head[:6] in (b'GIF87a', b'GIF89a'):
+                return struct.unpack('<HH', head[6:10])
+            if head[:2] == b'BM':
+                width, height = struct.unpack('<ii', head[18:26])
+                return abs(width), abs(height)
+            if head[:2] == b'\xff\xd8':
+                f.seek(2)
+                for _ in range(10000):
+                    marker = f.read(2)
+                    if len(marker) < 2 or marker[0] != 0xff:
+                        return None
+                    if marker[1] == 0xff:
+                        # fill byte before a marker
+                        f.seek(-1, 1)
+                    elif 0xc0 <= marker[1] <= 0xcf and marker[1] not in (0xc4, 0xc8, 0xcc):
+                        height, width = struct.unpack('>xxxHH', f.read(7))
+                        return width, height
+                    elif not (marker[1] == 0x01 or 0xd0 <= marker[1] <= 0xd8):
+                        f.seek(struct.unpack('>H', f.read(2))[0] - 2, 1)
+    except (OSError, struct.error):
+        pass
+    return None
 
 # find a file, and if found, return its path (for sync)
 def search_file(file_name):
@@ -382,6 +462,7 @@ GPIO.add_event_detect(13, GPIO.RISING, callback = buttonNext, bouncetime = 1234)
 sync_mode()
 
 # the loop
+retry_next_round = False
 try:
     while(1):
         files = sorted(glob.glob(MEDIA_FILES))
@@ -393,6 +474,8 @@ try:
             time.sleep(2)
         index = 0
         played = False
+        try_skipped = retry_next_round
+        retry_next_round = False
         while index < len(files):
             # a file chosen in the web interface plays next, then the files after it; a next press
             # from here on skips this file. (No signal in between, or it would be lost.)
@@ -404,19 +487,28 @@ try:
                 files = sorted(glob.glob(MEDIA_FILES))
             if requested in files:
                 index = files.index(requested)
-                if skipped.pop(requested, False) is not False:
+                if requested in skipped:
                     # chosen in the web interface: try it again
+                    del skipped[requested]
                     save_skipped()
             if index >= len(files):
                 break
             file = files[index]
             index += 1
             if file in skipped:
-                if skipped[file] == file_version(file):
+                version, count = skipped[file]
+                if version != file_version(file):
+                    # replaced since
+                    del skipped[file]
+                    save_skipped()
+                elif count >= SKIP_AFTER and not try_skipped:
                     continue
-                # replaced since
-                del skipped[file]
-                save_skipped()
+            if image_limit and file.lower().endswith(IMAGE_TYPES):
+                size = image_size(file)
+                if size and max(size) > image_limit:
+                    print("skipping %s: %d x %d pixels, more than this Pi can show (%d); resize it"
+                          % (file, size[0], size[1], image_limit), flush=True)
+                    continue
             played = True
             # read for every file, so a new image duration applies straight away
             settings = read_settings()
@@ -436,7 +528,10 @@ try:
             else:
                 vlc_play(file, options)
         if files and not played:
-            # everything was skipped: wait for a file to be replaced or chosen
+            # nothing could be played: better to try the skipped files again than show nothing
+            if any(count >= SKIP_AFTER for version, count in skipped.values()):
+                print("every file is skipped: trying them again", flush=True)
+                retry_next_round = True
             player.stop()
             write_status('idle')
             time.sleep(2)

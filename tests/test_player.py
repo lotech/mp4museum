@@ -19,7 +19,10 @@ def run(tmp_path, **scenario):
     out = subprocess.run([sys.executable, str(HARNESS), str(path)], stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, universal_newlines=True)
     assert out.returncode == 0 and out.stdout.strip(), out.stderr
-    return json.loads(out.stdout.strip().splitlines()[-1])
+    result = json.loads(out.stdout.strip().splitlines()[-1])
+    # what the player printed (its log)
+    result['stdout'] = '\n'.join(out.stdout.strip().splitlines()[:-1])
+    return result
 
 
 def plays(result):
@@ -296,51 +299,82 @@ def test_ctrl_c_stops_the_player_with_exit_code_0(tmp_path):
     assert r['log'][-1] == {'exit': '0'} and killpgs(r)[:1] == [(2, 40)]
 
 
-def bashrc_autostart(tmp_path, exit_codes):
-    """Run the autostart part of .bashrc with a fake python3 that exits with these codes in turn."""
+def bashrc_autostart(tmp_path, exit_codes, output=0):
+    """Run the autostart part of .bashrc with a fake python3 that exits with these codes in turn
+    (printing output bytes each time). Returns how often it ran, the log and the waits between."""
     bashrc = (Path(__file__).parents[1] / 'v7-beta' / 'home' / 'pi' / '.bashrc').read_text()
     start = bashrc.index('# mp4museum autostart')
     block = bashrc[start:bashrc.index('setterm -cursor on', start)].replace('/tmp/mp4museum.log', str(tmp_path / 'log'))
     bin_dir = tmp_path / 'bin'
     bin_dir.mkdir(exist_ok=True)
     (tmp_path / 'codes').write_text(' '.join(map(str, exit_codes)))
-    fakes = {'python3': 'set -- $(cat "%s"); echo "run $*" >> "%s"; echo "${@:2}" > "%s"; exit $1'
-                        % (tmp_path / 'codes', tmp_path / 'runs', tmp_path / 'codes'),
-             'setterm': 'exit 0', 'clear': 'exit 0', 'sleep': 'exit 0'}
+    fakes = {'python3': 'set -- $(cat "%s"); echo "run $*" >> "%s"; echo "${@:2}" > "%s"; head -c %d /dev/zero | tr "\\0" x; exit $1'
+                        % (tmp_path / 'codes', tmp_path / 'runs', tmp_path / 'codes', output),
+             'setterm': 'exit 0', 'clear': 'exit 0', 'sleep': 'echo $1 >> "%s"' % (tmp_path / 'sleeps')}
     for name, body in fakes.items():
         (bin_dir / name).write_text('#!/bin/bash\n' + body + '\n')
         (bin_dir / name).chmod(0o755)
-    subprocess.run(['bash', '-c', block], env={'PATH': '%s:/usr/bin:/bin' % bin_dir}, check=True, timeout=10)
-    return (tmp_path / 'runs').read_text().count('run'), (tmp_path / 'log').read_text()
+    subprocess.run(['bash', '-c', block], env={'PATH': '%s:/usr/bin:/bin' % bin_dir}, check=True, timeout=30)
+    sleeps = (tmp_path / 'sleeps').read_text().split() if (tmp_path / 'sleeps').exists() else []
+    return (tmp_path / 'runs').read_text().count('run'), (tmp_path / 'log').read_text(), [int(n) for n in sleeps]
 
 
 def test_bashrc_starts_the_player_again_if_it_dies(tmp_path):
     # killed for lack of memory (137), then an error (1), then stopped with Ctrl-C (0)
-    runs, log = bashrc_autostart(tmp_path, [137, 1, 0])
+    runs, log, sleeps = bashrc_autostart(tmp_path, [137, 1, 0])
     assert runs == 3 and 'exit code 137)' in log and 'exit code 1)' in log
 
 
-def crashed_on(path, state='playing'):
-    # the status the last player left behind (pid 1 isn't this player)
-    return {'/tmp/mp4museum-status.json': json.dumps({'state': state, 'file': path, 'since': 1, 'pid': 1})}
+def test_bashrc_when_the_player_keeps_stopping(tmp_path):
+    # e.g. an error in an edited script: waits longer each time, and the log (in memory) stays small
+    runs, log, sleeps = bashrc_autostart(tmp_path, [1] * 8 + [0], output=300000)
+    assert runs == 9 and sleeps == [6, 12, 24, 48, 60, 60, 60, 60]
+    assert 150000 < len(log) <= 1000000
 
 
-def test_file_that_stopped_the_player_is_skipped(tmp_path):
+def crashed_on(path, state='playing', times_before=0, pid=999999):
+    # the status the last player left behind (no process has pid 999999), and how many times
+    # that file had already stopped the player
+    write = {'/tmp/mp4museum-status.json': json.dumps({'state': state, 'file': path, 'since': 1, 'pid': pid})}
+    if times_before:
+        write['/tmp/mp4museum-skipped.json'] = json.dumps([[path, None, times_before]])
+    return write
+
+
+def test_file_that_stopped_the_player_twice_is_skipped(tmp_path):
     files = ['/media/internal/a.mp4', '/media/internal/b.png', '/media/internal/c.mp4']
-    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png'), max_plays=7)
-    assert plays(r)[3:7] == ['a.mp4', 'c.mp4', 'a.mp4', 'c.mp4']
-    # stopped on purpose: nothing is skipped
-    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png', state='stopped'), max_plays=6)
+    # once could be chance: still played
+    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png'), max_plays=6)
+    assert plays(r)[3:6] == ['a.mp4', 'b.png', 'c.mp4'] and 'b.png was playing when the player stopped (1 time)' in r['stdout']
+    # twice: skipped
+    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png', times_before=1), max_plays=7)
+    assert plays(r)[3:7] == ['a.mp4', 'c.mp4', 'a.mp4', 'c.mp4'] and 'skipped until it is replaced' in r['stdout']
+    # stopped on purpose: nothing counts
+    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png', state='stopped', times_before=1), max_plays=6)
     assert plays(r)[3:6] == ['a.mp4', 'b.png', 'c.mp4']
     # chosen in the web interface, it is tried again
-    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png'),
+    r = run(tmp_path, files=files, write=crashed_on('/media/internal/b.png', times_before=1),
             signals=[{'at': 21, 'play': '/media/internal/b.png'}], max_plays=8)
     assert plays(r)[3:8] == ['a.mp4', 'b.png', 'c.mp4', 'a.mp4', 'b.png']
 
 
-def test_everything_skipped_waits(tmp_path):
-    r = run(tmp_path, files=['/media/internal/b.png'], write=crashed_on('/media/internal/b.png'), max_seconds=60)
-    assert plays(r)[3:] == [] and r['statuses'][-1]['state'] == 'idle' and r['log'][-1] == {'exit': 'time limit'}
+def test_a_player_still_running_is_not_blamed(tmp_path):
+    # e.g. started a second time over SSH: the first one is still playing that file
+    other = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)', '/boot/mp4museum.py'])
+    try:
+        r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/b.png'],
+                write=crashed_on('/media/internal/b.png', times_before=1, pid=other.pid), max_plays=6)
+    finally:
+        other.kill()
+        other.wait()
+    assert plays(r)[3:6] == ['a.mp4', 'b.png', 'a.mp4'] and 'was playing when' not in r['stdout']
+
+
+def test_everything_skipped_is_tried_again(tmp_path):
+    # better than a black screen: e.g. a single loop video that stopped the player twice by chance
+    r = run(tmp_path, files=['/media/internal/b.png'], write=crashed_on('/media/internal/b.png', times_before=1),
+            max_plays=5)
+    assert plays(r)[3:5] == ['b.png', 'b.png'] and 'trying them again' in r['stdout']
 
 
 def test_stopping_on_purpose_says_so_in_the_status(tmp_path):
@@ -360,3 +394,31 @@ def test_image_that_never_ends_is_moved_on_from(tmp_path):
     r = run(tmp_path, files=files, media={'b-huge.png': 'slow'}, write={'/boot/mp4m-player.txt': 'image_duration=5\n'},
             signals=[{'at': 26, 'signal': 'SIGUSR2'}, {'at': 66, 'signal': 'SIGUSR2'}], max_plays=6)
     assert first_play(r, 'c.mp4')['at'] - first_play(r, 'b-huge.png')['at'] >= 60
+
+
+def png_header(width, height):
+    import struct
+    return (b'\x89PNG\r\n\x1a\n' + struct.pack('>I', 13) + b'IHDR' + struct.pack('>II', width, height) + b'\x08\x02\x00\x00\x00').hex()
+
+
+def jpeg_header(width, height):
+    import struct
+    return (b'\xff\xd8' + b'\xff\xe0' + struct.pack('>H', 6) + b'JFIF' +
+            b'\xff\xc0' + struct.pack('>HBHH', 11, 8, height, width) + b'\x03\x01\x11\x00').hex()
+
+
+def test_images_too_large_for_a_pi_3_are_skipped(tmp_path):
+    # 3300 x 2550 came out scrambled on a Pi 3B, after a long wait
+    files = ['/media/internal/a.mp4', '/media/internal/b-poster.png', '/media/internal/c-photo.jpg',
+             '/media/internal/d-fine.png']
+    contents = {'/media/internal/b-poster.png': png_header(3300, 2550),
+                '/media/internal/c-photo.jpg': jpeg_header(1200, 4000),
+                '/media/internal/d-fine.png': png_header(2048, 1536)}
+    pi3 = {'/proc/device-tree/model': 'Raspberry Pi 3 Model B Rev 1.2\0'}
+    r = run(tmp_path, files=files, contents=contents, write=pi3, max_plays=7)
+    assert plays(r)[3:7] == ['a.mp4', 'd-fine.png', 'a.mp4', 'd-fine.png']
+    assert 'b-poster.png: 3300 x 2550 pixels' in r['stdout'] and 'c-photo.jpg: 1200 x 4000' in r['stdout']
+    # a Pi 4 (limit not known), or not a Pi: shown
+    for model in ({'/proc/device-tree/model': 'Raspberry Pi 4 Model B Rev 1.4\0'}, {}):
+        r = run(tmp_path, files=files, contents=contents, write=model, max_plays=7)
+        assert plays(r)[3:7] == ['a.mp4', 'b-poster.png', 'c-photo.jpg', 'd-fine.png']

@@ -455,9 +455,9 @@ def media_kind(name):
             return kind
     return 'other'
 
-# Images bigger than a 4K screen gain nothing on screen, and a very large one can be more than
-# a Pi can decode (a Pi 3 has 1 GB of memory, shared with the graphics)
-LARGE_IMAGE = (3840, 2160)
+# A Pi 3 or older can't show images more than this many pixels wide or high: they come out
+# scrambled (seen with 3300 x 2550), so its player skips them. Same limit as in mp4museum.py.
+LARGE_IMAGE_SIDE = 2048
 
 def image_size(path):
     """(width, height) of a PNG, JPEG, GIF, BMP or WebP image from its header, or None."""
@@ -470,7 +470,7 @@ def image_size(path):
                 return struct.unpack('<HH', head[6:10])
             if head[:2] == b'BM' and len(head) >= 26:
                 width, height = struct.unpack('<ii', head[18:26])
-                return width, abs(height)
+                return abs(width), abs(height)
             if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
                 if head[12:16] == b'VP8X':
                     return int.from_bytes(head[24:27], 'little') + 1, int.from_bytes(head[27:30], 'little') + 1
@@ -487,6 +487,10 @@ def image_size(path):
                     marker = f.read(2)
                     if len(marker) < 2 or marker[0] != 0xff:
                         return None
+                    if marker[1] == 0xff:
+                        # fill byte before a marker
+                        f.seek(-1, 1)
+                        continue
                     if marker[1] in (0xd8, 0x01) or 0xd0 <= marker[1] <= 0xd7:
                         continue
                     length = struct.unpack('>H', f.read(2))[0]
@@ -499,22 +503,28 @@ def image_size(path):
     return None
 
 def is_large_image(size):
-    """True if (width, height) is bigger than a 4K screen, either way round."""
-    return bool(size) and (max(size) > max(LARGE_IMAGE) or min(size) > min(LARGE_IMAGE))
+    """True if (width, height) is more than a Pi 3 can show."""
+    return bool(size) and max(size) > LARGE_IMAGE_SIDE
 
 def read_player_log(lines=40):
     """The end of what the player printed, or '' if there is nothing."""
     try:
-        with open(PLAYER_LOG_FILE, 'r', errors='replace') as f:
-            return ''.join(f.readlines()[-lines:])
+        with open(PLAYER_LOG_FILE, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 65536))
+            text = f.read().decode('utf-8', 'replace')
     except OSError:
         return ''
+    return ''.join(text.splitlines(True)[-lines:])
+
+# The player skips a file that was playing when it stopped by itself this many times
+SKIP_AFTER = 2
 
 def get_skipped_files():
     """{path: [size, mtime]} of the files the player skips because it stopped while playing them."""
     try:
         with open(PLAYER_SKIPPED_FILE, 'r') as f:
-            return {path: version for path, version in json.load(f)}
+            return {path: version for path, version, count in json.load(f) if int(count) >= SKIP_AFTER}
     except (OSError, ValueError, TypeError):
         return {}
 

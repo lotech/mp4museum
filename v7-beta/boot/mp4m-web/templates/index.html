@@ -149,7 +149,7 @@
               {{ icon(kind_icons[entry.kind]) }}<span>{{ entry.size|size }}</span>
               {% if entry.pixels %}<span>{{ entry.pixels[0] }}×{{ entry.pixels[1] }}</span>{% endif %}
               {% if entry.skipped %}<span class="badge danger" title="The player stopped while playing this file, so it skips it. Replace the file, or play it from here to try again.">{{ icon('circle-alert') }}skipped</span>{% endif %}
-              {% if entry.large %}<span class="badge warning" title="Bigger than a 4K screen: the player may not be able to show it. Resize it to the screen's size (e.g. 1920×1080).">{{ icon('triangle-alert') }}very large</span>{% endif %}
+              {% if entry.large %}<span class="badge warning" title="A Pi 3 can't show images over 2048 pixels wide or high, so it skips it. Resize it to the screen's size, e.g. 1920×1080.">{{ icon('triangle-alert') }}too large</span>{% endif %}
               {% if not entry.internal %}<span class="badge">{{ icon('usb') }}{{ entry.folder }}</span>{% endif %}
               {% if entry.loop %}<span class="badge">{{ icon('repeat') }}loop</span>{% endif %}
               {% if not entry.plays %}<span class="badge muted">not played: no extension</span>{% endif %}

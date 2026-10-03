@@ -187,8 +187,10 @@ def index():
 def describe_player_status(status):
     """One line for the web interface, e.g. 'Playing intro.mp4 (internal) for 2 min'."""
     if not status:
-        return "The player is not running. Reboot to start it again."
+        return "The player is not running. If it doesn't start again by itself within a minute, reboot."
     state = status.get('state')
+    if state == 'stopped':
+        return "The player is stopping."
     if state == 'idle':
         return "Nothing to play: add files below or plug in a USB stick."
     path = status.get('file') or ''
@@ -378,9 +380,9 @@ def upload_file():
                         upload_message(f"File '{file.filename}' uploaded successfully.", "success")
                         pixels = system.image_size(path) if system.media_kind(path) == 'image' else None
                         if system.is_large_image(pixels):
-                            upload_message(f"'{file.filename}' is {pixels[0]}×{pixels[1]} pixels, bigger than a 4K screen: "
-                                           "the player may not be able to show it. Resize it to the screen's size "
-                                           "(e.g. 1920×1080).", "warning")
+                            upload_message(f"'{file.filename}' is {pixels[0]}×{pixels[1]} pixels: a Pi 3 can't show images "
+                                           f"over {system.LARGE_IMAGE_SIDE} pixels wide or high (they come out scrambled), "
+                                           "so it skips it. Resize it to the screen's size, e.g. 1920×1080.", "warning")
                 finally:
                     # Close the temp files before the partition goes back to read-only
                     discard_upload_temp_files()
