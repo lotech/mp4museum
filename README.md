@@ -25,7 +25,9 @@ This fork copies the v7 beta files off a running install and develops them furth
   card, and file names are checked.
 - **Login** with a password (default `mp4museum`), changeable in the web interface.
 - **A network name per player** (`mp4museum-xxxx.local`), so several players can share a network.
-- **Player** no longer uses a full CPU core while there is nothing to play.
+- **Player:** shows what is playing in the web interface with Pause/Resume and Next buttons,
+  has a setting for how long images are shown, brings back sync mode from version 6, uses one
+  VLC instance for everything, and no longer uses a full CPU core while there is nothing to play.
 - **Easier to maintain and install:** the web interface is split into modules and templates,
   runs as a system service, and has an install script.
 - **Updates from GitHub:** a Software Update button in the web interface, or

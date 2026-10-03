@@ -16,7 +16,7 @@ The player is meant to run offline. A network is optional and only needed for th
 
 | Path | Purpose |
 |---|---|
-| `boot/mp4museum.py` | Player (v6 player with sync mode removed; logo is now `mp4m-v7beta.jpg`) |
+| `boot/mp4museum.py` | Player: plays everything in `/media/*/` in order, GPIO pause (pin 11) and next (pin 13), sync mode with omxplayer-sync |
 | `boot/mp4m-web/` | Web interface (Flask, port 80, runs as root): `webservice.py` (routes), `system.py` (partitions, config.txt, network name, password), `updater.py` (software update), `templates/`, `static/`. On the boot partition so it can be updated without turning off the overlay |
 | `etc/systemd/system/mp4m-webservice.service` | Starts the web interface at boot |
 | `usr/local/bin/mp4m-update` | The `sudo mp4m-update` command |
@@ -29,6 +29,23 @@ The player is meant to run offline. A network is optional and only needed for th
 | `etc/usbmount/usbmount.conf` | USB sticks auto-mounted read-only at `/media/usb0..7` |
 | `etc/systemd/system/getty@tty1.service.d/autologin.conf` | Auto-login of user `pi` on tty1 |
 | `etc/initramfs-tools/scripts/overlay` | Read-only root with tmpfs overlay (standard raspi-config overlay script) |
+
+## Player
+
+The player (`/boot/mp4museum.py`, started from `.bashrc`) plays the boot video, the
+MP4MUSEUM logo, then every file in `/media/*/` (the internal media partition and USB sticks)
+in alphabetical order, over and over.
+
+- **Loops:** a file with `loop.` in its name repeats forever.
+- **Images** are shown for 10 seconds, or as set in the web interface (`/boot/mp4m-player.txt`,
+  `image_duration=<seconds>`). The new setting applies from the next pass through the playlist.
+- **Buttons:** GPIO pin 11 pauses and resumes, pin 13 skips to the next file. The web interface
+  has the same buttons and shows what is playing (the player writes `/tmp/mp4museum-status.json`).
+- **Sound:** the card number from `/boot/alsa.txt` (0 if not set), chosen in the web interface.
+- **Sync mode** (from version 6): with `sync.mp4` and `sync-leader.txt` or `sync-player.txt`
+  on a USB stick or in `/boot`, the player runs `omxplayer-sync` to play `sync.mp4` in sync
+  across players. This needs [omxplayer-sync](https://github.com/turingmachine/omxplayer-sync)
+  installed; without it the player plays as normal.
 
 ## Web interface
 
@@ -45,7 +62,7 @@ Open `http://<network name>.local` in a browser on the same network.
 - **Video presets** only change the video lines in `/boot/config.txt`; other settings are kept.
 
 Files the web interface may create in `/boot`: `mp4m-password.txt`, `hostname.txt`, `alsa.txt`,
-`mp4museum.py.new`. `mp4m-update.txt` is only read.
+`mp4m-player.txt`, `mp4museum.py.new`. `mp4m-update.txt` is only read.
 
 ## Getting the code onto the Pi
 

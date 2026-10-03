@@ -317,33 +317,52 @@ def set_video_mode_in_config(config_text, mode):
         lines += ['', VIDEO_BLOCK_START, '[all]'] + settings + [VIDEO_BLOCK_END]
     return '\n'.join(lines) + '\n'
 
-def get_mac_address():
-    mac_info = []
-    for interface, label in (('eth0', 'Ethernet'), ('wlan0', 'Wireless')):
-        mac_info.append(f"{label} ({interface}): {read_mac(interface) or 'Not available'}")
-    return "\n".join(mac_info)
+NET_PATH = '/sys/class/net'
+
+def network_interfaces():
+    """Network interfaces other than loopback, whatever they are called (eth0, enx..., wlan0)."""
+    try:
+        return sorted(name for name in os.listdir(NET_PATH) if name != 'lo')
+    except OSError:
+        return []
+
+def _read_interface_file(interface, name):
+    try:
+        with open(os.path.join(NET_PATH, interface, name), 'r') as f:
+            return f.read().strip()
+    except OSError:
+        return ''
 
 def get_network_status():
-    try:
-        # Get network configuration
-        result = subprocess.run(['ip', 'addr', 'show'], capture_output=True, text=True)
-        network_lines = result.stdout.splitlines()
-        filtered_lines = []
-        found_eth = False
+    """Each network interface with its state, MAC address and IP addresses."""
+    addresses = {}
+    status, output = run_command(['ip', '-o', 'addr', 'show'])
+    if status:
+        for line in output.splitlines():
+            # e.g. "2: enxb827eb4e4fd4    inet 192.168.1.120/24 brd 192.168.1.255 scope global ..."
+            parts = line.split()
+            if len(parts) >= 4 and parts[2] in ('inet', 'inet6'):
+                interface = parts[1].split('@')[0]
+                label = 'IPv4' if parts[2] == 'inet' else 'IPv6'
+                addresses.setdefault(interface, []).append(f"{label} {parts[3]}")
 
-        for line in network_lines:
-            # Look for the first line containing ": eth"
-            if not found_eth and ": eth" in line:
-                found_eth = True
-
-            if found_eth:
-                filtered_lines.append(line)
-
-        # Combine MAC addresses and network info
-        combined_info = get_mac_address() + "\n\nNetwork Configuration:\n" + "\n".join(filtered_lines)
-        return combined_info
-    except:
-        return "Error getting network information"
+    lines = [f"Network name: {socket.gethostname()}.local"]
+    interfaces = network_interfaces()
+    if not interfaces:
+        lines.append("No network interfaces found.")
+    for interface in interfaces:
+        kind = 'wireless' if os.path.isdir(os.path.join(NET_PATH, interface, 'wireless')) else 'wired'
+        state = _read_interface_file(interface, 'operstate')
+        state = {'up': 'connected', 'down': 'not connected'}.get(state, state or 'unknown')
+        lines += ['', f"{interface} ({kind}): {state}"]
+        mac = read_mac(interface)
+        if mac:
+            lines.append(f"  MAC address: {mac}")
+        for address in addresses.get(interface, []):
+            lines.append(f"  {address}")
+        if not addresses.get(interface):
+            lines.append("  No IP address")
+    return "\n".join(lines)
 
 def get_display_info():
     try:
@@ -505,7 +524,7 @@ def default_hostname():
 
     The serial is hashed so the name doesn't reveal it.
     """
-    unique_id = read_serial() or read_mac('eth0') or read_mac('wlan0')
+    unique_id = read_serial() or next((mac for mac in map(read_mac, network_interfaces()) if mac), '')
     if not unique_id:
         return "mp4museum"
     return "mp4museum-" + hashlib.sha256(unique_id.encode()).hexdigest()[:4]
