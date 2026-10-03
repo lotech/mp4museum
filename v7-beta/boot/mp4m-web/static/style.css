@@ -373,3 +373,9 @@ pre {
   display: inline-block;
   text-decoration: none;
 }
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}

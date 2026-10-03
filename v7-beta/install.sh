@@ -1,6 +1,8 @@
 #!/bin/bash
 # Install this version of the MP4MUSEUM web interface and player files
 # onto a Raspberry Pi running the MP4MUSEUM v7 beta image.
+# Afterwards, "sudo mp4m-update" (or the web interface) updates from GitHub
+# without this script, unless files outside /boot change.
 # Part of https://github.com/lotech/mp4museum, a fork of MP4MUSEUM by Julius Schmiedel.
 # Licensed under the GNU GPL v3, see LICENSE.
 #
@@ -21,10 +23,9 @@ if grep -q 'boot=overlay' /proc/cmdline; then
     exit 1
 fi
 
-echo "Installing web interface to /home/pi/mp4m-web"
-rm -rf /home/pi/mp4m-web
-cp -r home/pi/mp4m-web /home/pi/mp4m-web
-find /home/pi/mp4m-web -name '__pycache__' -prune -exec rm -rf {} +
+echo "Installing web interface to /boot/mp4m-web and the player to /boot/mp4museum.py"
+# The updater keeps a player script that was edited on this Pi, and saves the new one next to it
+python3 -B boot/mp4m-web/updater.py --from-dir ..
 
 echo "Installing boot video, logo and .bashrc to /home/pi"
 cp home/pi/mp4museum-boot.mp4 home/pi/mp4m-v7beta.jpg /home/pi/
@@ -33,10 +34,14 @@ if [ -f /home/pi/.bashrc ] && ! cmp -s home/pi/.bashrc /home/pi/.bashrc; then
     echo "  (previous .bashrc saved as .bashrc.bak)"
 fi
 cp home/pi/.bashrc /home/pi/.bashrc
-chown -R pi:pi /home/pi/mp4m-web /home/pi/mp4museum-boot.mp4 /home/pi/mp4m-v7beta.jpg /home/pi/.bashrc
+chown pi:pi /home/pi/mp4museum-boot.mp4 /home/pi/mp4m-v7beta.jpg /home/pi/.bashrc
 
-# The web interface used to be a single file started from .bashrc
-rm -f /home/pi/mp4m-webservice.py
+# Earlier versions of the web interface lived in /home/pi
+rm -rf /home/pi/mp4m-webservice.py /home/pi/mp4m-web
+
+echo "Installing the mp4m-update command"
+cp usr/local/bin/mp4m-update /usr/local/bin/mp4m-update
+chmod 755 /usr/local/bin/mp4m-update
 
 echo "Installing mp4m-webservice service"
 cp etc/systemd/system/mp4m-webservice.service /etc/systemd/system/
@@ -44,6 +49,7 @@ systemctl daemon-reload
 systemctl enable mp4m-webservice.service
 
 echo
-echo "Done. Now turn the overlay file system back on:"
+echo "Done. Later updates: sudo mp4m-update, or System -> Software Update in the web interface."
+echo "Now turn the overlay file system back on:"
 echo "  sudo raspi-config -> Overlay File System -> Yes, and write-protect the boot partition"
 echo "then reboot."

@@ -7,6 +7,7 @@ Everything that touches the Pi itself: read-only partitions, config.txt,
 sound, network name and password storage. Kept separate from the Flask
 routes in webservice.py.
 """
+import fcntl
 import hashlib
 import hmac
 import os
@@ -141,10 +142,28 @@ def is_read_only(mount_point):
         pass
     return 'ro' in options
 
+# Lock files keep other processes (sudo mp4m-update) from remounting read-only while this one writes
+LOCK_DIR = '/run/lock'
+
+def _lock_mount(mount_point):
+    """Take this partition's lock across processes; returns the lock's file descriptor or None."""
+    try:
+        fd = os.open(os.path.join(LOCK_DIR, 'mp4m' + mount_point.replace('/', '-') + '.lock'),
+                     os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        return None
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+def _unlock_mount(fd):
+    if fd is not None:
+        os.close(fd)
+
 class _MountState:
     def __init__(self):
         self.lock = threading.Lock()
         self.users = 0
+        self.lock_fd = None
         # Make the partition read-only again when the last writer is done
         self.restore_read_only = False
         # The last attempt to do that failed, so keep trying on later writes
@@ -164,12 +183,14 @@ def writable(mount_point):
         state = _mount_states.setdefault(mount_point, _MountState())
     with state.lock:
         if state.users == 0:
+            state.lock_fd = _lock_mount(mount_point)
             currently_read_only = is_read_only(mount_point)
             # A partition left writable by a failed remount still has to go back to read-only
             state.restore_read_only = currently_read_only or state.restore_failed
             if currently_read_only:
                 status, output = run_command(['mount', '-o', 'remount,rw', mount_point])
                 if not status:
+                    _unlock_mount(state.lock_fd)
                     raise RuntimeError(f"Failed to make {mount_point} writable: {output}")
         state.users += 1
     try:
@@ -177,8 +198,36 @@ def writable(mount_point):
     finally:
         with state.lock:
             state.users -= 1
-            if state.users == 0 and state.restore_read_only:
-                state.restore_failed = not make_read_only(mount_point)
+            if state.users == 0:
+                if state.restore_read_only:
+                    state.restore_failed = not make_read_only(mount_point)
+                _unlock_mount(state.lock_fd)
+                state.lock_fd = None
+
+def mounted_read_only_in_fstab(mount_point):
+    """True if /etc/fstab mounts this partition read-only."""
+    try:
+        with open('/etc/fstab', 'r') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 4 and not parts[0].startswith('#') and parts[1] == mount_point:
+                    return 'ro' in parts[3].split(',')
+    except OSError:
+        pass
+    return False
+
+def restore_read_only_mounts():
+    """At startup: make partitions read-only again if a crash or restart left them writable."""
+    for mount_point in (BOOT_PATH, MEDIA_PATH):
+        if not (mounted_read_only_in_fstab(mount_point) and os.path.ismount(mount_point)):
+            continue
+        # Not while another process (sudo mp4m-update) is writing to it
+        fd = _lock_mount(mount_point)
+        try:
+            if not is_read_only(mount_point):
+                make_read_only(mount_point)
+        finally:
+            _unlock_mount(fd)
 
 def make_read_only(mount_point, attempts=3):
     """Remount a partition read-only, retrying briefly if it is busy."""

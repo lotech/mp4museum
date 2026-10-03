@@ -182,6 +182,28 @@
   </div>
 
   <div class="form-group">
+    <h3>Software Update</h3>
+    <p class="hint">Installed version: <strong>{% if installed.commit == 'local' %}local copy{% else %}{{ (installed.commit or 'unknown')[:7] }}{% endif %}</strong>{% if installed.date %} ({{ installed.date[:10] }}{% if installed.branch %}, branch {{ installed.branch }}{% endif %}){% endif %},
+      updates from {{ update_config.repo }}, branch {{ update_config.branch }}.</p>
+    {% if update_available and update_available.commit != installed.commit %}
+    <p>New version <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}): {{ update_available.message }}</p>
+    {% endif %}
+    <div class="button-row">
+      {% if update_available and update_available.commit != installed.commit %}
+      <form method="post" action="{{ url_for('install_update') }}"
+            onsubmit="return confirm('Install the update? The web interface restarts afterwards.')">
+        <input type="submit" value="Install Update" class="button">
+      </form>
+      {% endif %}
+      <form method="post" action="{{ url_for('check_update') }}">
+        <input type="submit" value="Check for Updates" class="button">
+      </form>
+    </div>
+    <p class="hint">Needs an internet connection. Updates the web interface, and the player script unless
+      it has been edited here (then the new one is saved as mp4museum.py.new). Over SSH: <code>sudo mp4m-update</code></p>
+  </div>
+
+  <div class="form-group">
     <h3>Network Configuration</h3>
     <pre title="Network configuration and MAC addresses">{{ network_status }}</pre>
   </div>

@@ -24,6 +24,7 @@ a network is optional.
 - [x] Install script for the web interface (`v7-beta/install.sh`)
 - [x] The reboot confirmation page shares the CSS and reboot JavaScript
 - [x] Remove the unused Wi-Fi placeholder route
+- [x] Update from GitHub: `sudo mp4m-update` and a Software Update button (web interface moved to `/boot/mp4m-web` so it can be updated with the overlay on)
 - [ ] Test on the Pi 3B
 
 ## 3. Player
@@ -39,6 +40,9 @@ a network is optional.
 - [ ] Install script to set up v7 on a fresh Raspberry Pi OS, instead of depending on the image (`install.sh` only covers the v7 image so far)
 
 ## Ideas
+
+- [ ] Update from a file (USB stick or upload) for players that are never online
+- [ ] Updates that change files outside `/boot` (applied at boot, before the overlay is set up)
 
 - [ ] Show the network name on screen (e.g. on the logo screen), since every player now has its own name
 - [ ] Announce the web interface over Bonjour/mDNS (`_http._tcp`) so players show up in network browsers

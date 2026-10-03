@@ -12,9 +12,10 @@ import socket
 import tempfile
 from datetime import timedelta
 
-from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, session
+from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session
 
 import system
+import updater
 
 PROJECT_URL = 'https://mp4museum.org'
 UPSTREAM_REPO_URL = 'https://github.com/JuliusCode/MP4MUSEUM'
@@ -44,6 +45,8 @@ class MediaRequest(Request):
 
 app = Flask(__name__)
 app.request_class = MediaRequest
+# The version this process was started with; an update replaces the files but not the running code
+RUNNING_VERSION = updater.installed_version()
 app.secret_key = system.session_secret()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
@@ -171,7 +174,10 @@ def index():
                            script_content=system.read_script_file(),
                            script_file=system.SCRIPT_FILE,
                            hostname_is_default=not os.path.exists(system.HOSTNAME_FILE),
-                           using_default_password=not system.read_password_hash())
+                           using_default_password=not system.read_password_hash(),
+                           installed=RUNNING_VERSION,
+                           update_config=updater.read_config(),
+                           update_available=session.get('update'))
 
 
 # ----- Media files ----- #
@@ -355,7 +361,112 @@ def set_hostname():
     return redirect(url_for('index'))
 
 
+# ----- Software update ----- #
+@app.route('/check_update', methods=['POST'])
+def check_update():
+    config = updater.read_config()
+    try:
+        latest = updater.latest_commit(config['repo'], config['branch'])
+    except updater.UpdateError as e:
+        flash(str(e), "error")
+        return redirect(url_for('index'))
+    if latest['commit'] == RUNNING_VERSION.get('commit'):
+        session.pop('update', None)
+        flash("The software is up to date.", "success")
+    else:
+        session['update'] = latest
+        message = f"An update is available: {latest['commit'][:7]} ({latest['date'][:10]})."
+        installed_branch = RUNNING_VERSION.get('branch')
+        if installed_branch and installed_branch != config['branch']:
+            message += f" Installing it switches from branch {installed_branch} to {config['branch']}."
+        elif RUNNING_VERSION.get('date') and latest['date'] < RUNNING_VERSION['date']:
+            message += " It is older than the installed version."
+        flash(message, "success")
+    return redirect(url_for('index'))
+
+@app.route('/install_update', methods=['POST'])
+def install_update():
+    latest = session.get('update')
+    if not latest:
+        flash("Check for updates first.", "error")
+        return redirect(url_for('index'))
+    try:
+        summary = updater.update(latest)
+    except updater.UpdateError as e:
+        flash(f"Update failed, nothing was changed: {e}", "error")
+        return redirect(url_for('index'))
+    except Exception as e:
+        flash(f"The update stopped part way: {e}. Try again, or run 'sudo mp4m-update --force' over SSH.", "error")
+        return redirect(url_for('index'))
+    session.pop('update', None)
+
+    # Running as the systemd service: restart it with the new code once this page is sent
+    restarting = False
+    if os.environ.get('INVOCATION_ID'):
+        restarting, output = system.run_command(['systemd-run', '--on-active=2', 'systemctl', 'restart', 'mp4m-webservice'])
+        if not restarting:
+            print(f"Failed to schedule a restart of the web interface: {output}", flush=True)
+    try:
+        # The templates have just been replaced, so this page doesn't use them
+        with open(os.path.join(updater.APP_DIR, 'static', 'style.css'), 'r') as f:
+            inline_css = f.read()
+    except OSError:
+        inline_css = ''
+    return render_template_string(UPDATED_PAGE, lines=updater.describe(summary), restarting=restarting,
+                                  new_commit=summary['version']['commit'], inline_css=inline_css)
+
+@app.route('/version')
+def version():
+    return {'commit': RUNNING_VERSION.get('commit', '')}
+
+UPDATED_PAGE = """<!doctype html>
+<html>
+  <head>
+    <title>MP4Museum - Updated</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>{{ inline_css|safe }}</style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>Update installed</h2>
+      {% for line in lines %}<p>{{ line }}</p>{% endfor %}
+      {% if restarting %}
+      <p id="status" class="hint">The web interface is restarting with the new version...</p>
+      {% else %}
+      <p class="hint">Reboot to use the new version.</p>
+      {% endif %}
+      <p><a href="{{ url_for('confirm_reboot') }}" class="button button-link">Reboot</a>
+        <a href="{{ url_for('index') }}" class="button button-link">Later</a></p>
+    </div>
+    {% if restarting %}
+    <script>
+      // Wait for the new version to answer, then offer the reboot
+      function waitForNewVersion() {
+        fetch('{{ url_for('version') }}', {headers: {'X-Requested-With': 'fetch'}})
+          .then(response => response.ok ? response.json() : {})
+          .then(data => {
+            if (data.commit === {{ new_commit|tojson }}) {
+              window.location = '{{ url_for('confirm_reboot') }}';
+            } else {
+              setTimeout(waitForNewVersion, 2000);
+            }
+          })
+          .catch(() => setTimeout(waitForNewVersion, 2000));
+      }
+      setTimeout(waitForNewVersion, 3000);
+    </script>
+    {% endif %}
+  </body>
+</html>
+"""
+
+
 if __name__ == '__main__':
+    # A crash or restart can leave /boot or the media partition writable
+    system.restore_read_only_mounts()
+    # Keep using the templates this version started with, even after an update replaces the files
+    for template_name in app.jinja_env.list_templates():
+        app.jinja_env.get_template(template_name)
     # Every player gets its own network name, so several can share a network
     name = system.configured_hostname()
     status, output = system.apply_hostname(name)
