@@ -122,14 +122,33 @@ def test_address_on_the_logo_screen(tmp_path):
     assert not [e for e in r['log'] if 'stop_call' in e and logo < e['at'] <= first]
 
 
+
+def test_logo_from_the_web_interface_folder(tmp_path):
+    from pathlib import Path
+    logo = Path(__file__).resolve().parents[1] / 'v7-beta' / 'boot' / 'mp4m-web' / 'static' / 'logo.jpg'
+    r = run(tmp_path, files=['/media/internal/a.mp4'], logo=str(logo), max_plays=4)
+    # the one updates bring, 1920 x 1080: the address in proportion (24 on the old 1280 wide
+    # logo, 30 from the edges), grey like the logo's 'Please Wait'
+    assert plays(r)[2:4] == ['logo.jpg', 'a.mp4']
+    color, size, x, y = 2, 6, 8, 9
+    sizes = {e[0]: e[1] for e in marquee(r) if e[0] in (color, size, x, y)}
+    assert sizes == {color: 0xB0B0B0, size: 36, x: 45, y: 45}
+    # not there (installed before it existed, or removed): the old one in /home/pi
+    r = run(tmp_path, files=['/media/internal/a.mp4'], max_plays=4)
+    assert plays(r)[2] == 'mp4m-v7beta.jpg'
+    assert {e[0]: e[1] for e in marquee(r) if e[0] in (size, x)} == {size: 24, x: 30}
+
+
 def test_boot_video_plays_setting(tmp_path):
     for times in (0, 1, 2):
         r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=%d\n' % times},
                 max_plays=times + 2)
         assert plays(r)[:times + 2] == ['mp4museum-boot.mp4'] * times + ['mp4m-v7beta.jpg', 'a.mp4']
-    # anything else: twice, as in the original
-    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=5\n'}, max_plays=4)
-    assert plays(r)[:4] == ['mp4museum-boot.mp4'] * 2 + ['mp4m-v7beta.jpg', 'a.mp4']
+    # not set, or anything else: once (twice in the original, as a warm-up)
+    for setting in ('', 'boot_video_plays=5\n'):
+        r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': setting},
+                real_default=True, max_plays=3)
+        assert plays(r)[:3] == ['mp4museum-boot.mp4', 'mp4m-v7beta.jpg', 'a.mp4']
 
 
 def test_boot_video_original_or_custom(tmp_path):
@@ -322,6 +341,42 @@ def test_play_file_chosen_in_web_interface(tmp_path):
     r = run(tmp_path, files=files, signals=[{'at': 21, 'play': '/media/internal/c.mp4'}], max_plays=8)
     assert plays(r)[3:8] == ['a.mp4', 'c.mp4', 'd.mp4', 'a.mp4', 'b.mp4']
     assert 21 <= first_play(r, 'c.mp4')['at'] <= 22
+
+
+
+def test_previous_file(tmp_path):
+    files = ['/media/internal/a.mp4', '/media/internal/b.mp4', '/media/internal/c.mp4', '/media/usb0/d.mp4']
+    media = {name: 100 for name in ('a.mp4', 'b.mp4', 'c.mp4', 'd.mp4')}
+
+    def previous(*at):
+        return [{'at': t, 'command': 'previous'} for t in at]
+    # a.mp4 starts at about 20 s: the one before it is the last (the playlist repeats), then the
+    # files after that one again
+    r = run(tmp_path, files=files, media=media, signals=previous(30, 40), max_plays=7)
+    assert plays(r)[3:7] == ['a.mp4', 'd.mp4', 'c.mp4', 'd.mp4']
+    assert 30 <= first_play(r, 'd.mp4')['at'] <= 31 and 40 <= first_play(r, 'c.mp4')['at'] <= 41
+    # pressed twice before the next file starts: two back
+    r = run(tmp_path, files=files, media=media, signals=previous(30, 30.001), max_plays=5)
+    assert plays(r)[3:5] == ['a.mp4', 'c.mp4']
+    # in the second round (a.mp4 again from 40 s): across the end to d.mp4, then on from there
+    r = run(tmp_path, files=files, signals=previous(41.5), max_plays=9)
+    assert plays(r)[3:10] == ['a.mp4', 'b.mp4', 'c.mp4', 'd.mp4', 'a.mp4', 'd.mp4', 'a.mp4']
+    # not during start-up (there's nothing before the boot video and logo): ignored, and the
+    # status says so
+    r = run(tmp_path, files=files, signals=previous(3, 14), max_plays=5)
+    assert plays(r)[:5] == ['mp4museum-boot.mp4', 'mp4museum-boot.mp4', 'mp4m-v7beta.jpg', 'a.mp4', 'b.mp4']
+    assert {s['previous'] for s in r['statuses'] if s['file'] and not s['file'].startswith('/media/')} == {False}
+    assert {s['previous'] for s in r['statuses'] if s['file'] and s['file'].startswith('/media/')} == {True}
+
+
+def test_previous_passes_over_files_the_player_skips(tmp_path):
+    # b-poster.png is too large for a Pi 3 and c.mp4 has stopped the player twice: from d.mp4,
+    # back to a.mp4
+    files = ['/media/internal/a.mp4', '/media/internal/b-poster.png', '/media/internal/c.mp4', '/media/internal/d.mp4']
+    r = run(tmp_path, files=files, media={'a.mp4': 5, 'd.mp4': 100}, contents={'/media/internal/b-poster.png': png_header(3300, 2550)},
+            write={'/proc/device-tree/model': 'Raspberry Pi 3 Model B Rev 1.2\0'},
+            crashed={'file': '/media/internal/c.mp4', 'times': 2}, signals=[{'at': 40, 'command': 'previous'}], max_plays=6)
+    assert plays(r)[3:6] == ['a.mp4', 'd.mp4', 'a.mp4'] and 40 <= [e['at'] for e in r['log'] if 'play' in e][5] <= 41
 
 
 def test_play_file_ends_a_loop(tmp_path):

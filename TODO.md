@@ -31,7 +31,11 @@ a network is optional.
 
 - [x] Bring back sync mode (v6 had it, using omxplayer-sync); only runs when omxplayer-sync is installed
 - [x] Use one VLC instance instead of creating one per file
-- [ ] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround, kept for now). Setting for it in Media → Playback (`boot_video_plays`: 2, 1, 0); test with several cold starts (unplugged) that the first file shows properly, with sound
+- [x] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround). Setting for it in Media → Playback (`boot_video_plays`: 2, 1, 0). Pi 3 B+: with no boot video, a reboot and 4 cold starts (unplugged) all showed the logo with the address, then the first file properly. Sound not checked (no clip with sound, nothing plugged in)
+- [x] The boot video plays once by default (setting in Media → Playback: once, twice, not at all)
+- [x] New logo screen: a frame from the boot video with the credits (`boot/mp4m-web/static/logo.jpg`, so updates bring it); the address text scaled to the picture
+- [ ] Show the logo instead of the console text while the Pi starts. No Plymouth on the image (it would need internet to install), so: a systemd service early in boot that draws the image on the framebuffer (e.g. a raw dump in the framebuffer's format, `/dev/fb0`, 1920x1080 from `cmdline.txt`), and keep the console text off the screen (`console=tty3` or `vt.global_cursor_default=0` in `cmdline.txt`; tty1 still runs the player). Outside `/boot`, so it comes with `install.sh`. Test on the Pi
+- [x] Previous file button; back to the start (rewind) moved apart from the other buttons, with its own icon
 - [x] Setting for how long images are shown
 - [x] "Now playing", Pause/Resume and Next in the web interface
 - [x] Sound cards 10 and above (player reads all of `alsa.txt`, web interface allows 0–99)
@@ -90,7 +94,8 @@ a network is optional.
 - [ ] Updates that change files outside `/boot` (applied at boot, before the overlay is set up)
 
 - [x] Show the network name on screen: `http://<name>.local` and the IP address on the logo screen (VLC marquee), setting `show_address`
-- [ ] Test on the Pi: does the address show on the logo screen (VLC's marquee with the Pi's video output), is it readable, is it gone from the first file? Does the IP address appear when the network comes up during the logo?
+- [x] Tested on a Pi 3 B+: the address and IP show on the logo screen, then the playlist starts without them
+- [ ] Test on the Pi: does the IP address appear when the network comes up during the logo (e.g. boot video off, cold start)?
 - [ ] Announce the web interface over Bonjour/mDNS (`_http._tcp`) so players show up in network browsers
 - [ ] Offline setup: create a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (there is no Wi-Fi setting yet)
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)

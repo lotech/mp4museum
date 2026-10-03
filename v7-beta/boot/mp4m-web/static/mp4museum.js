@@ -120,8 +120,12 @@ function showPlayer(view) {
   const controls = view.running && ['playing', 'paused'].includes(state) && !playerBusy;
   document.getElementById('pauseButton').disabled = !controls;
   document.getElementById('nextButton').disabled = !controls;
-  // an older player script can't go back to the start
-  document.getElementById('rewindButton').disabled = !controls || !view.rewind;
+  // an older player script can't go back to the previous file or the start. (A page from
+  // before an update may not have these buttons.)
+  const previous = document.getElementById('previousButton');
+  if (previous) previous.disabled = !controls || !view.previous;
+  const rewind = document.getElementById('rewindButton');
+  if (rewind) rewind.disabled = !controls || !view.rewind;
   document.querySelectorAll('.playlist-item').forEach(item => {
     const current = active && item.dataset.path === view.file;
     item.classList.toggle('current', current);

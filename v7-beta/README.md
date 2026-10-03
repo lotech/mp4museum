@@ -21,7 +21,8 @@ The player is meant to run offline. A network is optional and only needed for th
 | `etc/systemd/system/mp4m-webservice.service` | Starts the web interface at boot |
 | `usr/local/bin/mp4m-update` | The `sudo mp4m-update` command |
 | `home/pi/.bashrc` | Autostart on tty1: runs `/boot/mp4museum.py`, and again if it stops by itself |
-| `home/pi/mp4m-v7beta.jpg` | Logo screen shown after boot |
+| `boot/mp4m-web/static/logo.jpg` | Logo screen shown after the boot video (a frame from it, crediting MP4MUSEUM by Julius Schmiedel); in the web interface folder so updates bring it |
+| `home/pi/mp4m-v7beta.jpg` | The v7 image's logo screen, shown if the one above isn't there |
 | `home/pi/mp4museum-boot.mp4` | Boot video (the original from the v7 image) |
 | `boot/config.txt` | Video/audio config (video lines set by the web UI video presets) |
 | `boot/cmdline.txt` | `boot=overlay` – root filesystem is read-only via overlayfs |
@@ -38,8 +39,8 @@ in alphabetical order, over and over.
 
 - **Boot video:** the original MP4MUSEUM one (`/home/pi/mp4museum-boot.mp4`). To use your own,
   put it on the SD card's boot partition as `mp4museum-boot.mp4` (it shows up as a drive on
-  a computer); delete it to go back to the original. It plays twice, as in the original (a
-  warm-up for the video output); Media → Playback can make that once or not at all.
+  a computer); delete it to go back to the original. It plays once; Media → Playback can
+  make that twice (as in the original, a warm-up for the video output) or not at all.
 - **Logo screen:** shows the player's address (`http://<name>.local` and its IP address) in the
   corner for its 10 seconds, so it's easy to find the web interface. It can be turned off in
   Media → Playback.

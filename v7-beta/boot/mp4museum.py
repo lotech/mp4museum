@@ -27,7 +27,10 @@ MEDIA_FILES = '/media/*/*.*'
 BOOT_VIDEO = '/home/pi/mp4museum-boot.mp4'
 # a boot video put on the boot partition (e.g. from a computer) is played instead
 CUSTOM_BOOT_VIDEO = '/boot/mp4museum-boot.mp4'
-LOGO = '/home/pi/mp4m-v7beta.jpg'
+# the logo screen: the one in the web interface's folder (updates bring it), else the one
+# install.sh put in /home/pi
+LOGO = '/boot/mp4m-web/static/logo.jpg'
+OLD_LOGO = '/home/pi/mp4m-v7beta.jpg'
 ALSA_FILE = '/boot/alsa.txt'
 # image_duration=<seconds>, loop_player=omxplayer|vlc, boot_video_plays=0|1|2 and
 # show_address=yes|no, set in the web interface
@@ -37,7 +40,8 @@ HOSTNAME_FILE = '/boot/hostname.txt'
 # what is playing, for the web interface
 STATUS_FILE = '/tmp/mp4museum-status.json'
 # from the web interface, followed by SIGUSR1: {"id": ..., "file": ...} plays that file;
-# {"id": ..., "command": "rewind"} goes back to the first frame and holds it until play is pressed
+# {"id": ..., "command": "rewind"} goes back to the first frame and holds it until play is pressed;
+# {"id": ..., "command": "previous"} plays the file before (the player knows which it skips)
 PLAY_REQUEST_FILE = '/tmp/mp4museum-play.json'
 # files that were playing when the player stopped by itself: [[path, [size, mtime]], ...]
 SKIPPED_FILE = '/tmp/mp4museum-skipped.json'
@@ -67,7 +71,7 @@ if os.path.isfile(ALSA_FILE):
 
 def read_settings():
     settings = {'image_duration': DEFAULT_IMAGE_DURATION, 'loop_player': 'omxplayer',
-                'boot_video_plays': 2, 'show_address': True}
+                'boot_video_plays': 1, 'show_address': True}
     try:
         with open(SETTINGS_FILE, 'r') as f:
             for line in f:
@@ -101,7 +105,7 @@ def write_status(state, source=None, position=None, length=None, temp='.tmp', en
             # the Pi sets its time from the network (it has no clock of its own)
             json.dump({'state': state, 'file': source, 'since': time.time(), 'mono': time.monotonic(),
                        'pid': os.getpid(), 'position': position, 'length': length, 'play_file': True,
-                       'rewind': playlist_started, 'engine': engine, 'loop_player': loop_engine,
+                       'rewind': playlist_started, 'previous': playlist_started, 'engine': engine, 'loop_player': loop_engine,
                        'loop_omx_ok': loop_omx_ok}, f)
         os.replace(STATUS_FILE + temp, STATUS_FILE)
     except OSError:
@@ -188,14 +192,23 @@ def rewind():
 # the signal the web interface sends after it, so the file chosen there plays next
 skip_requested = False
 requested_file = None
+# previous pressed this many times since the loop last chose a file (two quick presses: two back)
+previous_requested = 0
 def next_file():
-    global skip_requested, requested_file, rewind_requested
+    global skip_requested, requested_file, rewind_requested, previous_requested
     request = play_request()
     if request and request.get('command') == 'rewind':
         rewind()
         return
-    if request and isinstance(request.get('file'), str):
+    if request and request.get('command') == 'previous':
+        if not playlist_started:
+            # the boot video and logo: there's nothing before them
+            return
+        previous_requested += 1
+        requested_file = None
+    elif request and isinstance(request.get('file'), str):
         requested_file = request['file']
+        previous_requested = 0
     skip_requested = True
     # next overtakes a rewind that is still waiting
     rewind_requested = False
@@ -660,15 +673,19 @@ def address_text():
         pass
     return text
 
-def set_marquee(text):
+def set_marquee(text, width=1280):
     """Text in the bottom right corner of the picture, or None to take it off. VLC only sets it
-    on a picture being shown, so while a file plays."""
+    on a picture being shown, so while a file plays. Sizes are in the picture's pixels: width
+    is the picture's, so the text is the same size on any picture. Grey, like the logo's
+    'Please Wait', so it doesn't stand out more than the logo."""
     try:
         if text:
+            margin = max(10, round(30 * width / 1280))
             player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, text)
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, 30)
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.X, 30)
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, 30)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, max(10, round(24 * width / 1280)))
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Color, 0xB0B0B0)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.X, margin)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, margin)
             player.video_set_marquee_int(vlc.VideoMarqueeOption.Position, 10)
         player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1 if text else 0)
         return True
@@ -679,7 +696,9 @@ def set_marquee(text):
 # the address on the logo screen, so it's easy to find the web interface: shown once the logo
 # is, and looked up again every 2 seconds until the Pi has an IP address
 class LogoAddress:
-    def __init__(self):
+    def __init__(self, picture):
+        size = image_size(picture)
+        self.width = size[0] if size else 1280
         self.text = None
         self.checked = 0
         self.failed = False
@@ -689,11 +708,23 @@ class LogoAddress:
             self.checked = time.time()
             text = address_text()
             if text != self.text:
-                if set_marquee(text):
+                if set_marquee(text, self.width):
                     self.text = text
                 else:
                     # VLC can't show it here: not tried again (it says why in the log once)
                     self.failed = True
+
+# whether the loop below passes over a file without playing it (it says why there)
+def would_skip(file, try_skipped):
+    if file in skipped and not try_skipped:
+        version, count = skipped[file]
+        if count >= SKIP_AFTER and version == file_version(file):
+            return True
+    if image_limit and file.lower().endswith(IMAGE_TYPES):
+        size = image_size(file)
+        if size and max(size) > image_limit:
+            return True
+    return False
 
 # *** run player ****
 
@@ -707,8 +738,8 @@ if boot_video != BOOT_VIDEO and entry and entry[1] >= SKIP_AFTER and entry[0] ==
 
 # start player twice to make sure it is working
 # seems weird but works
-# (boot_video_plays: 2 by default; fewer to test whether the first file still shows properly
-# after a cold start)
+# (boot_video_plays: once by default. Without the boot video, a Pi 3 B+ showed the first file
+# properly after a reboot and 4 cold starts, so the warm-up isn't needed there; 2 as before)
 settings = read_settings()
 boot_played = [vlc_play(boot_video) for _ in range(settings['boot_video_plays'])]
 # forgiven only when all played: it could stop the player on the second
@@ -717,8 +748,9 @@ if boot_played and all(result == "ended" for result in boot_played):
 
 # please do not remove my logo screen
 skip_requested = False
-logo_address = LogoAddress() if settings['show_address'] else None
-vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,) + IMAGE_OPTIONS, while_playing=logo_address)
+logo = LOGO if os.path.isfile(LOGO) else OLD_LOGO
+logo_address = LogoAddress(logo) if settings['show_address'] else None
+vlc_play(logo, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,) + IMAGE_OPTIONS, while_playing=logo_address)
 if logo_address and logo_address.text is not None:
     # once the logo has ended, VLC can't take the address off: it would stay on the next file.
     # Stopping VLC drops its picture, and the address with it (a black moment, only at start-up)
@@ -753,8 +785,20 @@ try:
             # from here on skips this file. (No signal in between, or it would be lost.)
             signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
             requested, requested_file = requested_file, None
+            back, previous_requested = previous_requested, 0
             skip_requested = False
             signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
+            if back and files:
+                # previous: back from the file that was playing (files[index - 1]; the last one
+                # at the start of a round), over the files this round skips, around the end
+                position = (index - 1) % len(files)
+                for _ in range(len(files)):
+                    position = (position - 1) % len(files)
+                    if not would_skip(files[position], try_skipped):
+                        back -= 1
+                        if not back:
+                            break
+                index = position
             if requested and requested not in files:
                 files = sorted(glob.glob(MEDIA_FILES))
             if requested in files:

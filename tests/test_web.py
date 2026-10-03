@@ -399,7 +399,8 @@ def test_loop_player(client, monkeypatch):
     open(system.PLAYER_SETTINGS_FILE, 'w').write('image_duration=7\n')
     monkeypatch.setattr(system.shutil, 'which', lambda name: None)
     r = client.get('/')
-    assert b'<option value="omxplayer" selected>' in r.data and b"isn't installed here" in r.data
+    assert b'<option value="omxplayer" selected>' in r.data
+    assert b'Add -loop to the end of the file name to loop or hold a clip. omxplayer is preferred for loops.' in r.data
     r = client.post('/set_loop_player', data={'loop_player': 'vlc'}, follow_redirects=True)
     assert b'played with VLC' in r.data and b'<option value="vlc" selected>' in r.data
     assert open(system.PLAYER_SETTINGS_FILE).read() == 'image_duration=7\nloop_player=vlc\n'
@@ -483,6 +484,44 @@ def test_play_chosen_file(pi, client, monkeypatch):
     write_status('playing', str(pi.media / 'a.mp4'))
     r = client.post('/player/play', data={'file': path}, headers={'X-Requested-With': 'fetch'})
     assert r.status_code == 409 and 'older version' in r.get_json()['error'] and sent == []
+
+
+
+def test_previous_file(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    monkeypatch.setattr(webservice.time, 'sleep', lambda s: None)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    fetch = {'X-Requested-With': 'fetch'}
+
+    def status(state='playing', **fields):
+        with open(system.PLAYER_STATUS_FILE, 'w') as f:
+            json.dump(dict({'state': state, 'file': '/media/internal/c.mp4', 'since': time.time(), 'pid': 4242,
+                            'play_file': True, 'rewind': True, 'previous': True}, **fields), f)
+
+    # the player works out which file (it knows its order and what it skips): the web interface
+    # sends the command
+    status()
+    assert client.get('/player/status').get_json()['previous'] is True
+    r = client.post('/player/previous', headers=fetch)
+    assert r.status_code == 200 and sent == [(4242, signal.SIGUSR1)]
+    request = json.load(open(system.PLAY_REQUEST_FILE))
+    assert request['command'] == 'previous' and request['id'] and 'file' not in request
+    assert b'Playing the previous file' in client.post('/player/previous', follow_redirects=True).data
+    # not during start-up, nor with nothing playing; an older player would take it for Next
+    sent.clear()
+    for fields, error in (({'previous': False}, "There's no previous file during start-up."),
+                          ({'state': 'idle'}, 'Nothing is playing.'),
+                          ({'state': 'sync'}, "This doesn't work in sync mode."),
+                          ({'previous': None}, 'older version')):
+        status(**fields)
+        r = client.post('/player/previous', headers=fetch)
+        assert r.status_code == 409 and error in r.get_json()['error']
+    assert sent == []
+    os.remove(system.PLAYER_STATUS_FILE)
+    assert b'The player is not running' in client.post('/player/previous', follow_redirects=True).data
+    html = client.get('/').data.decode()
+    assert 'id="previousButton"' in html and 'id="rewindButton"' in html
 
 
 def test_player_buttons_tell_the_page_why_not(client, monkeypatch):
@@ -934,8 +973,8 @@ def test_device_info(pi, client, tmp_path, monkeypatch):
 
 def test_start_up_settings(pi, client):
     html = client.get('/').data.decode()
-    assert '<option value="2" selected>Play twice (default)</option>' in html
-    assert '<option value="yes" selected>Show (default)</option>' in html
+    assert '<option value="1" selected>Play once (default)</option>' in html
+    assert '<option value="yes" selected>Show (default)</option>' in html and 'Show network address on boot' in html
     r = client.post('/set_boot_video_plays', data={'boot_video_plays': '0'}, follow_redirects=True)
     assert b"boot video won&#39;t play" in r.data
     assert b'will play once' in client.post('/set_boot_video_plays', data={'boot_video_plays': '1'}, follow_redirects=True).data
@@ -958,3 +997,11 @@ def test_start_up_settings(pi, client):
     with open(system.SCRIPT_FILE, 'w') as f:
         f.write('# edited\nimport vlc\n')
     assert 'edited before these' in client.get('/').data.decode()
+    # an edited player from when the boot video played twice by default: shown as it is
+    open(system.PLAYER_SETTINGS_FILE, 'w').write('image_duration=7\n')
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write("settings = {'boot_video_plays': 2, 'show_address': True}\n")
+    assert system.get_boot_video_plays() == 2
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write("settings = {'boot_video_plays': 1, 'show_address': True}\n")
+    assert system.get_boot_video_plays() == 1
