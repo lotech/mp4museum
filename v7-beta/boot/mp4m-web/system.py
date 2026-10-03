@@ -778,6 +778,11 @@ def get_disabled_files():
     except OSError:
         return set()
 
+def player_reads_disabled_files():
+    """Whether the player script leaves out switched-off files (one edited here before that
+    existed is kept by updates, and doesn't)."""
+    return 'mp4m-disabled.txt' in read_script_file()
+
 def update_disabled_files(add=(), remove=()):
     """Switch files off (add) or on again (remove), keeping the others."""
     with _disabled_lock:

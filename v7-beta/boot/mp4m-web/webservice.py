@@ -523,10 +523,14 @@ def delete_file():
             with system.writable(system.MEDIA_PATH):
                 os.remove(file_path)
             flash(f"File '{filename}' deleted successfully.", "success")
-            # a file of the same name added later is played
-            system.update_disabled_files(remove=[file_path])
         except Exception as e:
             flash(f"Failed to delete file: {e}", "error")
+            return redirect(url_for('index'))
+        # a file of the same name added later is played
+        try:
+            system.update_disabled_files(remove=[file_path])
+        except Exception as e:
+            flash(f"Couldn't take it off the list of switched-off files: {e}", "error")
     else:
         flash("File not found.", "error")
     return redirect(url_for('index'))
@@ -547,7 +551,17 @@ def switch_file():
         flash(f"Failed to save the setting: {e}", "error")
         return redirect(url_for('index'))
     name = os.path.basename(path)
-    flash(f"{name} is switched off: the player leaves it out." if off else f"{name} is switched on again.", "success")
+    status = system.get_player_status() or {}
+    if not system.player_reads_disabled_files():
+        flash(f"{name} is marked {'off' if off else 'on'}, but the player script on this Pi was edited before "
+              "switching files off existed, so it plays every file. Updates keep an edited script and save "
+              "the new one as /boot/mp4museum.py.new.", "warning")
+    elif off and status.get('file') == path and status.get('state') in ('playing', 'paused'):
+        # playing now (a loop would go on until next): the player moves on
+        system.signal_player(signal.SIGUSR1)
+        flash(f"{name} is switched off: the player moves on and leaves it out.", "success")
+    else:
+        flash(f"{name} is switched off: the player leaves it out." if off else f"{name} is switched on again.", "success")
     return redirect(url_for('index'))
 
 
@@ -896,12 +910,23 @@ UPDATED_PAGE = """<!doctype html>
         document.getElementById('rebootButtons').hidden = true;
         statusLine.innerHTML = '<span class="spinner"></span>Rebooting... This page goes back to the web interface when the player has started again.';
         fetch('{{ url_for('reboot_system') }}', {method: 'POST', headers: {'X-Requested-With': 'fetch'}})
+          .then(response => {
+            if (response.status === 401) {
+              // logged out (e.g. the password was changed): nothing was rebooted
+              stopWaiting = true;
+              statusLine.textContent = 'You have been logged out, so the player was not rebooted. Log in again and reboot it.';
+            }
+          })
           .catch(() => {});
         // give it time to go down, then wait for it to answer again
         setTimeout(waitForPlayer, 15000);
       }
+      let stopWaiting = false;
       function waitForPlayer() {
-        fetch('{{ url_for('version') }}', {cache: 'no-store'})
+        if (stopWaiting) {
+          return;
+        }
+        fetch('{{ url_for('version') }}', {cache: 'no-store', signal: AbortSignal.timeout(5000)})
           .then(response => { if (response.ok) { window.location = '{{ url_for('index') }}'; } else { throw 0; } })
           .catch(() => setTimeout(waitForPlayer, 2000));
       }

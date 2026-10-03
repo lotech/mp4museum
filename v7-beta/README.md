@@ -44,6 +44,8 @@ in alphabetical order, over and over.
 - **Switching files off:** the eye button next to a file in the playlist leaves it out without
   changing or moving it (also on USB sticks); press it again to switch it back on. The list is
   `/boot/mp4m-disabled.txt`. Renaming a switched-off file in the web interface keeps it off.
+  Switching off the file that is playing moves on to the next one. Files on USB sticks are
+  remembered by where the stick is mounted (`usb0` for the first one plugged in).
 - **Logo screen:** shows the player's address (`http://<name>.local` and its IP address) in the
   corner for its 10 seconds, so it's easy to find the web interface. It can be turned off in
   System → Start-up.

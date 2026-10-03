@@ -1038,3 +1038,42 @@ def test_switch_files_off_and_on(pi, client):
     # only files in the playlist
     r = client.post('/switch_file', data={'file': '/etc/passwd', 'off': '1'}, follow_redirects=True)
     assert b"t in the playlist" in r.data and system.get_disabled_files() == set()
+
+
+def test_switching_off_the_file_playing_moves_on(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    (pi.media / 'loop-a.mp4').write_bytes(b'x')
+    (pi.media / 'b.mp4').write_bytes(b'x')
+    a = str(pi.media / 'loop-a.mp4')
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': a, 'since': time.time(), 'pid': 4242, 'play_file': True}, f)
+    # (a loop would go on until next): the player is told to move on
+    r = client.post('/switch_file', data={'file': a, 'off': '1'}, follow_redirects=True)
+    assert b'the player moves on' in r.data and sent == [(4242, signal.SIGUSR1)]
+    # another file: nothing is sent
+    sent.clear()
+    client.post('/switch_file', data={'file': str(pi.media / 'b.mp4'), 'off': '1'})
+    assert sent == []
+
+
+def test_switching_off_with_an_edited_player_says_it_wont_work(pi, client):
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write('# edited before switching files off existed\n')
+    r = client.post('/switch_file', data={'file': str(pi.media / 'a.mp4'), 'off': '1'}, follow_redirects=True)
+    assert b'edited before switching files off existed' in r.data and b'plays every file' in r.data
+
+
+def test_disabled_list_from_windows_and_deleting(pi, client, monkeypatch):
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    a = str(pi.media / 'a.mp4')
+    (pi.boot / 'mp4m-disabled.txt').write_bytes(('%s\r\n' % a).encode())
+    assert system.get_disabled_files() == {a} and system.get_playlist()[0]['disabled']
+    # deleted, but the list can't be written: the delete still reported as done
+    def fails(**kwargs):
+        raise OSError('read-only')
+    monkeypatch.setattr(system, 'update_disabled_files', fails)
+    r = client.post('/delete', data={'filename': 'a.mp4'}, follow_redirects=True).data
+    assert b'deleted successfully' in r and b'Failed to delete' not in r and b"Couldn&#39;t take it off" in r

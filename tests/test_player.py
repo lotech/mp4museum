@@ -842,6 +842,9 @@ def test_switched_off_files_are_left_out(tmp_path):
     r = run(tmp_path, files=files, media={'a.mp4': 5, 'c.mp4': 100}, write=off,
             signals=[{'at': 40, 'command': 'previous'}], max_plays=6)
     assert plays(r)[3:6] == ['a.mp4', 'c.mp4', 'a.mp4']
+    # saved on Windows (text files are read with universal newlines)
+    r = run(tmp_path, files=files, write={'/boot/mp4m-disabled.txt': '/media/internal/b.mp4\r\n'}, max_plays=6)
+    assert plays(r)[3:6] == ['a.mp4', 'c.mp4', 'd.mp4']
     # all switched off: nothing to play, as with no files (no spinning through the list)
     r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-disabled.txt': '/media/internal/a.mp4\n'},
             max_seconds=60)

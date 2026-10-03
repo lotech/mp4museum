@@ -829,8 +829,8 @@ def read_disabled():
         return set()
 
 # whether the loop below passes over a file without playing it (it says why there)
-def would_skip(file, try_skipped):
-    if file in read_disabled():
+def would_skip(file, try_skipped, disabled):
+    if file in disabled:
         return True
     if file in skipped and not try_skipped:
         version, count = skipped[file]
@@ -909,13 +909,15 @@ try:
             back, previous_requested = previous_requested, 0
             skip_requested = False
             signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
+            # switched off in the web interface: read for every file, so a change applies straight away
+            disabled = read_disabled()
             if back and files:
                 # previous: back from the file that was playing (files[index - 1]; the last one
                 # at the start of a round), over the files this round skips, around the end
                 position = (index - 1) % len(files)
                 for _ in range(len(files)):
                     position = (position - 1) % len(files)
-                    if not would_skip(files[position], try_skipped):
+                    if not would_skip(files[position], try_skipped, disabled):
                         back -= 1
                         if not back:
                             break
@@ -932,8 +934,7 @@ try:
                 break
             file = files[index]
             index += 1
-            # switched off in the web interface (read for every file, so it applies straight away)
-            if file in read_disabled():
+            if file in disabled:
                 continue
             if file in skipped:
                 version, count = skipped[file]
