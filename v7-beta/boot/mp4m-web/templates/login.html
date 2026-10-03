@@ -1,17 +1,23 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}MP4Museum - Log in{% endblock %}
 {% block container_class %}login{% endblock %}
 
 {% block header %}
-<h1>MP4Museum</h1>
-<p class="hint">{{ hostname }}.local</p>
+<div class="brand">
+  <span class="brand-mark">{{ icon('square-play') }}</span>
+  <div>
+    <div class="brand-name">MP4Museum</div>
+    <div class="brand-host">{{ hostname }}.local</div>
+  </div>
+</div>
 {% endblock %}
 
 {% block content %}
-<form method="post" action="{{ url_for('login') }}" class="form-group">
+<form method="post" action="{{ url_for('login') }}">
   <label for="password">Password</label>
-  <input type="password" name="password" id="password" autofocus required>
-  <input type="submit" value="Log in" class="button">
+  <input type="password" name="password" id="password" autofocus required autocomplete="current-password">
+  <button type="submit" class="button primary">Log in</button>
 </form>
 <p class="hint">
   The default password is <code>mp4museum</code>.

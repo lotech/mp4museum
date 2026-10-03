@@ -30,7 +30,7 @@ class FakePi:
     def __init__(self, root):
         self.root = root
         self.boot = root / 'boot'
-        self.media = root / 'media'
+        self.media = root / 'media' / 'internal'
         self.commands = []
         self.hostnames = []
         self.read_only = True
@@ -52,7 +52,7 @@ class FakePi:
 def pi(tmp_path, monkeypatch):
     p = FakePi(tmp_path)
     p.boot.mkdir()
-    p.media.mkdir()
+    p.media.mkdir(parents=True)
     (tmp_path / 'locks').mkdir()
     shutil.copy(REPO / 'v7-beta' / 'boot' / 'config.txt', p.boot)
     shutil.copy(REPO / 'v7-beta' / 'boot' / 'mp4museum.py', p.boot)
@@ -67,6 +67,7 @@ def pi(tmp_path, monkeypatch):
         'HOSTNAME_FILE': p.path('hostname.txt'),
         'PLAYER_SETTINGS_FILE': p.path('mp4m-player.txt'),
         'PLAYER_STATUS_FILE': str(tmp_path / 'mp4museum-status.json'),
+        'PLAY_REQUEST_FILE': str(tmp_path / 'mp4museum-play.json'),
         'LOCK_DIR': str(tmp_path / 'locks'),
     }.items():
         monkeypatch.setattr(system, name, value)
@@ -82,6 +83,7 @@ def pi(tmp_path, monkeypatch):
     monkeypatch.setattr(updater, '_differs_from_local_copy', {})
 
     monkeypatch.setattr(webservice, 'RUNNING_VERSION', {})
+    monkeypatch.setattr(webservice, '_auto_check', {'time': None, 'ok': False, 'latest': None})
     monkeypatch.setattr(webservice.app, 'secret_key', 'test')
     monkeypatch.delenv('INVOCATION_ID', raising=False)
     webservice.app.config['TESTING'] = True

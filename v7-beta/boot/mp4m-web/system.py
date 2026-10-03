@@ -8,17 +8,20 @@ sound, network name and password storage. Kept separate from the Flask
 routes in webservice.py.
 """
 import fcntl
+import glob
 import hashlib
 import hmac
 import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -35,6 +38,8 @@ HOSTNAME_FILE = os.path.join(BOOT_PATH, "hostname.txt")
 # Player settings and status, shared with /boot/mp4museum.py
 PLAYER_SETTINGS_FILE = os.path.join(BOOT_PATH, "mp4m-player.txt")
 PLAYER_STATUS_FILE = "/tmp/mp4museum-status.json"
+# A file chosen in the web interface, read by the player when it gets SIGUSR1
+PLAY_REQUEST_FILE = "/tmp/mp4museum-play.json"
 DEFAULT_IMAGE_DURATION = 10
 
 DEFAULT_PASSWORD = 'mp4museum'
@@ -433,6 +438,51 @@ def get_player_status():
         return None
     return status
 
+VIDEO_TYPES = ('.mp4', '.m4v', '.mov', '.mkv', '.avi', '.ts', '.h264', '.mpg', '.mpeg', '.webm', '.wmv')
+IMAGE_TYPES = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff')
+AUDIO_TYPES = ('.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus')
+
+def media_kind(name):
+    """'video', 'image', 'audio' or 'other', from the extension."""
+    name = name.lower()
+    for kind, types in (('video', VIDEO_TYPES), ('image', IMAGE_TYPES), ('audio', AUDIO_TYPES)):
+        if name.endswith(types):
+            return kind
+    return 'other'
+
+def get_playlist():
+    """Every file the player plays, in its order (/media/*/*.*: the media partition and USB
+    sticks), and the media partition's other files, which it doesn't play (no extension)."""
+    media_root = os.path.dirname(MEDIA_PATH)
+    paths = set(glob.glob(os.path.join(media_root, '*', '*.*')))
+    try:
+        paths.update(os.path.join(MEDIA_PATH, name) for name in os.listdir(MEDIA_PATH) if not name.startswith('.'))
+    except OSError:
+        pass
+    entries = []
+    for path in sorted(paths):
+        if not os.path.isfile(path):
+            continue
+        name = os.path.basename(path)
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        entries.append({'path': path, 'name': name, 'folder': os.path.basename(os.path.dirname(path)),
+                        'internal': os.path.dirname(path) == MEDIA_PATH, 'kind': media_kind(name),
+                        'plays': '.' in name, 'loop': 'loop.' in path, 'size': size})
+    return entries
+
+def request_play(path):
+    """Ask the player to play this file now, then carry on from there. False if it isn't running."""
+    request = PLAY_REQUEST_FILE + '.tmp'
+    with open(request, 'w') as f:
+        json.dump({'id': uuid.uuid4().hex, 'file': path}, f)
+    # The player runs as pi, the web interface as root
+    os.chmod(request, 0o644)
+    os.replace(request, PLAY_REQUEST_FILE)
+    return signal_player(signal.SIGUSR1)
+
 def signal_player(signum):
     """Send the player a signal (SIGUSR1: next, SIGUSR2: pause/resume). False if it isn't running."""
     status = get_player_status()
@@ -443,6 +493,19 @@ def signal_player(signum):
         return True
     except OSError:
         return False
+
+def parse_sound_cards(aplay_output):
+    """[{'number': '0', 'name': 'bcm2835 Headphones', 'devices': [...]}] from the output of aplay -l."""
+    cards = []
+    for line in aplay_output.splitlines():
+        match = re.match(r'card (\d+): (\S+) \[(.*?)\], device (\d+): (.*?)(?: \[.*\])?$', line.strip())
+        if not match:
+            continue
+        number, short_name, name, device, device_name = match.groups()
+        if not cards or cards[-1]['number'] != number:
+            cards.append({'number': number, 'name': name or short_name, 'devices': []})
+        cards[-1]['devices'].append(f"device {device}: {device_name}")
+    return cards
 
 def get_current_sound_card():
     """Get the current sound card configuration."""

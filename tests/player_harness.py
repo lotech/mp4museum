@@ -16,11 +16,14 @@ log = []
 clock = {'now': 1000.0}
 
 def fire_signals():
-    # scripted events: send signals at given times
+    # scripted events: send signals at given times; {'play': path} chooses a file as the web interface does
     for event in scenario.get('signals', []):
         if not event.get('done') and clock['now'] - 1000 >= event['at']:
             event['done'] = True
-            os.kill(os.getpid(), getattr(signal, event['signal']))
+            if 'play' in event:
+                with open(paths['/tmp/mp4museum-play.json'], 'w') as f:
+                    json.dump({'id': 'request-%s' % event['at'], 'file': event['play']}, f)
+            os.kill(os.getpid(), getattr(signal, event.get('signal', 'SIGUSR1')))
 
 active_omx = []
 
@@ -52,6 +55,7 @@ class Player:
         if sum('play' in event for event in log) > scenario.get('max_plays', 50):
             raise SystemExit('play limit')
         self.started = clock['now']
+        self.paused_at, self.paused_total = None, 0
         behaviour = scenario.get('media', {}).get(os.path.basename(m.path), 5)
         self.state = {'error': _S.Error, 'stuck': _S.Opening}.get(behaviour, _S.Playing)
         self.length = behaviour if isinstance(behaviour, (int, float)) else 10 ** 9
@@ -71,7 +75,20 @@ class Player:
         self.state = _S.Stopped
     def pause(self):
         self.state = _S.Paused if self.state == _S.Playing else _S.Playing
+        if self.state == _S.Paused:
+            self.paused_at = clock['now']
+        elif self.paused_at is not None:
+            self.paused_total += clock['now'] - self.paused_at
+            self.paused_at = None
         log.append({'pause': self.state == _S.Paused})
+    def get_length(self):
+        # known once it is playing, as in VLC
+        playing = self.state in (_S.Playing, _S.Paused, _S.Ended)
+        return int(self.length * 1000) if playing and self.length < 10 ** 8 else 0
+    def get_time(self):
+        if self.media is None:
+            return -1
+        return int(((self.paused_at or clock['now']) - self.started - self.paused_total) * 1000)
 class Instance:
     def __init__(self, args):
         log.append({'instance': args})
@@ -159,7 +176,8 @@ shutil.which = lambda name: '/usr/bin/' + name if name in scenario.get('installe
 tmp = tempfile.mkdtemp()
 paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
          '/boot/alsa.txt': os.path.join(tmp, 'alsa.txt'), '/boot/mp4m-player.txt': os.path.join(tmp, 'mp4m-player.txt'),
-         '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json')}
+         '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json'),
+         '/tmp/mp4museum-play.json': os.path.join(tmp, 'play.json')}
 for real, fake in paths.items():
     if real in scenario.get('write', {}):
         open(fake, 'w').write(scenario['write'][real])

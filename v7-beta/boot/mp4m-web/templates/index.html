@@ -1,257 +1,343 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set kind_icons = {'video': 'film', 'image': 'image', 'audio': 'music', 'other': 'file'} %}
+{% set update_ready = update_available and update_available.commit != installed.commit %}
 
-{% block header %}
-<div class="page-header">
-  <h1>MP4Museum <span class="hint">{{ hostname }}.local</span></h1>
-  <form method="post" action="{{ url_for('logout') }}">
-    <button type="submit" class="link-button" title="Log out of the web interface">Log out</button>
+{% block topbar %}
+<div id="updateBar" class="update-bar" data-check-url="{{ url_for('check_update') }}" {% if not update_ready %}hidden{% endif %}>
+  {{ icon('cloud-download') }}
+  <span id="updateText" class="update-text">
+    {%- if update_ready %}Update available: <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}) {{ update_available.message }}{% endif -%}
+  </span>
+  <form method="post" action="{{ url_for('install_update') }}"
+        onsubmit="return confirm('Install the update? The web interface restarts afterwards.')">
+    <button type="submit" class="button small primary">Install update</button>
   </form>
+  <button type="button" class="icon-button" onclick="hideUpdateBar()" title="Hide until the page is opened again" aria-label="Hide">{{ icon('x') }}</button>
 </div>
 {% endblock %}
 
+{% block header %}
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">{{ icon('square-play') }}</span>
+    <div>
+      <div class="brand-name">MP4Museum</div>
+      <div class="brand-host">{{ hostname }}.local</div>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button type="button" class="button ghost" onclick="reboot(true)" title="Restart the player">{{ icon('power') }}<span>Reboot</span></button>
+    <form method="post" action="{{ url_for('logout') }}">
+      <button type="submit" class="button ghost" title="Log out of the web interface">{{ icon('log-out') }}<span>Log out</span></button>
+    </form>
+  </div>
+</header>
+{% endblock %}
+
 {% block content %}
-<div class="tabs">
-  <button class="tab active" data-tab="media" onclick="showTab('media')" title="Manage media files, upload, download, and delete content">Media</button>
-  <button class="tab" data-tab="sound" onclick="showTab('sound')" title="Configure audio output device and sound settings">Sound</button>
-  <button class="tab" data-tab="video" onclick="showTab('video')" title="Set display resolution and video output mode">Video</button>
-  <button class="tab" data-tab="script" onclick="showTab('script')" title="Edit the Python script for custom functionality">Script</button>
-  <button class="tab" data-tab="system" onclick="showTab('system')" title="Network name, password and network information">System</button>
+<nav class="tabs">
+  <button class="tab active" data-tab="media" onclick="showTab('media')">{{ icon('list-video') }}<span>Media</span></button>
+  <button class="tab" data-tab="sound" onclick="showTab('sound')">{{ icon('volume-2') }}<span>Sound</span></button>
+  <button class="tab" data-tab="video" onclick="showTab('video')">{{ icon('monitor') }}<span>Video</span></button>
+  <button class="tab" data-tab="script" onclick="showTab('script')">{{ icon('code') }}<span>Script</span></button>
+  <button class="tab" data-tab="system" onclick="showTab('system')">{{ icon('settings') }}<span>System</span></button>
+</nav>
+
+{# ----- Media ----- #}
+<div id="media" class="tab-content active">
+  <div class="media-layout">
+    <section class="card player-card state-{{ player.state or 'stopped' }}" id="player"
+             data-status-url="{{ url_for('player_status') }}">
+      <script id="playerData" type="application/json">{{ player|tojson }}</script>
+      <div class="screen">
+        <div class="screen-icon">{{ icon(kind_icons[player.kind] if player.kind else 'square-play', 'player-kind') }}</div>
+        <div class="screen-text">
+          <div class="screen-badges">
+            <span id="playerState" class="badge state">{{ player.state or 'stopped' }}</span>
+            <span id="playerLoop" class="badge" {% if not player.loop %}hidden{% endif %}>{{ icon('repeat') }}loop</span>
+            <span id="playerFolder" class="badge" {% if not player.folder %}hidden{% endif %}>{{ player.folder }}</span>
+          </div>
+          <div id="playerTitle" class="screen-title">{{ player.name if player.name and player.state in ('playing', 'paused', 'sync') else player.text }}</div>
+        </div>
+      </div>
+      <div class="progress-row">
+        <span id="playerTime" class="time"></span>
+        <div class="progress"><div id="playerProgress" class="progress-fill"></div></div>
+        <span id="playerLength" class="time"></span>
+      </div>
+      <div class="transport">
+        <form method="post" action="{{ url_for('player_pause') }}" class="js-player">
+          <button type="submit" id="pauseButton" class="round-button big" title="Pause or resume (same as the button on GPIO pin 11)" aria-label="Pause or resume">
+            <span class="when-playing">{{ icon('pause') }}</span><span class="when-paused">{{ icon('play') }}</span>
+          </button>
+        </form>
+        <form method="post" action="{{ url_for('player_next') }}" class="js-player">
+          <button type="submit" id="nextButton" class="round-button" title="Next file (same as the button on GPIO pin 13)" aria-label="Next file">{{ icon('skip-forward') }}</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="card playback-card">
+      <h3>{{ icon('settings') }}Playback</h3>
+      <div class="settings-grid">
+        <form method="post" action="{{ url_for('set_image_duration') }}" class="setting">
+          <label for="seconds">{{ icon('image') }}Show each image for</label>
+          <div class="input-row">
+            <div class="input-suffix">
+              <input type="number" name="seconds" id="seconds" min="1" max="86400" required value="{{ image_duration }}">
+              <span>seconds</span>
+            </div>
+            <button type="submit" class="button">Save</button>
+          </div>
+          <p class="hint">Applies from the next image.</p>
+        </form>
+        <form method="post" action="{{ url_for('set_loop_player') }}" class="setting">
+          <label for="loop_player">{{ icon('repeat') }}Play loop videos with</label>
+          <div class="input-row">
+            <select name="loop_player" id="loop_player">
+              <option value="omxplayer"{% if loop_player == 'omxplayer' %} selected{% endif %}>omxplayer (default)</option>
+              <option value="vlc"{% if loop_player == 'vlc' %} selected{% endif %}>VLC</option>
+            </select>
+            <button type="submit" class="button">Save</button>
+          </div>
+          <p class="hint">Files named like <code>intro-loop.mp4</code> repeat until Next.
+            {% if omxplayer_installed %}omxplayer holds the last frame at each loop; VLC shows a black frame.{% else %}omxplayer isn't installed here, so VLC is used.{% endif %}</p>
+        </form>
+      </div>
+    </section>
+
+    <section class="card playlist-card">
+      <div class="card-head">
+        <h3>{{ icon('list-video') }}Playlist <span class="count">{{ playlist|length }}</span></h3>
+        {% if is_available %}
+        <form id="uploadForm" method="post" action="{{ url_for('upload_file') }}" enctype="multipart/form-data"
+              data-free-space="{{ free_space }}" data-free-space-text="{{ free_space_text }}">
+          <input type="file" name="file" id="uploadInput" multiple class="visually-hidden" onchange="uploadFiles(this)"
+                 aria-label="Choose files to upload">
+          <button type="button" class="button primary small" onclick="document.getElementById('uploadInput').click()"
+                  title="Add files to the media partition">{{ icon('upload') }}<span>Upload</span></button>
+        </form>
+        {% endif %}
+      </div>
+      {% if is_available %}
+      <p class="hint">{{ free_space_text }} free. Files play in this order: the media partition, then USB sticks.</p>
+      {% else %}
+      <div class="info-box">The media partition {{ media_path }} is not mounted, so files can't be uploaded.</div>
+      {% endif %}
+      <div id="uploadProgress" class="upload-progress" hidden>
+        <div class="upload-label"><span id="uploadName"></span><span id="uploadPercent"></span></div>
+        <div class="progress"><div id="uploadBar" class="progress-fill"></div></div>
+      </div>
+
+      <ul class="playlist" id="playlist">
+        {% for entry in playlist %}
+        <li class="playlist-item{% if not entry.plays %} not-played{% endif %}" data-path="{{ entry.path }}">
+          <form method="post" action="{{ url_for('player_play') }}" class="js-player">
+            <input type="hidden" name="file" value="{{ entry.path }}">
+            <button type="submit" class="item-play" {% if entry.plays %}title="Play this file now"{% else %}disabled title="Not played: the name has no extension"{% endif %}
+                    aria-label="Play {{ entry.name }}">
+              <span class="item-index">{{ loop.index }}</span>{{ icon('play', 'item-play-icon') }}
+            </button>
+          </form>
+          <div class="item-main">
+            <div class="item-name" title="{{ entry.name }}">{{ entry.name }}</div>
+            <div class="item-meta">
+              {{ icon(kind_icons[entry.kind]) }}<span>{{ entry.size|size }}</span>
+              {% if not entry.internal %}<span class="badge">{{ icon('usb') }}{{ entry.folder }}</span>{% endif %}
+              {% if entry.loop %}<span class="badge">{{ icon('repeat') }}loop</span>{% endif %}
+              {% if not entry.plays %}<span class="badge muted">not played: no extension</span>{% endif %}
+            </div>
+          </div>
+          <div class="item-actions">
+            {% if entry.internal %}
+            <a class="icon-button" href="{{ url_for('download_file', filename=entry.name) }}" title="Download" aria-label="Download {{ entry.name }}">{{ icon('download') }}</a>
+            <form method="post" action="{{ url_for('delete_file') }}" onsubmit="return confirm('Delete ' + this.filename.value + '?')">
+              <input type="hidden" name="filename" value="{{ entry.name }}">
+              <button type="submit" class="icon-button danger" title="Delete" aria-label="Delete {{ entry.name }}">{{ icon('trash-2') }}</button>
+            </form>
+            {% endif %}
+          </div>
+        </li>
+        {% else %}
+        <li class="empty">No files yet. Upload some, or plug in a USB stick.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
 </div>
 
-<div id="media" class="tab-content active">
-  <div class="form-group">
-    <h3>Now Playing</h3>
-    <p id="nowPlayingText" data-status-url="{{ url_for('player_status') }}">{{ now_playing }}</p>
-    <div class="button-row">
-      <form method="post" action="{{ url_for('player_pause') }}">
-        <input type="submit" value="Pause / Resume" class="button" title="Same as the pause button on GPIO pin 11">
+{# ----- Sound ----- #}
+<div id="sound" class="tab-content">
+  <div class="grid-2">
+    <section class="card">
+      <h3>{{ icon('volume-2') }}Sound output</h3>
+      <p class="current">
+        {% if current_sound_card == 'auto' %}Automatic: the player uses card 0.
+        {% else %}Card <strong>{{ current_sound_card }}</strong>{% for card in sound_cards if card.number == current_sound_card %}: {{ card.name }}{% endfor %}
+        {% endif %}
+      </p>
+      <form method="post" action="{{ url_for('set_sound_device') }}" class="setting" onsubmit="return validateSoundDevice()">
+        <label for="device">Card number</label>
+        <div class="input-row">
+          <input type="text" name="device" id="device" required inputmode="numeric" class="narrow"
+                 value="{{ '' if current_sound_card == 'auto' else current_sound_card }}" placeholder="0">
+          <button type="submit" class="button">Set card</button>
+          {% if current_sound_card != "auto" %}
+          <button type="submit" class="button ghost" formaction="{{ url_for('set_auto_sound') }}" formnovalidate>Automatic</button>
+          {% endif %}
+        </div>
+        <div id="deviceError" class="field-error"></div>
       </form>
-      <form method="post" action="{{ url_for('player_next') }}">
-        <input type="submit" value="Next" class="button" title="Same as the next button on GPIO pin 13">
-      </form>
-    </div>
+      <p class="hint">Card numbers 10 and above need the player script from this version or later; an edited
+        player from before may only read the first digit.</p>
+    </section>
+
+    <section class="card">
+      <h3>{{ icon('speaker') }}Sound cards on this player</h3>
+      <ul class="choice-list">
+        {% for card in sound_cards %}
+        <li{% if card.number == current_sound_card %} class="current"{% endif %}>
+          <div>
+            <div><strong>Card {{ card.number }}</strong> {{ card.name }}</div>
+            <div class="hint">{{ card.devices|join(', ') }}</div>
+          </div>
+          {% if card.number == current_sound_card %}
+          <span class="badge on">{{ icon('circle-check') }}in use</span>
+          {% else %}
+          <form method="post" action="{{ url_for('set_sound_device') }}">
+            <input type="hidden" name="device" value="{{ card.number }}">
+            <button type="submit" class="button small">Use</button>
+          </form>
+          {% endif %}
+        </li>
+        {% else %}
+        <li class="empty">No sound cards found.</li>
+        {% endfor %}
+      </ul>
+      <details>
+        <summary>Full list (<code>aplay -l</code>)</summary>
+        <pre>{{ sound_devices_text }}</pre>
+      </details>
+    </section>
   </div>
+</div>
 
-  <h2>Files in {{ media_path }}</h2>
+{# ----- Video ----- #}
+<div id="video" class="tab-content">
+  <div class="grid-2">
+    <section class="card">
+      <h3>{{ icon('monitor') }}Video mode</h3>
+      <p class="current">Now: <strong>{{ current_mode }}</strong></p>
+      <form method="post" action="{{ url_for('set_video_mode') }}" class="setting">
+        <label for="mode">Change to</label>
+        <div class="input-row">
+          <select name="mode" id="mode" required>
+            {% if not current_mode_key %}
+            <option value="" selected disabled>Custom (current settings)</option>
+            {% endif %}
+            {% for key, mode in video_modes.items() %}
+            <option value="{{ key }}" {% if key == current_mode_key %}selected{% endif %}>{{ mode.description }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="button">Apply</button>
+        </div>
+      </form>
+      <p class="hint">Needs a reboot. Only the video lines in /boot/config.txt are changed, your other settings are kept.
+        NTSC and PAL use the composite (3.5mm AV) output, which is only active when no HDMI display is connected.</p>
+    </section>
 
-  {% if is_available %}
-  <div class="form-group">
-    <h3>Upload File</h3>
-    <form method="post" action="{{ url_for('upload_file') }}" enctype="multipart/form-data" class="upload-form"
-          data-free-space="{{ free_space }}" data-free-space-text="{{ free_space_text }}" onsubmit="return checkUploadSize(this)">
-      <input type="file" name="file" required title="Select a file from your computer to upload (supported formats: MP4, MP3, WAV, etc.)">
-      <input type="submit" value="Upload" class="button" title="Upload the selected file to the media directory">
+    <section class="card">
+      <h3>{{ icon('info') }}Display</h3>
+      <pre>{{ display_info }}</pre>
+    </section>
+  </div>
+</div>
+
+{# ----- Script ----- #}
+<div id="script" class="tab-content">
+  <section class="card">
+    <div class="card-head">
+      <h3>{{ icon('code') }}Player script <span class="hint">{{ script_file }}</span></h3>
+      <div class="button-row">
+        <button type="button" class="button ghost" onclick="loadScript()" title="Discard unsaved changes and reload from disk">{{ icon('rotate-ccw') }}<span>Discard</span></button>
+        <button type="submit" form="scriptForm" class="button">{{ icon('save') }}<span>Save</span></button>
+        <button type="button" class="button primary" onclick="saveAndReboot()">{{ icon('power') }}<span>Save and reboot</span></button>
+      </div>
+    </div>
+    <form method="post" action="{{ url_for('save_script') }}" id="scriptForm">
+      <label for="script_content" class="visually-hidden">Player script</label>
+      <textarea name="script_content" id="script_content" class="script-editor" rows="24" spellcheck="false">{{ script_content }}</textarea>
     </form>
-    <p class="hint">{{ free_space_text }} free. Files play in alphabetical order.</p>
-  </div>
-  {% else %}
-  <div class="form-group">
-    <h3>Upload File</h3>
-    <div class="info-box" title="The media partition is missing">
-      The media partition {{ media_path }} is not mounted, so files can't be uploaded.
-    </div>
-  </div>
-  {% endif %}
+    <p class="hint">The Python script that plays the media. Changes take effect after a reboot.
+      Software updates keep an edited script and save the new one next to it as mp4museum.py.new.</p>
+  </section>
+</div>
 
-  <ul class="file-list">
-    {% for file in files %}
-      <li>
-        <span>{{ file }}</span>
-        <div class="file-actions">
-          <a href="{{ url_for('download_file', filename=file) }}" title="Download this file to your computer">Download</a>
-          <form method="post" action="{{ url_for('delete_file') }}" onsubmit="return confirm('Are you sure you want to delete ' + this.filename.value + '?')">
-            <input type="hidden" name="filename" value="{{ file }}">
-            <button type="submit" class="link-button" title="Permanently delete this file">Delete</button>
+{# ----- System ----- #}
+<div id="system" class="tab-content">
+  <div class="grid-2">
+    <div class="stack">
+      <section class="card">
+        <h3>{{ icon('tag') }}Network name</h3>
+        <p class="current">This player is at <strong>http://{{ hostname }}.local</strong></p>
+        <form method="post" action="{{ url_for('set_hostname') }}" class="setting"
+              onsubmit="return confirm('Change the network name? The page will move to the new address.')">
+          <label for="hostname">New name</label>
+          <div class="input-row">
+            <input type="text" name="hostname" id="hostname" value="{{ hostname }}" maxlength="63"
+                   pattern="[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?" title="Letters, numbers and hyphens, not starting or ending with a hyphen">
+            <button type="submit" class="button">Change</button>
+          </div>
+        </form>
+        <p class="hint">Letters, numbers and -. Give each player on the same network a different name; leave it empty to go back to the default.
+          {% if hostname_is_default %}This is the default name, made from the Pi's serial number.{% endif %}</p>
+      </section>
+
+      <section class="card">
+        <h3>{{ icon('cloud-download') }}Software update</h3>
+        <p class="current">Installed: <strong>{% if installed.commit == 'local' %}local copy{% else %}{{ (installed.commit or 'unknown')[:7] }}{% endif %}</strong>{% if installed.date %} ({{ installed.date[:10] }}{% if installed.branch %}, branch {{ installed.branch }}{% endif %}){% endif %}</p>
+        {% if update_ready %}
+        <p>New version <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}): {{ update_available.message }}</p>
+        {% endif %}
+        <div class="button-row">
+          {% if update_ready %}
+          <form method="post" action="{{ url_for('install_update') }}"
+                onsubmit="return confirm('Install the update? The web interface restarts afterwards.')">
+            <button type="submit" class="button primary">{{ icon('download') }}<span>Install Update</span></button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('check_update') }}">
+            <button type="submit" class="button">{{ icon('refresh-cw') }}<span>Check for Updates</span></button>
           </form>
         </div>
-      </li>
-    {% endfor %}
-  </ul>
-
-  <div class="form-group">
-    <h3>Images</h3>
-    <form method="post" action="{{ url_for('set_image_duration') }}" class="video-form">
-      <div>
-        <label for="seconds">Show each image for (seconds):</label>
-        <input type="number" name="seconds" id="seconds" min="1" max="86400" required value="{{ image_duration }}">
-      </div>
-      <input type="submit" value="Save" class="button">
-    </form>
-    <p class="hint">Applies from the next image.</p>
-  </div>
-
-  <div class="form-group">
-    <h3>Loop videos</h3>
-    <form method="post" action="{{ url_for('set_loop_player') }}" class="video-form">
-      <div>
-        <label for="loop_player">Play loop videos with:</label>
-        <select name="loop_player" id="loop_player">
-          <option value="omxplayer"{% if loop_player == 'omxplayer' %} selected{% endif %}>omxplayer (default)</option>
-          <option value="vlc"{% if loop_player == 'vlc' %} selected{% endif %}>VLC</option>
-        </select>
-      </div>
-      <input type="submit" value="Save" class="button">
-    </form>
-    <p class="hint">Videos with "loop" before the extension (e.g. <code>intro-loop.mp4</code>) repeat until Next is pressed.
-      omxplayer holds the last frame with a short pause at each loop; VLC shows a black frame.
-      omxplayer is no longer developed and isn't on newer Raspberry Pi OS versions.{% if not omxplayer_installed %} It is not installed on this player, so VLC is used.{% endif %}
-      Applies from the next loop video.</p>
-  </div>
-
-  <div class="form-group">
-    <button class="button" onclick="reboot(true)" title="Restart the system to apply all changes">Reboot System</button>
-  </div>
-</div>
-
-<div id="sound" class="tab-content">
-  <h2>Sound Device</h2>
-
-  <div class="form-group">
-    <h3>Select Sound Device</h3>
-    <form method="post" action="{{ url_for('set_sound_device') }}" class="sound-form" onsubmit="return validateSoundDevice()">
-      <div>
-        <label for="device" title="Enter the card number from the list below">Card Number:</label>
-        <input type="text" name="device" id="device" required title="Enter the number shown in 'card X' in the list below"
-               value="{{ current_sound_card }}"
-               onfocus="if(this.value === 'auto') this.value = '';"
-               onblur="if(this.value === '') this.value = 'auto';">
-        <div id="deviceError" class="field-error"></div>
-      </div>
-      <input type="submit" value="Set Card" class="button" title="Set this card as the default audio output">
-      {% if current_sound_card != "auto" %}
-      <button type="submit" class="button" formaction="{{ url_for('set_auto_sound') }}" formnovalidate onclick="document.getElementById('device').value = 'auto'" title="Enable automatic sound device selection">Auto Mode</button>
-      {% endif %}
-    </form>
-  </div>
-
-  <p class="hint">Card numbers 10 and above need the player script from this version or later; an edited
-    player from before may only read the first digit.</p>
-
-  <div class="form-group">
-    <h3>Available Sound Devices</h3>
-    <pre title="List of all sound devices connected to the system. Use the card number from this list to set the audio output.">{{ sound_devices_text }}</pre>
-  </div>
-</div>
-
-<div id="video" class="tab-content">
-  <h2>Video Mode</h2>
-
-  <div class="form-group">
-    <h3>Display Information</h3>
-    <pre title="Current display configuration and status information">{{ display_info }}</pre>
-  </div>
-
-  <div class="form-group">
-    <h3>Current Video Mode: <span title="The currently active display resolution and refresh rate">{{ current_mode }}</span></h3>
-  </div>
-
-  <div class="form-group">
-    <h3>Select Video Mode</h3>
-    <form method="post" action="{{ url_for('set_video_mode') }}" class="video-form">
-      <div>
-        <label for="mode" title="Choose the display resolution and refresh rate">Video Mode:</label>
-        <select name="mode" id="mode" required title="Select the desired video output mode. Changes require a system reboot to take effect.">
-          {% if not current_mode_key %}
-          <option value="" selected disabled>Custom (current settings)</option>
-          {% endif %}
-          {% for key, mode in video_modes.items() %}
-          <option value="{{ key }}" {% if key == current_mode_key %}selected{% endif %}>{{ mode.description }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <input type="submit" value="Apply Video Mode" class="button" title="Apply the selected video mode (requires system reboot)">
-    </form>
-    <p class="hint">Only the video lines in /boot/config.txt are changed, your other settings are kept.
-      NTSC and PAL use the composite (3.5mm AV) output, which is only active when no HDMI display is connected.</p>
-  </div>
-</div>
-
-<div id="script" class="tab-content">
-  <h2>Python Script Editor</h2>
-
-  <div class="form-group">
-    <h3>Edit MP4Museum Script</h3>
-    <form method="post" action="{{ url_for('save_script') }}" id="scriptForm" class="script-form">
-      <label for="script_content" class="visually-hidden">Script Content:</label>
-      <textarea name="script_content" id="script_content" class="script-editor" rows="20" cols="80"
-                title="Edit the Python script. This file is located at {{ script_file }}">{{ script_content }}</textarea>
-      <div class="script-actions">
-        <input type="submit" value="Save Script" class="button" title="Save the script to {{ script_file }}">
-        <button type="button" class="button" onclick="loadScript()" title="Discard unsaved changes and reload from disk">Discard Changes</button>
-        <button type="button" class="button" onclick="saveAndReboot()" title="Save the script and reboot the system">Save and Reboot</button>
-      </div>
-    </form>
-  </div>
-
-  <div class="form-group">
-    <h3>Script Information</h3>
-    <div class="info-box">
-      <strong>File:</strong> {{ script_file }}<br>
-      <strong>What it does:</strong> This is your custom Python script for adding extra features to your MP4Museum system.<br>
-      <strong>Important:</strong> Changes are saved only when you click "Save Script" or "Save and Reboot". You need to reboot the player for the changes to take effect.
+        <p class="hint">From {{ update_config.repo }}, branch {{ update_config.branch }}; needs an internet connection
+          (this page checks by itself every few hours when it can). Updates the web interface, and the player script unless
+          it has been edited here. Over SSH: <code>sudo mp4m-update</code></p>
+      </section>
     </div>
-  </div>
-</div>
 
-<div id="system" class="tab-content">
-  <h2>System</h2>
-
-  <div class="form-group">
-    <h3>Network Name</h3>
-    <p class="hint">This player is at <strong>http://{{ hostname }}.local</strong>.
-      Give each player on the same network a different name.
-      {% if hostname_is_default %}This is the default name, made from the Pi's serial number.{% endif %}</p>
-    <form method="post" action="{{ url_for('set_hostname') }}" class="stacked-form"
-          onsubmit="return confirm('Change the network name? The page will move to the new address.')">
-      <label for="hostname">New name (letters, numbers and -). Leave empty to go back to the default.</label>
-      <input type="text" name="hostname" id="hostname" value="{{ hostname }}" maxlength="63"
-             pattern="[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?" title="Letters, numbers and hyphens, not starting or ending with a hyphen">
-      <input type="submit" value="Change Name" class="button">
-    </form>
-  </div>
-
-  <div class="form-group">
-    <h3>Password</h3>
-    {% if using_default_password %}
-    <p class="hint">The password is still the default (mp4museum).</p>
-    {% endif %}
-    <form method="post" action="{{ url_for('set_password') }}" class="stacked-form">
-      <label for="current_password">Current password</label>
-      <input type="password" name="current_password" id="current_password" required>
-      <label for="new_password">New password</label>
-      <input type="password" name="new_password" id="new_password" required>
-      <label for="confirm_password">New password again</label>
-      <input type="password" name="confirm_password" id="confirm_password" required>
-      <input type="submit" value="Change Password" class="button">
-    </form>
-    <p class="hint">Forgot it? Delete mp4m-password.txt from the SD card's boot partition to reset it to the default.</p>
-  </div>
-
-  <div class="form-group">
-    <h3>Software Update</h3>
-    <p class="hint">Installed version: <strong>{% if installed.commit == 'local' %}local copy{% else %}{{ (installed.commit or 'unknown')[:7] }}{% endif %}</strong>{% if installed.date %} ({{ installed.date[:10] }}{% if installed.branch %}, branch {{ installed.branch }}{% endif %}){% endif %},
-      updates from {{ update_config.repo }}, branch {{ update_config.branch }}.</p>
-    {% if update_available and update_available.commit != installed.commit %}
-    <p>New version <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}): {{ update_available.message }}</p>
-    {% endif %}
-    <div class="button-row">
-      {% if update_available and update_available.commit != installed.commit %}
-      <form method="post" action="{{ url_for('install_update') }}"
-            onsubmit="return confirm('Install the update? The web interface restarts afterwards.')">
-        <input type="submit" value="Install Update" class="button">
-      </form>
+    <section class="card">
+      <h3>{{ icon('key-round') }}Password</h3>
+      {% if using_default_password %}
+      <p class="current">The password is still the default (mp4museum).</p>
       {% endif %}
-      <form method="post" action="{{ url_for('check_update') }}">
-        <input type="submit" value="Check for Updates" class="button">
+      <form method="post" action="{{ url_for('set_password') }}" class="password-form">
+        <label for="current_password">Current password</label>
+        <input type="password" name="current_password" id="current_password" required autocomplete="current-password">
+        <label for="new_password">New password</label>
+        <input type="password" name="new_password" id="new_password" required autocomplete="new-password">
+        <label for="confirm_password">New password again</label>
+        <input type="password" name="confirm_password" id="confirm_password" required autocomplete="new-password">
+        <div><button type="submit" class="button">Change password</button></div>
       </form>
-    </div>
-    <p class="hint">Needs an internet connection. Updates the web interface, and the player script unless
-      it has been edited here (then the new one is saved as mp4museum.py.new). Over SSH: <code>sudo mp4m-update</code></p>
-  </div>
+      <p class="hint">Forgot it? Delete mp4m-password.txt from the SD card's boot partition to reset it to the default.</p>
+    </section>
 
-  <div class="form-group">
-    <h3>Network</h3>
-    <pre title="Network interfaces, MAC and IP addresses">{{ network_status }}</pre>
   </div>
+  <section class="card network-card">
+    <h3>{{ icon('network') }}Network</h3>
+    <pre>{{ network_status }}</pre>
+  </section>
 </div>
 {% endblock %}

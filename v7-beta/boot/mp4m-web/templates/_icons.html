@@ -1,0 +1,5 @@
+{# Added 2026 in https://github.com/lotech/mp4museum; licensed under the GNU GPL v3, see LICENSE.
+   Lucide icons (https://lucide.dev, ISC licence) from static/icons.svg, so nothing is loaded from the internet #}
+{% macro icon(name, class='') -%}
+<svg class="icon {{ class }}" aria-hidden="true" focusable="false"><use href="{{ url_for('static', filename='icons.svg') }}#{{ name }}"></use></svg>
+{%- endmacro %}

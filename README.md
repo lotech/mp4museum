@@ -25,6 +25,9 @@ This fork copies the v7 beta files off a running install and develops them furth
   card, and file names are checked.
 - **Login** with a password (default `mp4museum`), changeable in the web interface.
 - **A network name per player** (`mp4museum-xxxx.local`), so several players can share a network.
+- **A new web interface design:** a player with Pause/Resume and Next and how far the file has
+  got, a playlist to start any file from, uploads with progress, messages that don't push the
+  page around, and an update bar when a new version is available.
 - **Player:** shows what is playing in the web interface with Pause/Resume and Next buttons,
   has a setting for how long images are shown, brings back sync mode from version 6, uses one
   VLC instance for everything, and no longer uses a full CPU core while there is nothing to play.
@@ -79,3 +82,5 @@ unchanged from the original repository.
   The v7 player script is based on the GPL version 6 player. The v7 web interface
   (now `v7-beta/boot/mp4m-web/`) was not published with a license of its own; it is
   included here as part of the GPL-licensed MP4MUSEUM project.
+- The web interface's icons are from [Lucide](https://lucide.dev), under the ISC licence
+  (in `v7-beta/boot/mp4m-web/static/icons.svg`).

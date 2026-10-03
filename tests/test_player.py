@@ -222,3 +222,41 @@ def test_loop_images_stay_in_vlc(tmp_path):
     r = run(tmp_path, files=['/media/internal/still-loop.jpg'], installed=['omxplayer'],
             write={'/boot/mp4m-player.txt': 'loop_player=omxplayer\nimage_duration=3\n'}, max_plays=6)
     assert omx_starts(r) == [] and plays(r)[3:5] == ['still-loop.jpg'] * 2
+
+
+# ----- Web interface: choosing a file, position ----- #
+def test_play_file_chosen_in_web_interface(tmp_path):
+    files = ['/media/internal/a.mp4', '/media/internal/b.mp4', '/media/internal/c.mp4', '/media/usb0/d.mp4']
+    # chosen while a.mp4 plays: c.mp4 plays straight away, then the files after it
+    r = run(tmp_path, files=files, signals=[{'at': 21, 'play': '/media/internal/c.mp4'}], max_plays=8)
+    assert plays(r)[3:8] == ['a.mp4', 'c.mp4', 'd.mp4', 'a.mp4', 'b.mp4']
+    assert 21 <= first_play(r, 'c.mp4')['at'] <= 22
+
+
+def test_play_file_ends_a_loop(tmp_path):
+    files = ['/media/internal/a-loop.mp4', '/media/internal/b.mp4', '/media/internal/c.mp4']
+    for options in ({}, {'installed': ['omxplayer']}):
+        r = run(tmp_path, files=files, signals=[{'at': 40, 'play': '/media/internal/c.mp4'}], max_plays=7, **options)
+        assert 40 <= first_play(r, 'c.mp4')['at'] <= 41 and 'b.mp4' not in plays(r)[:-1]
+
+
+def test_play_request_ignored_if_old_or_unknown(tmp_path):
+    files = ['/media/internal/a.mp4', '/media/internal/b.mp4', '/media/internal/c.mp4']
+    # left from before the player started
+    r = run(tmp_path, files=files, write={'/tmp/mp4museum-play.json': '{"id": "old", "file": "/media/internal/c.mp4"}'},
+            signals=[{'at': 21, 'signal': 'SIGUSR1'}], max_plays=6)
+    assert plays(r)[3:6] == ['a.mp4', 'b.mp4', 'c.mp4']
+    # not a file the player plays: next is pressed and the playlist carries on
+    r = run(tmp_path, files=files, signals=[{'at': 21, 'play': '/etc/passwd'}], max_plays=6)
+    assert plays(r)[3:6] == ['a.mp4', 'b.mp4', 'c.mp4'] and 21 <= first_play(r, 'b.mp4')['at'] <= 22
+
+
+def test_status_has_position_and_length(tmp_path):
+    r = run(tmp_path, files=['/media/internal/a.mp4'], media={'a.mp4': 30},
+            signals=[{'at': 30, 'signal': 'SIGUSR2'}, {'at': 35, 'signal': 'SIGUSR2'}], max_plays=4)
+    statuses = [s for s in r['statuses'] if s['file'] == '/media/internal/a.mp4']
+    assert statuses[0]['position'] == 0 and statuses[0]['length'] is None and statuses[0]['play_file'] is True
+    assert statuses[1]['state'] == 'playing' and statuses[1]['length'] == 30 and statuses[1]['position'] < 2
+    paused = [s for s in statuses if s['state'] == 'paused'][0]
+    resumed = statuses[statuses.index(paused) + 1]
+    assert 9 <= paused['position'] <= 11 and abs(resumed['position'] - paused['position']) < .1

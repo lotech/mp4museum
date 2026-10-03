@@ -419,3 +419,36 @@ def test_cli_unexpected_error_is_explained(cli, github, monkeypatch):
     monkeypatch.setattr(updater, 'update', failing_update)
     code, out = cli(['--yes'])
     assert 'stopped part way: mount failed' in str(code)
+
+
+def test_page_checks_for_updates_by_itself(pi, client, github):
+    updater.update()
+    webservice.RUNNING_VERSION = installed()
+    fetch = {'X-Requested-With': 'fetch'}
+    assert client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json() == {'update': None}
+    github.release('bbb1111', '2026-10-04T00:00:00Z', 'Even newer')
+    github.api_calls = 0
+    # asked again within a few hours: GitHub isn't
+    assert client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json() == {'update': None}
+    assert github.api_calls == 0
+    webservice._auto_check['time'] -= webservice.AUTO_CHECK_INTERVAL
+    r = client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json()
+    assert r == {'update': {'commit': 'bbb1111', 'date': '2026-10-04', 'message': 'Even newer'}}
+    assert github.api_calls == 1
+    # the bar's Install button works with what the check found
+    assert b'Update available' in client.get('/').data
+    r = client.post('/install_update')
+    assert b'Update installed' in r.data and github.api_calls == 1
+
+
+def test_page_check_is_quiet_offline(client, monkeypatch):
+    calls = []
+    def offline(repo, ref):
+        calls.append(repo)
+        raise updater.UpdateError("Couldn't reach GitHub")
+    monkeypatch.setattr(updater, 'latest_commit', offline)
+    fetch = {'X-Requested-With': 'fetch'}
+    for _ in range(3):
+        assert client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json() == {'update': None}
+    assert len(calls) == 1          # tried again after an hour, not on every page
+    assert b'reach GitHub' not in client.get('/').data
