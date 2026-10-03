@@ -20,7 +20,7 @@
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% for category, msg in messages %}
           <div class="toast {{ category }}" role="status">
-            {{ icon('circle-alert' if category == 'error' else 'circle-check', 'toast-icon') }}
+            {{ icon({'error': 'circle-alert', 'warning': 'triangle-alert'}.get(category, 'circle-check'), 'toast-icon') }}
             <span>{{ msg }}</span>
             <button type="button" class="toast-close" title="Close" aria-label="Close">{{ icon('x') }}</button>
           </div>
@@ -41,7 +41,7 @@
 
     <div id="rebootScreen" class="reboot-screen">
       <div class="reboot-message">
-        {{ icon('power', 'reboot-icon') }}
+        {{ icon('loader-circle', 'reboot-icon') }}
         <h2>The player is restarting</h2>
         <p>This page reloads when it is back, in about a minute.</p>
       </div>

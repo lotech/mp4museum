@@ -157,6 +157,7 @@ def index():
 
     return render_template('index.html',
                            playlist=system.get_playlist(),
+                           player_log=system.read_player_log(),
                            player=player_view(system.get_player_status()),
                            media_path=system.MEDIA_PATH,
                            is_available=is_available,
@@ -186,8 +187,10 @@ def index():
 def describe_player_status(status):
     """One line for the web interface, e.g. 'Playing intro.mp4 (internal) for 2 min'."""
     if not status:
-        return "The player is not running."
+        return "The player is not running. If it doesn't start again by itself within a minute, reboot."
     state = status.get('state')
+    if state == 'stopped':
+        return "The player is stopping."
     if state == 'idle':
         return "Nothing to play: add files below or plug in a USB stick."
     path = status.get('file') or ''
@@ -206,11 +209,12 @@ def player_view(status):
     browser doesn't depend on the Pi's clock (which may be wrong without a network)."""
     view = {'running': bool(status), 'state': None, 'text': describe_player_status(status), 'file': None,
             'name': None, 'folder': None, 'kind': None, 'loop': False, 'position': None, 'length': None,
-            'play_file': False}
+            'play_file': False, 'rewind': False}
     if not status:
         return view
     path = status.get('file') or None
     view.update(state=status.get('state'), file=path, play_file=status.get('play_file') is True,
+                rewind=status.get('rewind') is True,
                 name=os.path.basename(path) if path else None,
                 folder=os.path.basename(os.path.dirname(path)) if path else None,
                 kind=system.media_kind(path) if path else None, loop='loop.' in (path or ''))
@@ -305,6 +309,35 @@ def player_play():
         flash(f"Playing {entry['name']}.", "success")
     return redirect(url_for('index'))
 
+@app.route('/player/rewind', methods=['POST'])
+def player_rewind():
+    status = system.get_player_status()
+    if not status:
+        error = "The player is not running."
+    elif status.get('state') not in ('playing', 'paused'):
+        error = "Nothing is playing." if status.get('state') != 'sync' else "This doesn't work in sync mode."
+    elif status.get('rewind') is not True:
+        error = "This player script can't go back to the start (it is from an older version)."
+    else:
+        error = None
+    if not error:
+        try:
+            if system.request_rewind():
+                time.sleep(0.5)
+            else:
+                error = "The player is not running."
+        except OSError as e:
+            error = f"Couldn't ask the player: {e}"
+    if error:
+        if is_fetch():
+            return dict(player_view(system.get_player_status()), error=error), 409
+        flash(error, "error")
+    elif is_fetch():
+        return player_view(system.get_player_status())
+    else:
+        flash("Back at the first frame. Press play to start.", "success")
+    return redirect(url_for('index'))
+
 @app.route('/set_image_duration', methods=['POST'])
 def set_image_duration():
     seconds = request.form.get('seconds', '').strip()
@@ -372,8 +405,14 @@ def upload_file():
                         upload_message("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
                     else:
                         file.stream.flush()
-                        os.replace(file.stream.name, os.path.join(system.MEDIA_PATH, file.filename))
+                        path = os.path.join(system.MEDIA_PATH, file.filename)
+                        os.replace(file.stream.name, path)
                         upload_message(f"File '{file.filename}' uploaded successfully.", "success")
+                        pixels = system.image_size(path) if system.media_kind(path) == 'image' else None
+                        if system.is_large_image(pixels):
+                            upload_message(f"'{file.filename}' is {pixels[0]}×{pixels[1]} pixels: a Pi 3 can't show images "
+                                           f"over {system.LARGE_IMAGE_SIDE} pixels wide or high (they come out scrambled), "
+                                           "so it skips it. Resize it to the screen's size, e.g. 1920×1080.", "warning")
                 finally:
                     # Close the temp files before the partition goes back to read-only
                     discard_upload_temp_files()

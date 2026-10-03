@@ -572,3 +572,118 @@ def test_position_survives_the_clock_being_set(client, monkeypatch):
 def test_page_starts_with_doctype(client):
     assert client.get('/').data.startswith(b'<!doctype html>')
     assert client.get('/login').data.startswith(b'<!doctype html>')
+
+
+# ----- Images too big to show, the player's log ----- #
+def png(width, height):
+    import struct
+    return b'\x89PNG\r\n\x1a\n' + struct.pack('>I', 13) + b'IHDR' + struct.pack('>II', width, height) + b'\x08\x02\x00\x00\x00'
+
+
+def jpeg(width, height):
+    import struct
+    exif = b'\xff\xe1' + struct.pack('>H', 8) + b'Exif\x00\x00'
+    sof = b'\xff\xc2' + struct.pack('>HBHH', 11, 8, height, width) + b'\x03\x01\x11\x00'
+    return b'\xff\xd8' + exif + sof + b'\xff\xd9'
+
+
+def test_image_sizes(pi):
+    files = {'a.png': png(1920, 1080), 'b.jpg': jpeg(6000, 4000), 'c.gif': b'GIF89a' + bytes([0x80, 0x07, 0x38, 0x04]),
+             'd.png': png(2048, 2048), 'e.png': png(3300, 2550), 'f.jpg': b'\xff\xd8\xff', 'g.mp4': png(9000, 9000)}
+    for name, data in files.items():
+        (pi.media / name).write_bytes(data)
+    found = {e['name']: (e['pixels'], e['large']) for e in system.get_playlist()}
+    assert found == {'a.png': ((1920, 1080), False), 'b.jpg': ((6000, 4000), True), 'c.gif': ((1920, 1080), False),
+                     'd.png': ((2048, 2048), False), 'e.png': ((3300, 2550), True),   # scrambled on a Pi 3B
+                     'f.jpg': (None, False),
+                     'g.mp4': (None, False)}              # only images are read
+
+
+def test_very_large_image_gets_a_warning(pi, client):
+    fetch = {'X-Requested-With': 'fetch'}
+    r = client.post('/upload', data={'file': (io.BytesIO(png(8000, 6000)), 'huge.png')}, headers=fetch).get_json()
+    assert r['ok'] is True and r['messages'][1][0] == 'warning' and '8000×6000' in r['messages'][1][1]
+    r = client.post('/upload', data={'file': (io.BytesIO(png(1920, 1080)), 'fine.png')}, headers=fetch).get_json()
+    assert len(r['messages']) == 1
+    html = client.get('/').data.decode()
+    assert '8000×6000' in html and html.count('too large</span>') == 1
+
+
+def test_player_log_on_the_system_tab(client):
+    assert 'Nothing yet.' in client.get('/').data.decode()
+    with open(system.PLAYER_LOG_FILE, 'w') as f:
+        f.write(''.join('line %d\n' % n for n in range(100)) + '2026-10-03 05:00:00 the player stopped (exit code 137)\n')
+    html = client.get('/').data.decode()
+    assert 'exit code 137' in html and 'line 99' in html and 'line 40\n' not in html
+
+
+def test_file_name_plays_the_file(pi, client):
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    html = client.get('/').data.decode()
+    # the name is a second button for the same play form
+    assert 'id="play-1"' in html and 'form="play-1" class="item-name js-play"' in html
+    assert 'reboot' in client.get('/player/status').get_json()['text']
+
+
+def test_files_the_player_skips_are_marked(pi, client):
+    (pi.media / 'big.png').write_bytes(png(9000, 9000))
+    (pi.media / 'ok.mp4').write_bytes(b'x')
+    info = os.stat(pi.media / 'big.png')
+    with open(system.PLAYER_SKIPPED_FILE, 'w') as f:
+        json.dump([[str(pi.media / 'big.png'), [info.st_size, int(info.st_mtime)], 2],
+                   [str(pi.media / 'ok.mp4'), [1, int(info.st_mtime)], 1]], f)   # once doesn't count
+    assert [e['skipped'] for e in system.get_playlist()] == [True, False]
+    assert 'skipped</span>' in client.get('/').data.decode()
+    # replaced (another size or time): the player plays it again, so it isn't marked
+    (pi.media / 'big.png').write_bytes(png(1920, 1080) + b'more')
+    assert [e['skipped'] for e in system.get_playlist()] == [False, False]
+
+
+def test_image_size_odd_headers(pi):
+    import struct
+    # fill bytes before a JPEG marker are allowed
+    jpg = b'\xff\xd8\xff\xff\xff\xc0' + struct.pack('>HBHH', 11, 8, 600, 800) + b'\x03'
+    (pi.media / 'fill.jpg').write_bytes(jpg)
+    assert system.image_size(str(pi.media / 'fill.jpg')) == (800, 600)
+    bmp = b'BM' + bytes(16) + struct.pack('<ii', -640, -480)
+    (pi.media / 'neg.bmp').write_bytes(bmp)
+    assert system.image_size(str(pi.media / 'neg.bmp')) == (640, 480)
+    for junk in (b'', b'\xff\xd8', b'\xff\xd8\xff\xe0\x00\x01', b'\x89PNG\r\n\x1a\n', b'GIF89a\x01'):
+        (pi.media / 'junk.jpg').write_bytes(junk)
+        assert system.image_size(str(pi.media / 'junk.jpg')) is None
+
+
+def test_rewind(client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    monkeypatch.setattr(webservice.time, 'sleep', lambda s: None)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    fetch = {'X-Requested-With': 'fetch'}
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': '/media/internal/a.mp4', 'since': time.time(), 'pid': 4242,
+                   'play_file': True, 'rewind': True}, f)
+    assert client.get('/player/status').get_json()['rewind'] is True
+    r = client.post('/player/rewind', headers=fetch)
+    assert r.status_code == 200 and sent == [(4242, signal.SIGUSR1)]
+    request = json.load(open(system.PLAY_REQUEST_FILE))
+    assert request['command'] == 'rewind' and request['id'] and 'file' not in request
+    assert b'Press play to start' in client.post('/player/rewind', follow_redirects=True).data
+    # an older player would take the signal for Next: nothing is sent
+    sent.clear()
+    write_status('playing', '/media/internal/a.mp4')
+    r = client.post('/player/rewind', headers=fetch)
+    assert r.status_code == 409 and 'older version' in r.get_json()['error'] and sent == []
+    write_status('idle')
+    assert client.post('/player/rewind', headers=fetch).get_json()['error'] == 'Nothing is playing.'
+    assert 'id="rewindButton"' in client.get('/').data.decode()
+
+
+def test_large_images_only_marked_where_the_player_skips_them(pi, client, tmp_path):
+    (pi.media / 'big.png').write_bytes(png(4000, 3000))
+    assert system.get_playlist()[0]['large'] is True
+    for model in ('Raspberry Pi 4 Model B Rev 1.4\0', 'Raspberry Pi 5 Model B Rev 1.0\0'):
+        (tmp_path / 'model').write_text(model)
+        assert system.get_playlist()[0]['large'] is False
+        r = client.post('/upload', data={'file': (io.BytesIO(png(4000, 3000)), 'b2.png')},
+                        headers={'X-Requested-With': 'fetch'}).get_json()
+        assert len(r['messages']) == 1

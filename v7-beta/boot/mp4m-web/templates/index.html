@@ -69,6 +69,9 @@
         <span id="playerLength" class="time"></span>
       </div>
       <div class="transport">
+        <form method="post" action="{{ url_for('player_rewind') }}" class="js-player">
+          <button type="submit" id="rewindButton" class="round-button" title="Back to the first frame, held until play is pressed" aria-label="Back to the start and hold">{{ icon('skip-back') }}</button>
+        </form>
         <form method="post" action="{{ url_for('player_pause') }}" class="js-player">
           <button type="submit" id="pauseButton" class="round-button big" title="Pause or resume (same as the button on GPIO pin 11)" aria-label="Pause or resume">
             <span class="when-playing">{{ icon('pause') }}</span><span class="when-paused">{{ icon('play') }}</span>
@@ -135,17 +138,21 @@
       <ul class="playlist" id="playlist">
         {% for entry in playlist %}
         <li class="playlist-item{% if not entry.plays %} not-played{% endif %}" data-path="{{ entry.path }}">
-          <form method="post" action="{{ url_for('player_play') }}" class="js-player">
+          <form method="post" action="{{ url_for('player_play') }}" class="js-player" id="play-{{ loop.index }}">
             <input type="hidden" name="file" value="{{ entry.path }}">
-            <button type="submit" class="item-play" {% if entry.plays %}title="Play this file now"{% else %}disabled title="Not played: the name has no extension"{% endif %}
+            <button type="submit" class="item-play js-play" {% if entry.plays %}title="Play this file now"{% else %}disabled title="Not played: the name has no extension"{% endif %}
                     aria-label="Play {{ entry.name }}">
               <span class="item-index">{{ loop.index }}</span>{{ icon('play', 'item-play-icon') }}
             </button>
           </form>
           <div class="item-main">
-            <div class="item-name" title="{{ entry.name }}">{{ entry.name }}</div>
+            <button type="submit" form="play-{{ loop.index }}" class="item-name js-play" title="{{ entry.name }}"
+                    {% if not entry.plays %}disabled{% endif %}>{{ entry.name }}</button>
             <div class="item-meta">
               {{ icon(kind_icons[entry.kind]) }}<span>{{ entry.size|size }}</span>
+              {% if entry.pixels %}<span>{{ entry.pixels[0] }}×{{ entry.pixels[1] }}</span>{% endif %}
+              {% if entry.skipped %}<span class="badge danger" title="The player stopped while playing this file, so it skips it. Replace the file, or play it from here to try again.">{{ icon('circle-alert') }}skipped</span>{% endif %}
+              {% if entry.large %}<span class="badge warning" title="A Pi 3 can't show images over 2048 pixels wide or high, so it skips it. Resize it to the screen's size, e.g. 1920×1080.">{{ icon('triangle-alert') }}too large</span>{% endif %}
               {% if not entry.internal %}<span class="badge">{{ icon('usb') }}{{ entry.folder }}</span>{% endif %}
               {% if entry.loop %}<span class="badge">{{ icon('repeat') }}loop</span>{% endif %}
               {% if not entry.plays %}<span class="badge muted">not played: no extension</span>{% endif %}
@@ -337,6 +344,12 @@
     </section>
 
   </div>
+  <section class="card network-card">
+    <h3>{{ icon('terminal') }}Player log</h3>
+    <pre class="log">{{ player_log or 'Nothing yet.' }}</pre>
+    <p class="hint">The end of what the player printed (/tmp/mp4museum.log): errors, skipped files, and when it was started again after stopping.</p>
+  </section>
+
   <section class="card network-card">
     <h3>{{ icon('network') }}Network</h3>
     <pre>{{ network_status }}</pre>

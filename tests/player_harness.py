@@ -21,9 +21,12 @@ def fire_signals(place=None):
     for event in scenario.get('signals', []):
         if not event.get('done') and clock['now'] - 1000 >= event['at'] and event.get('when') == place:
             event['done'] = True
-            if 'play' in event:
+            if 'play' in event or 'command' in event:
+                # {'play': path} or {'command': 'rewind'}, as the web interface sends them
+                request = {'id': 'request-%s' % event['at']}
+                request.update({'file': event['play']} if 'play' in event else {'command': event['command']})
                 with open(paths['/tmp/mp4museum-play.json'], 'w') as f:
-                    json.dump({'id': 'request-%s' % event['at'], 'file': event['play']}, f)
+                    json.dump(request, f)
             os.kill(os.getpid(), getattr(signal, event.get('signal', 'SIGUSR1')))
 
 active_omx = []
@@ -66,7 +69,7 @@ class Player:
         if any('input-repeat' in o for o in m.options):
             self.length = 10 ** 9
     def get_state(self):
-        if self.state == _S.Playing and clock['now'] - self.started >= self.length and self.length:
+        if self.state == _S.Playing and self.get_time() / 1000 >= self.length and self.length:
             self.state = _S.Ended
         fire_signals()
         return self.state
@@ -83,6 +86,15 @@ class Player:
             self.paused_total += clock['now'] - self.paused_at
             self.paused_at = None
         log.append({'pause': self.state == _S.Paused})
+    def set_time(self, ms):
+        log.append({'set_time': ms, 'at': round(clock['now'] - 1000, 2)})
+        self.started, self.paused_total = clock['now'] - ms / 1000, 0
+        if self.state == _S.Paused:
+            self.paused_at = clock['now']
+    def set_pause(self, on):
+        log.append({'set_pause': on, 'at': round(clock['now'] - 1000, 2)})
+        if bool(on) != (self.state == _S.Paused) and self.state in (_S.Playing, _S.Paused):
+            self.pause()
     def get_length(self):
         # known once it is playing, as in VLC
         playing = self.state in (_S.Playing, _S.Paused, _S.Ended)
@@ -187,10 +199,27 @@ tmp = tempfile.mkdtemp()
 paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
          '/boot/alsa.txt': os.path.join(tmp, 'alsa.txt'), '/boot/mp4m-player.txt': os.path.join(tmp, 'mp4m-player.txt'),
          '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json'),
-         '/tmp/mp4museum-play.json': os.path.join(tmp, 'play.json')}
+         '/tmp/mp4museum-play.json': os.path.join(tmp, 'play.json'),
+         '/tmp/mp4museum-skipped.json': os.path.join(tmp, 'skipped.json'),
+         # scenario write: {'/proc/device-tree/model': 'Raspberry Pi 3 Model B Rev 1.2'}
+         '/proc/device-tree/model': os.path.join(tmp, 'model')}
 for real, fake in paths.items():
     if real in scenario.get('write', {}):
         open(fake, 'w').write(scenario['write'][real])
+# scenario crashed: {'file': path, 'times': n}: the last player stopped while playing it, and it
+# had stopped the player n - 1 times before (recorded with the file's real size and time)
+if 'crashed' in scenario:
+    crashed = paths.get(scenario['crashed']['file'], scenario['crashed']['file'])
+    try:
+        info = os.stat(crashed)
+        version = [info.st_size, int(info.st_mtime)]
+    except OSError:
+        version = None
+    with open(paths['/tmp/mp4museum-status.json'], 'w') as f:
+        json.dump({'state': 'playing', 'file': crashed, 'since': 1, 'pid': 999999}, f)
+    if scenario['crashed']['times'] > 1:
+        with open(paths['/tmp/mp4museum-skipped.json'], 'w') as f:
+            json.dump([[crashed, version, scenario['crashed']['times'] - 1]], f)
 source = PLAYER.read_text()
 for real, fake in paths.items():
     source = source.replace(repr(real)[1:-1], fake)
@@ -205,9 +234,17 @@ _real_open = open
 def watching_open(path, *args, **kwargs):
     if path == paths['/boot/mp4m-player.txt']:
         fire_signals('settings')
+    # scenario contents: {media path: hex}, e.g. an image header for the player to read
+    if path in scenario.get('contents', {}):
+        import io
+        return io.BytesIO(bytes.fromhex(scenario['contents'][path]))
     return _real_open(path, *args, **kwargs)
 try:
     exec(compile(source, 'mp4museum.py', 'exec'), {'__name__': '__main__', 'open': watching_open})
 except SystemExit as e:
     log.append({'exit': str(e)})
-print(json.dumps({'log': log, 'statuses': statuses}))
+try:
+    skipped = json.load(open(paths['/tmp/mp4museum-skipped.json']))
+except (OSError, ValueError):
+    skipped = None
+print(json.dumps({'log': log, 'statuses': statuses, 'skipped': skipped}))

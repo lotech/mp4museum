@@ -43,8 +43,10 @@ function icon(name) {
 
 function setIcon(svg, name) {
   const use = svg && svg.querySelector('use');
-  if (use) {
-    use.setAttribute('href', document.body.dataset.iconsUrl + '#' + name);
+  const href = document.body.dataset.iconsUrl + '#' + name;
+  // Only when it changes: setting it again redraws the icon, which flickers
+  if (use && use.getAttribute('href') !== href) {
+    use.setAttribute('href', href);
   }
 }
 
@@ -52,7 +54,7 @@ function showToast(message, category) {
   const toast = document.createElement('div');
   toast.className = 'toast ' + (category || 'success');
   toast.setAttribute('role', 'status');
-  const mark = icon(category === 'error' ? 'circle-alert' : 'circle-check');
+  const mark = icon({error: 'circle-alert', warning: 'triangle-alert'}[category] || 'circle-check');
   mark.classList.add('toast-icon');
   const text = document.createElement('span');
   text.textContent = message;
@@ -74,7 +76,7 @@ function setUpToast(toast) {
   };
   toast.querySelector('.toast-close').addEventListener('click', hide);
   // Errors stay longer, so there is time to read them
-  setTimeout(hide, toast.classList.contains('error') ? 12000 : 5000);
+  setTimeout(hide, toast.classList.contains('success') ? 5000 : 12000);
 }
 
 // ----- Player ----- //
@@ -115,13 +117,16 @@ function showPlayer(view) {
   const controls = view.running && ['playing', 'paused'].includes(state) && !playerBusy;
   document.getElementById('pauseButton').disabled = !controls;
   document.getElementById('nextButton').disabled = !controls;
+  // an older player script can't go back to the start
+  document.getElementById('rewindButton').disabled = !controls || !view.rewind;
   document.querySelectorAll('.playlist-item').forEach(item => {
     const current = active && item.dataset.path === view.file;
     item.classList.toggle('current', current);
-    const button = item.querySelector('.item-play');
-    if (button && item.classList.contains('not-played') === false) {
-      // An older player script can't jump to a file
-      button.disabled = !view.play_file || state === 'sync' || !view.running || playerBusy;
+    if (!item.classList.contains('not-played')) {
+      // An older player script can't jump to a file. When the player isn't running the buttons
+      // stay on, so pressing one says so.
+      const off = (view.running && !view.play_file) || state === 'sync' || playerBusy;
+      item.querySelectorAll('.js-play').forEach(button => button.disabled = off);
     }
   });
   showProgress();
