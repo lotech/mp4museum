@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import platform
 import re
 import shutil
 import signal
@@ -91,7 +92,7 @@ INVALID_FILENAME_CHARS = set('/\\:*?"<>|')
 def read_serial():
     """The Pi's serial number, or '' if it can't be read."""
     try:
-        with open('/proc/cpuinfo', 'r') as f:
+        with open(CPUINFO_FILE, 'r') as f:
             for line in f:
                 if line.startswith('Serial'):
                     return line.split(':', 1)[1].strip()
@@ -130,6 +131,8 @@ def is_valid_filename(filename):
     # Plain file names only: no paths, hidden files or characters exFAT can't store
     return (bool(filename)
             and not filename.startswith('.')
+            # exFAT drops a trailing dot: the file would lose its extension
+            and not filename.endswith('.')
             and not any(c in INVALID_FILENAME_CHARS or ord(c) < 32 or ord(c) == 127 for c in filename)
             # exFAT allows 255 UTF-16 characters
             and len(filename.encode('utf-16-le')) <= 510)
@@ -291,6 +294,110 @@ def get_video_settings(config_text):
             settings.add(f"{key}={value}")
     return settings
 
+# ----- Graphics memory ----- #
+# Memory for the graphics chip (video decoding, the screen), set with gpu_mem in config.txt.
+# The v7 image has 128 MB.
+GPU_MEM_CHOICES = (128, 256, 512)
+MEMINFO_FILE = '/proc/meminfo'
+
+def _applies_to_all(config_text):
+    """(line, applies to every Pi) for each line: before any [section], or under [all]."""
+    everywhere = True
+    for line in config_text.splitlines(True):
+        stripped = line.strip()
+        if stripped.startswith('['):
+            everywhere = stripped.lower() == '[all]'
+            yield line, False
+        else:
+            yield line, everywhere
+
+# gpu_mem_256, gpu_mem_512, gpu_mem_1024: for boards with that much memory (1024: or more);
+# they win over gpu_mem
+GPU_MEM_OVERRIDE_RE = re.compile(r'\s*gpu_mem_(256|512|1024)\s*=\s*(\d*)\s*$')
+
+def get_gpu_mem(config_text, board=None):
+    """The gpu_mem set for every Pi in config.txt (MB), or None. board: the board's memory in
+    MB, to take a gpu_mem_256/512/1024 line for it into account."""
+    value = override = None
+    for line, everywhere in _applies_to_all(config_text):
+        match = re.match(r'\s*gpu_mem\s*=\s*(\d+)\s*$', line)
+        if everywhere and match:
+            value = int(match.group(1))
+        match = GPU_MEM_OVERRIDE_RE.match(line)
+        if everywhere and match and match.group(2) and board and (
+                int(match.group(1)) == board or (match.group(1) == '1024' and board >= 1024)):
+            override = int(match.group(2))
+    return override if override is not None else value
+
+def gpu_mem_in_model_sections(config_text):
+    """Whether a model section (e.g. [pi4]) sets the graphics memory: it may differ from
+    get_gpu_mem() on some boards. set_gpu_mem_in_config sets those lines too."""
+    return any(not everywhere and (GPU_MEM_OVERRIDE_RE.match(line) or re.match(r'\s*gpu_mem\s*=', line))
+               for line, everywhere in _applies_to_all(config_text))
+
+def set_gpu_mem_in_config(config_text, megabytes):
+    """config.txt with gpu_mem set to megabytes for every Pi. gpu_mem lines in model sections
+    (e.g. [pi4]) get the same value and gpu_mem_256/512/1024 lines are taken out, as they would
+    win over it on the boards they are for; nothing else changes."""
+    lines, done = [], False
+    for line, everywhere in _applies_to_all(config_text):
+        if GPU_MEM_OVERRIDE_RE.match(line):
+            continue
+        if re.match(r'\s*gpu_mem\s*=', line):
+            if everywhere and done:
+                continue
+            line = f"gpu_mem={megabytes}\n"
+            done = done or everywhere
+        lines.append(line)
+    if not done:
+        # after the comments at the top, before any [section]
+        at = next((i for i, line in enumerate(lines) if line.strip() and not line.lstrip().startswith('#')), len(lines))
+        lines.insert(at, f"gpu_mem={megabytes}\n")
+    return ''.join(lines)
+
+def memory_megabytes():
+    """The memory Linux has (without what the graphics chip has), in MB, or None."""
+    try:
+        with open(MEMINFO_FILE, 'r') as f:
+            for line in f:
+                if line.startswith('MemTotal:'):
+                    return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+def board_memory_megabytes():
+    """All the memory on the board in MB, or None. From the revision code; on old boards
+    without one, Linux's memory plus the graphics memory, rounded up to a board size."""
+    memory = installed_memory_megabytes()
+    if memory:
+        return memory
+    linux = memory_megabytes()
+    if not linux:
+        return None
+    estimate = linux + (get_gpu_mem(read_config_text() or '') or 64)
+    memory = 256
+    while memory < estimate:
+        memory *= 2
+    return memory
+
+def gpu_mem_choices(board=None):
+    """The graphics memory choices safe on this board: the Raspberry Pi documentation says at
+    most 128 MB on a 256 MB board and 384 MB on a 512 MB board, or Linux may not start."""
+    board = board or board_memory_megabytes()
+    if board and board <= 256:
+        return GPU_MEM_CHOICES[:1]
+    if board and board <= 512:
+        return GPU_MEM_CHOICES[:2]
+    return GPU_MEM_CHOICES
+
+def recommended_gpu_mem(board=None):
+    """512 MB with 2 GB or more (a Pi 4), 256 MB with 1 GB (a Pi 3), else 128 MB."""
+    board = board or board_memory_megabytes()
+    if not board:
+        return 256
+    return 512 if board >= 2048 else 256 if board >= 1024 else 128
+
 def get_current_video_mode(config_text):
     """Return (mode key, description) for the video mode set in config.txt."""
     settings = get_video_settings(config_text)
@@ -373,6 +480,99 @@ def get_network_status():
         if not addresses.get(interface):
             lines.append("  No IP address")
     return "\n".join(lines)
+
+# ----- Device ----- #
+CPUINFO_FILE = '/proc/cpuinfo'
+OS_RELEASE_FILE = '/etc/os-release'
+UPTIME_FILE = '/proc/uptime'
+
+def _read_text(path):
+    try:
+        with open(path, 'r', errors='replace') as f:
+            return f.read()
+    except OSError:
+        return ''
+
+def read_model():
+    """e.g. 'Raspberry Pi 3 Model B Rev 1.2', or ''."""
+    return _read_text(MODEL_FILE).strip('\0 \n')
+
+def installed_memory_megabytes():
+    """All the memory on the board in MB (Linux gets it less the graphics memory), or None.
+    From the revision code: on newer boards bits 20-22 give the size, 256 MB << n."""
+    match = re.search(r'^Revision\s*:\s*([0-9a-fA-F]+)\s*$', _read_text(CPUINFO_FILE), re.M)
+    if not match:
+        return None
+    revision = int(match.group(1), 16)
+    if not revision & (1 << 23):
+        return None
+    return 256 << ((revision >> 20) & 7)
+
+def _vcgencmd(*args):
+    """The value of `vcgencmd ...`, e.g. '256M' from 'gpu=256M', or None."""
+    ok, output = run_command(['vcgencmd'] + list(args))
+    if not ok or '=' not in output:
+        return None
+    return output.split('=', 1)[1].strip()
+
+def format_megabytes(megabytes):
+    return f"{megabytes // 1024} GB" if megabytes >= 1024 and megabytes % 1024 == 0 else f"{megabytes} MB"
+
+def format_duration(seconds):
+    minutes = int(seconds) // 60
+    days, hours, minutes = minutes // 1440, minutes // 60 % 24, minutes % 60
+    if days:
+        return f"{days} d {hours} h"
+    return f"{hours} h {minutes} min" if hours else f"{minutes} min"
+
+def get_device_info():
+    """(label, value) pairs about this Pi for the System tab, leaving out what can't be read."""
+    info = []
+    model = read_model()
+    if model:
+        info.append(("Model", model))
+    memory = installed_memory_megabytes()
+    linux_memory = memory_megabytes()
+    if memory:
+        info.append(("Memory", format_megabytes(memory)))
+    elif linux_memory:
+        info.append(("Memory", f"{linux_memory} MB for programs"))
+    gpu = _vcgencmd('get_mem', 'gpu')
+    if gpu and gpu.endswith('M') and gpu[:-1].isdigit():
+        info.append(("Graphics memory", f"{gpu[:-1]} MB"))
+    temperature = _vcgencmd('measure_temp')
+    if temperature:
+        info.append(("Temperature", temperature.replace("'C", " °C")))
+    throttled = _vcgencmd('get_throttled')
+    try:
+        throttled = int(throttled, 16) if throttled else None
+    except ValueError:
+        throttled = None
+    if throttled is not None:
+        if throttled & 0x1:
+            info.append(("Power", "Too low now: use a stronger power supply"))
+        elif throttled & 0x10000:
+            info.append(("Power", "Was too low since the Pi started: use a stronger power supply"))
+        else:
+            info.append(("Power", "OK"))
+    if media_available():
+        try:
+            usage = shutil.disk_usage(MEDIA_PATH)
+            info.append(("Media partition", f"{format_size(usage.free)} free of {format_size(usage.total)}"))
+        except OSError:
+            pass
+    match = re.search(r'^PRETTY_NAME="?([^"\n]*)"?$', _read_text(OS_RELEASE_FILE), re.M)
+    if match:
+        info.append(("Operating system", match.group(1)))
+    info.append(("Linux kernel", platform.release()))
+    try:
+        info.append(("Running for", format_duration(float(_read_text(UPTIME_FILE).split()[0]))))
+    except (IndexError, ValueError):
+        pass
+    serial = read_serial()
+    if serial:
+        info.append(("Serial number", serial))
+    return info
 
 def get_display_info():
     try:
@@ -463,11 +663,7 @@ MODEL_FILE = '/proc/device-tree/model'
 
 def image_limit():
     """LARGE_IMAGE_SIDE on a Pi 3 or older, else None."""
-    try:
-        with open(MODEL_FILE, 'r', errors='replace') as f:
-            model = f.read()
-    except OSError:
-        return None
+    model = read_model()
     if any(newer in model for newer in ('Pi 4', 'Pi 5', 'Pi 400', 'Pi 500', 'Compute Module 4', 'Compute Module 5')):
         return None
     return LARGE_IMAGE_SIDE if 'Raspberry Pi' in model else None

@@ -60,7 +60,16 @@ a network is optional.
 - [ ] Check the image limit on the Pi: does 2048 wide show, and 2560? And what a Pi 4 can show
 - [ ] Find out what stopped the player the first time (the 12 MB PNG: out of memory?)
 - [x] Rewind button: back to the first frame, held until play (omxplayer loops show it in VLC, then loop in omxplayer again)
-- [ ] Test rewind on the Pi: does VLC show the first frame while paused after jumping back?
+- [x] Rewind tested on the Pi: omxplayer loops went black, then took a second to play; VLC held the frame but was slow to play on, with a black frame. Now the file starts again and pauses at its first picture (no jump back), and omxplayer starts in front of the frame VLC holds
+- [ ] Test rewind again on the Pi: is the first frame shown for omxplayer loops? Does VLC play on straight away? No black between the held frame and omxplayer?
+- [x] Badge on the player card: which program shows the file (VLC, omxplayer)
+- [x] Changing the loop player starts the loop video playing now again with it
+- [x] Rename files in the web interface (order, `-loop`)
+- [x] Graphics memory setting (Video tab): `gpu_mem`, recommended 256 MB on a Pi 3, 512 MB on a Pi 4
+- [x] Device info on the System tab: model, memory, graphics memory, temperature, power (under-voltage), media space, OS
+- [ ] Test on the Pi: with 256 MB, does a 3300 x 2550 image show? (Then the 2048 pixel limit could go up)
+- [x] Tried mpv on the Pi 3B (Buster): it loops with a pause like omxplayer's, so no gain there. It also needs the KMS driver (`dtoverlay=vc4-fkms-v3d`, only set for a Pi 4 in `config.txt`; without it mpv has no video output: the Debian build has no `--vo=rpi`), installing from `legacy.raspbian.org` (Buster's packages moved there), `--hwdec=mmal-copy` (frames copied by the CPU, it dropped frames) and the picture was the wrong size. Worked: `mpv --fs --vo=gpu --gpu-context=drm --hwdec=mmal-copy --loop-file=inf <file>`
+- [ ] mpv again on a newer Raspberry Pi OS or a Pi 4 (KMS and hardware decoding are the default there, and omxplayer doesn't exist): seamless loops?, no black frames between files, images, control over its IPC socket
 
 ## 5. Installation
 
@@ -82,4 +91,10 @@ a network is optional.
 - [ ] Offline setup: create a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (there is no Wi-Fi setting yet)
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
 - [ ] "Restore default config.txt" button (the old "Auto" video preset used to do this)
+- [ ] OSC control over the network (show control software, Max/MSP, TouchOSC, QLab), for the basic controls:
+  - e.g. `/mp4museum/play`, `/pause`, `/toggle`, `/next`, `/previous`, `/rewind`, `/play <file name or number>`
+  - maybe also `/sync` (start a file on several players at once) and a status reply (what is playing, position)
+  - OSC is simple UDP messages: parse them in Python rather than adding a package (players may never be online)
+  - in the web service (it already sends the player its commands) or the player; port and on/off in the web interface (System); off by default, as anyone on the network could control the player
+  - needs a "previous file" in the player, which doesn't exist yet
 - [x] "Save and Reboot" asks for confirmation twice

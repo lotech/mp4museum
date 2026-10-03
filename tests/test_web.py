@@ -675,6 +675,13 @@ def test_rewind(client, monkeypatch):
     assert r.status_code == 409 and 'older version' in r.get_json()['error'] and sent == []
     write_status('idle')
     assert client.post('/player/rewind', headers=fetch).get_json()['error'] == 'Nothing is playing.'
+    # the boot video is playing: the player can rewind, but not that
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': '/home/pi/mp4museum-boot.mp4', 'since': time.time(), 'pid': 4242,
+                   'play_file': True, 'rewind': False}, f)
+    assert client.get('/player/status').get_json()['rewind'] is False
+    r = client.post('/player/rewind', headers=fetch)
+    assert r.status_code == 409 and 'start-up video' in r.get_json()['error'] and sent == []
     assert 'id="rewindButton"' in client.get('/').data.decode()
 
 
@@ -687,3 +694,231 @@ def test_large_images_only_marked_where_the_player_skips_them(pi, client, tmp_pa
         r = client.post('/upload', data={'file': (io.BytesIO(png(4000, 3000)), 'b2.png')},
                         headers={'X-Requested-With': 'fetch'}).get_json()
         assert len(r['messages']) == 1
+
+
+def test_rename(pi, client):
+    (pi.media / 'clip.mp4').write_bytes(b'video')
+    (pi.media / 'other.mp4').write_bytes(b'x')
+    r = client.post('/rename', data={'filename': 'clip.mp4', 'new_name': ' 01 clip-loop.mp4 '}, follow_redirects=True)
+    assert b'Renamed' in r.data and (pi.media / '01 clip-loop.mp4').read_bytes() == b'video'
+    assert not (pi.media / 'clip.mp4').exists() and ['mount', '-o', 'remount,rw', str(pi.media)] in pi.commands
+    # not over another file, not to a bad name, not outside the media partition
+    for new in ('other.mp4', '.hidden.mp4', '../escape.mp4', 'a/b.mp4', ''):
+        r = client.post('/rename', data={'filename': '01 clip-loop.mp4', 'new_name': new}, follow_redirects=True)
+        assert b'Renamed' not in r.data, new
+    assert (pi.media / '01 clip-loop.mp4').exists() and not (pi.media.parent / 'escape.mp4').exists()
+    assert b'not found' in client.post('/rename', data={'filename': 'gone.mp4', 'new_name': 'x.mp4'}, follow_redirects=True).data
+    # a name without an extension isn't played: said so
+    r = client.post('/rename', data={'filename': 'other.mp4', 'new_name': 'notes'}, follow_redirects=True)
+    assert b"won&#39;t play it" in r.data
+    assert 'askNewName' in client.get('/').data.decode()
+
+
+def test_engine_badge(client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    for engine, shown in (('omxplayer', 'omxplayer'), ('vlc', 'vlc'), ('something', None)):
+        with open(system.PLAYER_STATUS_FILE, 'w') as f:
+            json.dump({'state': 'playing', 'file': '/media/internal/a-loop.mp4', 'since': time.time(), 'pid': 4242,
+                       'engine': engine}, f)
+        assert client.get('/player/status').get_json()['engine'] == shown
+    assert 'id="playerEngine"' in client.get('/').data.decode()
+
+
+def test_changing_the_loop_player_starts_the_loop_again(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    (pi.media / 'a-loop.mp4').write_bytes(b'x')
+    (pi.media / 'b.mp4').write_bytes(b'x')
+    for playing, restarted in (('a-loop.mp4', True), ('b.mp4', False)):
+        sent.clear()
+        with open(system.PLAYER_STATUS_FILE, 'w') as f:
+            json.dump({'state': 'playing', 'file': str(pi.media / playing), 'since': time.time(), 'pid': 4242,
+                       'play_file': True, 'engine': 'omxplayer'}, f)
+        r = client.post('/set_loop_player', data={'loop_player': 'vlc'}, follow_redirects=True)
+        assert (b'has started again' in r.data) == restarted and bool(sent) == restarted
+        if restarted:
+            assert json.load(open(system.PLAY_REQUEST_FILE))['file'] == str(pi.media / playing)
+
+
+def test_rename_case_only_on_a_case_insensitive_partition(pi, client, monkeypatch):
+    # exFAT ignores case: renaming Clip.mp4 to clip.mp4 in one go changes nothing there
+    (pi.media / 'Clip.mp4').write_bytes(b'video')
+    real_exists, real_samefile = os.path.exists, os.path.samefile
+    lower = str(pi.media / 'clip.mp4')
+    monkeypatch.setattr(webservice.os.path, 'exists', lambda p: True if p == lower else real_exists(p))
+    monkeypatch.setattr(webservice.os.path, 'samefile', lambda a, b: True if lower in (a, b) else real_samefile(a, b))
+    renames = []
+    real_rename = os.rename
+    monkeypatch.setattr(webservice.os, 'rename', lambda a, b: (renames.append((os.path.basename(a), os.path.basename(b))), real_rename(a, b)))
+    r = client.post('/rename', data={'filename': 'Clip.mp4', 'new_name': 'clip.mp4'}, follow_redirects=True)
+    assert b'Renamed' in r.data and len(renames) == 2 and renames[0][1].startswith('.') and renames[1][1] == 'clip.mp4'
+    assert sorted(os.listdir(pi.media)) == ['clip.mp4']
+
+
+def test_rename_refuses_names_ending_in_a_dot(pi, client):
+    # exFAT drops a trailing dot, so the file would lose its extension
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    for bad in ('a.mp4.', 'b.'):
+        r = client.post('/rename', data={'filename': 'a.mp4', 'new_name': bad}, follow_redirects=True)
+        assert b'Renamed' not in r.data
+    assert not system.is_valid_filename('clip.') and system.is_valid_filename('clip.mp4')
+
+
+def test_renames_to_the_same_name_one_at_a_time(pi, client, monkeypatch):
+    (pi.media / 'a.mp4').write_bytes(b'a')
+    (pi.media / 'b.mp4').write_bytes(b'b')
+    real_rename = os.rename
+    def slow_rename(a, b):
+        time.sleep(.2)
+        real_rename(a, b)
+    monkeypatch.setattr(webservice.os, 'rename', slow_rename)
+    def rename(name):
+        c = webservice.app.test_client()
+        c.post('/login', data={'password': 'mp4museum'})
+        c.post('/rename', data={'filename': name, 'new_name': 'same.mp4'})
+    threads = [threading.Thread(target=rename, args=(n,)) for n in ('a.mp4', 'b.mp4')]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # one of them was renamed, the other is still there: nothing was overwritten
+    assert sorted(os.listdir(pi.media)) in (['b.mp4', 'same.mp4'], ['a.mp4', 'same.mp4'])
+
+
+def test_loop_restarted_only_when_the_program_changes(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append(sig))
+    (pi.media / 'a-loop.mp4').write_bytes(b'x')
+    def playing(engine):
+        with open(system.PLAYER_STATUS_FILE, 'w') as f:
+            json.dump({'state': 'playing', 'file': str(pi.media / 'a-loop.mp4'), 'since': time.time(), 'pid': 4242,
+                       'play_file': True, 'engine': engine}, f)
+    monkeypatch.setattr(system.shutil, 'which', lambda name: '/usr/bin/' + name)
+    for engine, choice, restarted in (('vlc', 'vlc', False), ('omxplayer', 'omxplayer', False),
+                                      ('omxplayer', 'vlc', True), ('vlc', 'omxplayer', True)):
+        sent.clear()
+        playing(engine)
+        r = client.post('/set_loop_player', data={'loop_player': choice}, follow_redirects=True)
+        assert (b'has started again' in r.data) == restarted and bool(sent) == restarted, (engine, choice)
+    # an omxplayer loop's first frame held (VLC shows it), VLC chosen: the loop starts again in VLC
+    sent.clear()
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'paused', 'file': str(pi.media / 'a-loop.mp4'), 'since': time.time(), 'pid': 4242,
+                   'play_file': True, 'engine': 'vlc', 'loop_player': 'omxplayer'}, f)
+    assert b'has started again' in client.post('/set_loop_player', data={'loop_player': 'vlc'}, follow_redirects=True).data
+    # omxplayer chosen, but this loop can't use it (file type, codec): VLC carries on, nothing to restart
+    sent.clear()
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': str(pi.media / 'a-loop.mp4'), 'since': time.time(), 'pid': 4242,
+                   'play_file': True, 'engine': 'vlc', 'loop_player': 'vlc', 'loop_omx_ok': False}, f)
+    assert b'has started again' not in client.post('/set_loop_player', data={'loop_player': 'omxplayer'},
+                                                   follow_redirects=True).data and not sent
+    # omxplayer chosen but not installed: VLC still plays it
+    monkeypatch.setattr(system.shutil, 'which', lambda name: None)
+    sent.clear()
+    playing('vlc')
+    assert b'has started again' not in client.post('/set_loop_player', data={'loop_player': 'omxplayer'},
+                                                   follow_redirects=True).data and not sent
+
+
+def test_engine_badge_only_while_something_plays(client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'idle', 'file': None, 'since': time.time(), 'pid': 4242, 'engine': 'vlc'}, f)
+    assert client.get('/player/status').get_json()['engine'] is None
+
+
+# ----- Graphics memory ----- #
+def test_graphics_memory(pi, client, tmp_path):
+    original = open(system.CONFIG_FILE).read()
+    assert system.get_gpu_mem(original) == 128
+    html = client.get('/').data.decode()
+    assert 'Now: <strong>128 MB</strong>' in html and '256 MB (recommended)' in html   # a Pi 3: 1 GB
+    r = client.post('/set_gpu_mem', data={'gpu_mem': '256'})
+    assert r.status_code == 302 and '/confirm_reboot' in r.location
+    changed = open(system.CONFIG_FILE).read()
+    assert changed == original.replace('gpu_mem=128', 'gpu_mem=256') and system.get_gpu_mem(changed) == 256
+    for bad in ('1024', '64', 'lots', ''):
+        r = client.post('/set_gpu_mem', data={'gpu_mem': bad}, follow_redirects=True)
+        assert b'Please choose' in r.data
+    assert system.get_gpu_mem(open(system.CONFIG_FILE).read()) == 256
+    # a Pi 4 with 4 GB
+    (tmp_path / 'cpuinfo').write_text('Revision\t: c03114\n')
+    (tmp_path / 'meminfo').write_text('MemTotal:        3884000 kB\n')
+    assert system.recommended_gpu_mem() == 512 and system.gpu_mem_choices() == (128, 256, 512)
+    # 512 MB (a Pi Zero W): at most 384 MB, so 512 isn't offered or taken
+    (tmp_path / 'cpuinfo').write_text('Revision\t: 9000c1\n')
+    html = client.get('/').data.decode()
+    assert 'value="512"' not in html and '128 MB (recommended)' in html
+    r = client.post('/set_gpu_mem', data={'gpu_mem': '512'}, follow_redirects=True)
+    assert b'Please choose 128 or 256 MB' in r.data and system.get_gpu_mem(open(system.CONFIG_FILE).read()) == 256
+    # an old board without the memory in its revision code: from Linux's memory and gpu_mem
+    (tmp_path / 'cpuinfo').write_text('Revision\t: 000e\n')
+    (tmp_path / 'meminfo').write_text('MemTotal:         190000 kB\n')
+    open(system.CONFIG_FILE, 'w').write('gpu_mem=64\n')
+    assert system.board_memory_megabytes() == 256 and system.gpu_mem_choices() == (128,)
+    open(system.CONFIG_FILE, 'w').write('gpu_mem=256\n')
+    (tmp_path / 'meminfo').write_text('MemTotal:         190000 kB\n')
+    assert system.board_memory_megabytes() == 512
+
+
+def test_graphics_memory_lines_in_config(pi, client):
+    config = ('# comment\n\ndisable_splash=1\n[pi4]\ngpu_mem=76\ngpu_mem_1024=200\ndtoverlay=x\n'
+              '[all]\ngpu_mem=64\ngpu_mem_1024=300\ngpu_mem_512 = 100\n')
+    assert system.get_gpu_mem(config) == 64
+    # gpu_mem_1024 wins over gpu_mem on boards with 1 GB or more, gpu_mem_512 with 512 MB
+    assert system.get_gpu_mem(config, 1024) == 300 and system.get_gpu_mem(config, 4096) == 300
+    assert system.get_gpu_mem(config, 512) == 100 and system.get_gpu_mem(config, 256) == 64
+    changed = system.set_gpu_mem_in_config(config, 512)
+    # the lines that would win over it on some boards, in model sections too, are taken out or
+    # set the same; the rest of the Pi 4 section is left alone
+    assert changed == ('# comment\n\ndisable_splash=1\n[pi4]\ngpu_mem=512\ndtoverlay=x\n'
+                       '[all]\ngpu_mem=512\n')
+    assert system.get_gpu_mem(changed, 1024) == 512
+    # the page says when a model section sets it differently
+    assert system.gpu_mem_in_model_sections(config) and system.gpu_mem_in_model_sections(changed)
+    assert not system.gpu_mem_in_model_sections('gpu_mem=64\n[pi4]\ndtoverlay=x\n')
+    assert 'have their own setting' not in client.get('/').data.decode()
+    open(system.CONFIG_FILE, 'w').write(config)
+    assert 'have their own setting' in client.get('/').data.decode()
+    # not set: added at the top, where it applies to every Pi
+    config = '# comment\n\ndisable_splash=1\n[pi4]\ndtoverlay=x\n'
+    changed = system.set_gpu_mem_in_config(config, 256)
+    assert changed == '# comment\n\ngpu_mem=256\ndisable_splash=1\n[pi4]\ndtoverlay=x\n' and system.get_gpu_mem(changed) == 256
+    # two lines for every Pi: one is left
+    assert system.set_gpu_mem_in_config('gpu_mem=64\ngpu_mem=128\n', 256) == 'gpu_mem=256\n'
+
+
+def test_device_info(pi, client, tmp_path, monkeypatch):
+    revision = tmp_path / 'cpuinfo'
+    revision.write_text('Hardware\t: BCM2835\nRevision\t: a02082\nSerial\t\t: 00000000deadbeef\nModel\t\t: Raspberry Pi 3\n')
+    (tmp_path / 'os-release').write_text('PRETTY_NAME="Raspbian GNU/Linux 10 (buster)"\nNAME="Raspbian GNU/Linux"\n')
+    (tmp_path / 'uptime').write_text('11520.42 40000.00\n')
+    monkeypatch.setattr(system, 'CPUINFO_FILE', str(revision))
+    monkeypatch.setattr(system, 'OS_RELEASE_FILE', str(tmp_path / 'os-release'))
+    monkeypatch.setattr(system, 'UPTIME_FILE', str(tmp_path / 'uptime'))
+    answers = {'get_mem gpu': 'gpu=256M', 'measure_temp': "temp=48.3'C", 'get_throttled': 'throttled=0x50000'}
+    monkeypatch.setattr(system, 'run_command', lambda cmd: (True, answers[' '.join(cmd[1:])]) if cmd[0] == 'vcgencmd'
+                        else pi.run_command(cmd))
+    info = dict(system.get_device_info())
+    assert info['Model'] == 'Raspberry Pi 3 Model B Rev 1.2' and info['Memory'] == '1 GB'
+    assert info['Graphics memory'] == '256 MB' and info['Temperature'] == '48.3 °C'
+    assert 'Was too low' in info['Power'] and info['Running for'] == '3 h 12 min'
+    assert info['Operating system'] == 'Raspbian GNU/Linux 10 (buster)' and info['Serial number'] == '00000000deadbeef'
+    assert 'free of' in info['Media partition']
+    page = client.get('/').data.decode()
+    assert '<dt>Memory</dt><dd>1 GB</dd>' in page and 'Raspbian GNU/Linux 10 (buster)' in page
+    # a Pi 4 with 4 GB; power fine
+    revision.write_text('Revision\t: c03114\n')
+    answers['get_throttled'] = 'throttled=0x0'
+    info = dict(system.get_device_info())
+    assert info['Memory'] == '4 GB' and info['Power'] == 'OK' and 'Serial number' not in info
+    # old boards, no vcgencmd, nothing readable: only what is known
+    revision.write_text('Revision\t: 000e\n')
+    monkeypatch.setattr(system, 'run_command', lambda cmd: (False, 'not found'))
+    (tmp_path / 'model').unlink()
+    info = dict(system.get_device_info())
+    assert info['Memory'] == '861 MB for programs' and 'Model' not in info and 'Power' not in info
+    assert system.format_duration(59) == '0 min' and system.format_duration(3 * 86400 + 7200) == '3 d 2 h'

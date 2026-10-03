@@ -14,6 +14,7 @@ import socket
 import time
 import tempfile
 import threading
+import uuid
 from datetime import timedelta
 
 from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, g
@@ -152,8 +153,10 @@ def index():
     is_available = system.media_available()
     # Get sound devices from aplay -l
     sound_status, sound_out = system.run_command(["aplay", "-l"])
-    current_mode_key, current_mode = system.get_current_video_mode(system.read_config_text())
+    config_text = system.read_config_text() or ''
+    current_mode_key, current_mode = system.get_current_video_mode(config_text)
     free_space = system.get_free_space() if is_available else 0
+    board = system.board_memory_megabytes()
 
     return render_template('index.html',
                            playlist=system.get_playlist(),
@@ -168,7 +171,13 @@ def index():
                            current_mode=current_mode,
                            current_mode_key=current_mode_key,
                            video_modes=system.VIDEO_MODES,
+                           gpu_mem=system.get_gpu_mem(config_text, board),
+                           gpu_mem_in_sections=system.gpu_mem_in_model_sections(config_text),
+                           gpu_mem_choices=system.gpu_mem_choices(board),
+                           gpu_mem_recommended=system.recommended_gpu_mem(board),
+                           memory_mb=system.memory_megabytes(),
                            network_status=system.get_network_status(),
+                           device_info=system.get_device_info(),
                            display_info=system.get_display_info(),
                            current_sound_card=system.get_current_sound_card(),
                            script_content=system.read_script_file(),
@@ -209,12 +218,14 @@ def player_view(status):
     browser doesn't depend on the Pi's clock (which may be wrong without a network)."""
     view = {'running': bool(status), 'state': None, 'text': describe_player_status(status), 'file': None,
             'name': None, 'folder': None, 'kind': None, 'loop': False, 'position': None, 'length': None,
-            'play_file': False, 'rewind': False}
+            'play_file': False, 'rewind': False, 'engine': None}
     if not status:
         return view
     path = status.get('file') or None
     view.update(state=status.get('state'), file=path, play_file=status.get('play_file') is True,
                 rewind=status.get('rewind') is True,
+                engine=(status.get('engine') if status.get('engine') in ('vlc', 'omxplayer', 'omxplayer-sync')
+                        and status.get('state') in ('playing', 'paused', 'sync') else None),
                 name=os.path.basename(path) if path else None,
                 folder=os.path.basename(os.path.dirname(path)) if path else None,
                 kind=system.media_kind(path) if path else None, loop='loop.' in (path or ''))
@@ -316,6 +327,8 @@ def player_rewind():
         error = "The player is not running."
     elif status.get('state') not in ('playing', 'paused'):
         error = "Nothing is playing." if status.get('state') != 'sync' else "This doesn't work in sync mode."
+    elif status.get('rewind') is False:
+        error = "The start-up video can't go back to the start."
     elif status.get('rewind') is not True:
         error = "This player script can't go back to the start (it is from an older version)."
     else:
@@ -357,11 +370,31 @@ def set_loop_player():
     if choice not in system.LOOP_PLAYERS:
         flash("Please choose VLC or omxplayer.", "error")
         return redirect(url_for('index'))
+    name = 'omxplayer' if choice == 'omxplayer' else 'VLC'
     try:
         system.save_player_setting('loop_player', choice)
-        flash(f"Loop videos are now played with {'omxplayer' if choice == 'omxplayer' else 'VLC'}.", "success")
     except Exception as e:
         flash(f"Failed to save the setting: {e}", "error")
+        return redirect(url_for('index'))
+    # a loop video playing now starts again if another program will loop it (VLC is used if
+    # omxplayer isn't installed). loop_player: the program looping it (while an omxplayer loop's
+    # first frame is held, VLC shows it); older players only say which program shows it
+    status = system.get_player_status() or {}
+    playing = status.get('file') or ''
+    # (loop_omx_ok: whether omxplayer could loop this file at all: file type, codec)
+    will_use = ('omxplayer' if choice == 'omxplayer' and system.omxplayer_installed()
+                and status.get('loop_omx_ok') is not False else 'vlc')
+    if (status.get('state') in ('playing', 'paused') and 'loop.' in playing and status.get('play_file') is True
+            and (status.get('loop_player') or status.get('engine')) in ('vlc', 'omxplayer')
+            and (status.get('loop_player') or status.get('engine')) != will_use
+            and any(entry['path'] == playing for entry in system.get_playlist())):
+        try:
+            if system.request_play(playing):
+                flash(f"Loop videos are now played with {name}; {os.path.basename(playing)} has started again.", "success")
+                return redirect(url_for('index'))
+        except OSError:
+            pass
+    flash(f"Loop videos are now played with {name}.", "success")
     return redirect(url_for('index'))
 
 
@@ -451,6 +484,55 @@ def delete_file():
     return redirect(url_for('index'))
 
 
+_rename_lock = threading.Lock()
+
+@app.route('/rename', methods=['POST'])
+def rename_file():
+    filename = request.form.get('filename', '')
+    new_name = request.form.get('new_name', '').strip()
+    if not system.media_available():
+        flash(f"The media partition {system.MEDIA_PATH} is not mounted.", "error")
+        return redirect(url_for('index'))
+    if not system.is_valid_filename(filename):
+        flash("Invalid filename.", "error")
+        return redirect(url_for('index'))
+    if not system.is_valid_filename(new_name):
+        flash("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
+        return redirect(url_for('index'))
+    old_path = os.path.join(system.MEDIA_PATH, filename)
+    new_path = os.path.join(system.MEDIA_PATH, new_name)
+    # one at a time, so two renames to the same name can't overwrite a file
+    with _rename_lock:
+        if not os.path.isfile(old_path):
+            flash("File not found.", "error")
+            return redirect(url_for('index'))
+        # the media partition (exFAT) ignores case: a name differing only in case is the same file,
+        # and renaming it straight to that name changes nothing, so it goes through another name
+        case_only = os.path.exists(new_path) and os.path.samefile(old_path, new_path)
+        if os.path.exists(new_path) and not case_only:
+            flash(f"There is already a file called '{new_name}'.", "error")
+            return redirect(url_for('index'))
+        try:
+            with system.writable(system.MEDIA_PATH):
+                if case_only:
+                    between = os.path.join(system.MEDIA_PATH, '.rename-' + uuid.uuid4().hex)
+                    os.rename(old_path, between)
+                    try:
+                        os.rename(between, new_path)
+                    except OSError:
+                        os.rename(between, old_path)
+                        raise
+                else:
+                    os.rename(old_path, new_path)
+        except Exception as e:
+            flash(f"Failed to rename the file: {e}", "error")
+            return redirect(url_for('index'))
+    flash(f"Renamed '{filename}' to '{new_name}'.", "success")
+    if '.' not in new_name:
+        flash(f"'{new_name}' has no extension, so the player won't play it.", "warning")
+    return redirect(url_for('index'))
+
+
 # ----- Reboot ----- #
 @app.route('/reboot', methods=['POST'])
 def reboot_system():
@@ -517,6 +599,28 @@ def set_video_mode():
         return redirect(url_for('confirm_reboot'))
     except Exception as e:
         flash(f"Error setting video mode: {str(e)}", "error")
+        return redirect(url_for('index'))
+
+
+@app.route('/set_gpu_mem', methods=['POST'])
+def set_gpu_mem():
+    value = request.form.get('gpu_mem', '')
+    choices = system.gpu_mem_choices()
+    if not value.isdecimal() or int(value) not in choices:
+        # too much leaves Linux too little to start
+        flash(f"Please choose {' or '.join(str(c) for c in choices)} MB.", "error")
+        return redirect(url_for('index'))
+    try:
+        config_text = system.read_config_text()
+        if not config_text:
+            flash(f"Could not read {system.CONFIG_FILE}.", "error")
+            return redirect(url_for('index'))
+        with system.writable(system.BOOT_PATH):
+            system.write_file(system.CONFIG_FILE, system.set_gpu_mem_in_config(config_text, int(value)))
+        flash(f"Graphics memory set to {int(value)} MB.", "success")
+        return redirect(url_for('confirm_reboot'))
+    except Exception as e:
+        flash(f"Error setting the graphics memory: {e}", "error")
         return redirect(url_for('index'))
 
 

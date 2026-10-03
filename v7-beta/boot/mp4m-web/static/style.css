@@ -366,6 +366,23 @@ pre.log {
   margin-top: 0;
 }
 
+.device-info {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.device-info dt {
+  color: var(--muted);
+}
+
+.device-info dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .hint {
   color: var(--muted);
   font-size: 13px;

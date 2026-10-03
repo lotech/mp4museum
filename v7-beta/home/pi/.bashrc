@@ -119,7 +119,7 @@ if [[ $(tty) == /dev/tty1 ]]; then
 # the web interface runs as a service: systemctl status mp4m-webservice
 
 # mp4museum autostart. If the player stops by itself (an error, or out of memory), it is
-# started again; stopped on purpose (Ctrl-C) it exits with 0 and you get the console.
+# started again; stopped on purpose (Ctrl-C) you get the console.
 # Its output is in /tmp/mp4museum.log (the web interface shows the end of it).
 setterm -cursor off
 clear
@@ -130,6 +130,11 @@ while true; do
   python3 /boot/mp4museum.py >> /tmp/mp4museum.log 2>&1
   status=$?
   [ $status -eq 0 ] && break
+  # Ctrl-C with a player script from before (edited, so kept by install.sh): Python 3.7 exits with 1
+  # and a KeyboardInterrupt traceback, later versions with 130. A stop on purpose too.
+  if [ $status -eq 130 ] || tail -n 3 /tmp/mp4museum.log | grep -q '^KeyboardInterrupt'; then
+    break
+  fi
   echo "$(date '+%F %T') the player stopped (exit code $status), starting it again" >> /tmp/mp4museum.log
   # the log is in memory: keep the end of it
   if [ "$(stat -c %s /tmp/mp4museum.log)" -gt 1000000 ]; then

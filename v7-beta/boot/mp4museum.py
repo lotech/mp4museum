@@ -70,8 +70,16 @@ def read_settings():
         pass
     return settings
 
-def write_status(state, source=None, position=None, length=None, temp='.tmp'):
+# the program looping the loop file playing now ('vlc', 'omxplayer'), else None: while an
+# omxplayer loop's first frame is held, VLC shows it (engine) but the loop is omxplayer's
+loop_engine = None
+# whether omxplayer could loop it (installed, file type, codec), so the web interface knows
+# if choosing omxplayer would change anything
+loop_omx_ok = None
+
+def write_status(state, source=None, position=None, length=None, temp='.tmp', engine='vlc'):
     # position and length in seconds, when known; play_file: this player reads PLAY_REQUEST_FILE.
+    # rewind: it can go back to the first frame (False until the playlist starts)
     # temp: the quit signal handler uses its own temp file, as it can interrupt this one
     try:
         with open(STATUS_FILE + temp, 'w') as f:
@@ -79,7 +87,8 @@ def write_status(state, source=None, position=None, length=None, temp='.tmp'):
             # the Pi sets its time from the network (it has no clock of its own)
             json.dump({'state': state, 'file': source, 'since': time.time(), 'mono': time.monotonic(),
                        'pid': os.getpid(), 'position': position, 'length': length, 'play_file': True,
-                       'rewind': True}, f)
+                       'rewind': playlist_started, 'engine': engine, 'loop_player': loop_engine,
+                       'loop_omx_ok': loop_omx_ok}, f)
         os.replace(STATUS_FILE + temp, STATUS_FILE)
     except OSError:
         pass
@@ -140,29 +149,26 @@ def play_request():
     handled_play_request = request_id
     return request
 
-# back to the first frame, paused, until play is pressed
+# back to the first frame, paused, until play is pressed. The file is started again rather than
+# VLC jumping back: on the Pi it was slow to play on after a jump back, with a black frame.
 rewind_requested = False
-rewound = False
-# play pressed while a rewind is on its way: the first frame isn't held
+# play pressed while a rewind is on its way: it plays on as soon as the first frame is shown
 play_requested = False
+# rewind is for the playlist, not the boot video and logo
+playlist_started = False
 
 def take_play_request():
     global play_requested
     requested, play_requested = play_requested, False
     return requested
 def rewind():
-    global rewind_requested, rewound
-    if skip_requested:
+    global rewind_requested
+    if skip_requested or not playlist_started:
         # next was pressed first: the file is on its way out
         return
-    if not omx and player.get_state() in (vlc.State.Playing, vlc.State.Paused):
-        player.set_time(0)
-        player.set_pause(1)
-        rewound = True
-    else:
-        # omxplayer can't hold a frame: omx_loop shows it in VLC. Between files: the next file
-        # waits at its first frame (vlc_play, omx_loop)
-        rewind_requested = True
+    # vlc_play and omx_loop start the file again; between files, the next file waits at its
+    # first frame. omxplayer can't hold a frame: omx_loop shows it in VLC.
+    rewind_requested = True
 
 # stop the current file; also ends a loop file (omx_loop stops omxplayer). Read here, with
 # the signal the web interface sends after it, so the file chosen there plays next
@@ -213,8 +219,34 @@ def quit_player(signum, frame):
 for quit_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(quit_signal, quit_player)
 
+def pause_at_first_picture(started):
+    """Pause as soon as VLC shows the first picture (a moment after it says it plays).
+    Returns 'held', 'playing' (play was pressed meanwhile) or None if it didn't get that far."""
+    global rewind_requested
+    playing_since = None
+    while not skip_requested and time.time() - started < OPEN_TIMEOUT:
+        state = player.get_state()
+        if state in (vlc.State.Ended, vlc.State.Error, vlc.State.Stopped):
+            break
+        if state == vlc.State.Playing:
+            playing_since = playing_since or time.time()
+            if player.get_time() > 0 or time.time() - playing_since > .5:
+                break
+        time.sleep(.01)
+    showing = player.get_state() == vlc.State.Playing
+    rewind_requested = False
+    # a play press waiting for this picture is used up either way
+    play_pressed = take_play_request()
+    if not showing:
+        return None
+    if play_pressed:
+        return 'playing'
+    player.set_pause(1)
+    return 'held'
+
 # play media with vlc and wait until it has finished
-# returns 'ended', 'skipped' (next was pressed) or 'failed' (it didn't play)
+# returns 'ended', 'skipped' (next was pressed), 'rewind' (to be started again, held at its
+# first frame) or 'failed' (it didn't play)
 def vlc_play(source, options=(), limit=None):
     """limit: seconds it may play (not counting pauses) before it is stopped."""
     media = vlc_instance.media_new(source, *options)
@@ -224,11 +256,14 @@ def vlc_play(source, options=(), limit=None):
     shown_state = 'playing'
     shown_length = 0
     write_status(shown_state, source, 0)
-    time.sleep(1)
+    if rewind_requested:
+        # rewind: held at the first frame until play is pressed
+        pause_at_first_picture(started)
+    else:
+        time.sleep(1)
     current_state = player.get_state()
     has_played = False
-    global rewound, rewind_requested
-    rewound = False
+    rewinding = False
     unpaused, checked = 1, time.time()
     while current_state in (vlc.State.Opening, vlc.State.Buffering, vlc.State.Playing, vlc.State.Paused):
         if skip_requested:
@@ -248,17 +283,11 @@ def vlc_play(source, options=(), limit=None):
             print("skipping %s: it didn't start playing" % source, flush=True)
             break
         if rewind_requested and current_state in (vlc.State.Playing, vlc.State.Paused):
-            # rewind pressed between files: this one waits at its first frame
-            rewind_requested = False
-            player.set_time(0)
-            if not take_play_request():
-                player.set_pause(1)
-            rewound = True
+            # started again by the caller, without stopping (that would show black frames)
+            rewinding = True
+            break
         state = 'paused' if current_state == vlc.State.Paused else 'playing'
         length = player.get_length()
-        if rewound:
-            # back at the start: show it, and an image's time starts again
-            rewound, shown_state, unpaused = False, None, 0
         if state != shown_state or (length > 0 and length != shown_length):
             shown_state, shown_length = state, length
             write_status(state, source, max(0, player.get_time()) / 1000, length / 1000 if length > 0 else None)
@@ -267,7 +296,7 @@ def vlc_play(source, options=(), limit=None):
     # a very short file can be over before the first check
     if current_state == vlc.State.Ended:
         has_played = True
-    else:
+    elif not rewinding:
         # skipped, failed or stuck. A file that ended by itself is not stopped: stopping
         # closes VLC's video output (black frames), so the next file starts in the same
         # window and the last frame stays on screen until it does
@@ -275,6 +304,8 @@ def vlc_play(source, options=(), limit=None):
     media.release()
     if skip_requested:
         return 'skipped'
+    if rewinding:
+        return 'rewind'
     return 'ended' if has_played else 'failed'
 
 # loop video files with omxplayer (unless the setting is loop_player=vlc): it loops inside
@@ -282,6 +313,8 @@ def vlc_play(source, options=(), limit=None):
 # file again on the Pi. omxplayer is no longer developed (it doesn't work on newer Raspberry
 # Pi OS), but it is on the v7 image; VLC is used if it isn't installed or can't play the file
 OMX_LOOP_TYPES = ('.mp4', '.m4v', '.mov', '.mkv', '.avi', '.ts', '.h264')
+# seconds VLC keeps showing a held frame while omxplayer starts (it takes about a second)
+HANDOVER = 1.5
 
 def omx_can_play(source):
     """True if the video is H.264 or MPEG-4, which omxplayer decodes on every Pi. With other
@@ -334,28 +367,44 @@ def omx_loop(source):
     # VLC lets go of the screen; omxplayer blanks the background behind the video (-b)
     player.stop()
     while not skip_requested:
+        held = None
         if rewind_requested:
-            hold_first_frame(source)
-            if skip_requested:
-                break
+            held = hold_first_frame(source)
+        def let_go():
+            # VLC stops showing the held frame
+            player.stop()
+            held.release()
+        if skip_requested:
+            if held:
+                let_go()
+            break
         omx_paused = False
         started = time.time()
+        # after a held frame, no black background (-b): VLC shows the frame until omxplayer's
+        # picture is up (the console behind is black, see .bashrc)
         try:
-            process = subprocess.Popen(['omxplayer', '--loop', '--no-osd', '-b',
-                                        '-o', 'alsa:plughw:%s,0' % audiodevice, source],
+            process = subprocess.Popen(['omxplayer', '--loop', '--no-osd'] + ([] if held else ['-b']) +
+                                       ['-o', 'alsa:plughw:%s,0' % audiodevice, source],
                                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                        stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
+            if held:
+                let_go()
             return 'failed'
         omx_started = started
         omx = process
         shown_state = None
         while process.poll() is None and not skip_requested and not rewind_requested:
+            if held and time.time() - started > HANDOVER:
+                let_go()
+                held = None
             state = 'paused' if omx_paused else 'playing'
             if state != shown_state:
                 shown_state = state
-                write_status(state, source)
+                write_status(state, source, engine='omxplayer')
             time.sleep(.05)
+        if held:
+            let_go()
         stop_omx(process)
         omx = None
         if skip_requested:
@@ -499,30 +548,29 @@ def image_size(path):
 
 def hold_first_frame(source):
     """Show a video's first frame in VLC, paused, until play or next is pressed (for omxplayer,
-    which can't hold a frame)."""
-    media = vlc_instance.media_new(source)
-    player.set_media(media)
-    player.play()
-    started = time.time()
-    global rewind_requested
-    while (player.get_state() not in (vlc.State.Playing, vlc.State.Ended, vlc.State.Error)
-           and time.time() - started < OPEN_TIMEOUT and not skip_requested):
-        time.sleep(.01)
-    player.set_pause(1)
-    # VLC pauses a moment later
-    paused_by = time.time() + 2
-    while player.get_state() == vlc.State.Playing and time.time() < paused_by and not skip_requested:
-        time.sleep(.01)
-    player.set_time(0)
-    # from here play presses go to VLC; one pressed on the way means: play it from the start
-    rewind_requested = False
-    if not take_play_request():
-        write_status('paused', source, 0)
-        while player.get_state() == vlc.State.Paused and not skip_requested:
-            time.sleep(.05)
-    # omxplayer takes the screen again
-    player.stop()
-    media.release()
+    which can't hold a frame). Returns the media, with VLC still showing that frame: omx_loop
+    starts omxplayer in front of it, so there is no black screen in between."""
+    while True:
+        media = vlc_instance.media_new(source)
+        player.set_media(media)
+        player.play()
+        shown = pause_at_first_picture(time.time())
+        if shown == 'held':
+            write_status('paused', source, 0)
+            # VLC pauses a moment later
+            paused_by = time.time() + 2
+            while player.get_state() == vlc.State.Playing and time.time() < paused_by and not skip_requested:
+                time.sleep(.01)
+            while player.get_state() == vlc.State.Paused and not skip_requested and not rewind_requested:
+                time.sleep(.05)
+        if rewind_requested and not skip_requested:
+            # rewind pressed again while held: start it again
+            media.release()
+            continue
+        if shown and not skip_requested:
+            # play: VLC holds this picture while omxplayer starts
+            player.set_pause(1)
+        return media
 
 # find a file, and if found, return its path (for sync)
 def search_file(file_name):
@@ -542,7 +590,7 @@ def sync_mode():
                 vlc_play(intro)
             # VLC lets go of the screen for omxplayer
             player.stop()
-            write_status('sync', sync_file)
+            write_status('sync', sync_file, engine='omxplayer-sync')
             subprocess.run(["omxplayer-sync", "-u", flag, sync_file])
 
 # *** run player ****
@@ -575,6 +623,7 @@ sync_mode()
 
 # the loop
 retry_next_round = False
+playlist_started = True
 try:
     while(1):
         files = sorted(glob.glob(MEDIA_FILES))
@@ -626,22 +675,34 @@ try:
             # read for every file, so a new image duration applies straight away
             settings = read_settings()
             options = [':image-duration=%d' % settings['image_duration']]
+            loop_engine = loop_omx_ok = None
             if "loop." in file:
                 # play it again and again until next is pressed
-                if (settings['loop_player'] == 'omxplayer' and file.lower().endswith(OMX_LOOP_TYPES)
-                        and shutil.which("omxplayer") and omx_can_play(file)):
+                loop_omx_ok = bool(file.lower().endswith(OMX_LOOP_TYPES) and shutil.which("omxplayer")
+                                   and omx_can_play(file))
+                if settings['loop_player'] == 'omxplayer' and loop_omx_ok:
+                    loop_engine = 'omxplayer'
                     if omx_loop(file) != 'failed':
                         forgive(file)
                         continue
                     print("falling back to VLC for %s" % file, flush=True)
+                    loop_omx_ok = False
+                loop_engine = 'vlc'
                 # VLC starts it again in the same window each time it ends
-                while not skip_requested and vlc_play(file, options) == 'ended':
+                while not skip_requested:
+                    result = vlc_play(file, options)
+                    if result == 'ended':
+                        forgive(file)
+                    elif result != 'rewind':
+                        break
+            else:
+                limit = settings['image_duration'] + IMAGE_GRACE if file.lower().endswith(IMAGE_TYPES) else None
+                result = vlc_play(file, options, limit=limit)
+                while result == 'rewind':
+                    # started again, held at its first frame
+                    result = vlc_play(file, options, limit=limit)
+                if result == 'ended':
                     forgive(file)
-            elif file.lower().endswith(IMAGE_TYPES):
-                if vlc_play(file, options, limit=settings['image_duration'] + IMAGE_GRACE) == 'ended':
-                    forgive(file)
-            elif vlc_play(file, options) == 'ended':
-                forgive(file)
         if files and not played:
             # nothing could be played: better to try the skipped files again than show nothing
             if any(count >= SKIP_AFTER for version, count in skipped.values()):

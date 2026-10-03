@@ -299,17 +299,19 @@ def test_ctrl_c_stops_the_player_with_exit_code_0(tmp_path):
     assert r['log'][-1] == {'exit': '0'} and killpgs(r)[:1] == [(2, 40)]
 
 
-def bashrc_autostart(tmp_path, exit_codes, output=0):
+def bashrc_autostart(tmp_path, exit_codes, output=0, last_line=None):
     """Run the autostart part of .bashrc with a fake python3 that exits with these codes in turn
     (printing output bytes each time). Returns how often it ran, the log and the waits between."""
+    tmp_path.mkdir(exist_ok=True)
     bashrc = (Path(__file__).parents[1] / 'v7-beta' / 'home' / 'pi' / '.bashrc').read_text()
     start = bashrc.index('# mp4museum autostart')
     block = bashrc[start:bashrc.index('setterm -cursor on', start)].replace('/tmp/mp4museum.log', str(tmp_path / 'log'))
     bin_dir = tmp_path / 'bin'
     bin_dir.mkdir(exist_ok=True)
     (tmp_path / 'codes').write_text(' '.join(map(str, exit_codes)))
-    fakes = {'python3': 'set -- $(cat "%s"); echo "run $*" >> "%s"; echo "${@:2}" > "%s"; head -c %d /dev/zero | tr "\\0" x; exit $1'
-                        % (tmp_path / 'codes', tmp_path / 'runs', tmp_path / 'codes', output),
+    fakes = {'python3': 'set -- $(cat "%s"); echo "run $*" >> "%s"; echo "${@:2}" > "%s"; head -c %d /dev/zero | tr "\\0" x; %s exit $1'
+                        % (tmp_path / 'codes', tmp_path / 'runs', tmp_path / 'codes', output,
+                           'echo; echo "%s";' % last_line if last_line else ''),
              'setterm': 'exit 0', 'clear': 'exit 0', 'sleep': 'echo $1 >> "%s"' % (tmp_path / 'sleeps')}
     for name, body in fakes.items():
         (bin_dir / name).write_text('#!/bin/bash\n' + body + '\n')
@@ -429,11 +431,18 @@ def test_rewind_holds_the_first_frame(tmp_path):
     files = ['/media/internal/a.mp4', '/media/internal/b.mp4']
     r = run(tmp_path, files=files, media={'a.mp4': 100},
             signals=[{'at': 50, 'command': 'rewind'}, {'at': 70, 'signal': 'SIGUSR2'}], max_plays=5)
-    assert [e['set_time'] for e in r['log'] if 'set_time' in e] == [0]
+    # started again (on the Pi VLC was slow to play on after jumping back), without stopping
+    # it first (black frames), and paused as soon as its first picture is shown
+    assert plays(r)[3:5] == ['a.mp4', 'a.mp4'] and 50 <= [e['at'] for e in r['log'] if 'play' in e][4] <= 51
+    assert not [e for e in r['log'] if 'stop_call' in e and 30 < e.get('at', 50) < 70] and 'set_time' not in str(r['log'])
     held = [s for s in r['statuses'] if s['state'] == 'paused'][0]
-    assert held['file'].endswith('a.mp4') and held['position'] == 0 and held['rewind'] is True
+    assert held['file'].endswith('a.mp4') and held['position'] < .1 and held['rewind'] is True
     # held for 20 seconds, then the whole file plays from the start
     assert 169 <= first_play(r, 'b.mp4')['at'] <= 172
+    # not offered for the boot video and logo
+    playlist = [i for i, s in enumerate(r['statuses']) if s['file'] and s['file'].startswith('/media/')][0]
+    assert playlist > 0 and not any(s['rewind'] for s in r['statuses'][:playlist])
+    assert all(s['rewind'] is True for s in r['statuses'][playlist:])
     # already paused: it stays paused, at the start
     r = run(tmp_path, files=files, media={'a.mp4': 100},
             signals=[{'at': 40, 'signal': 'SIGUSR2'}, {'at': 50, 'command': 'rewind'}], max_seconds=200)
@@ -449,7 +458,12 @@ def test_rewind_a_loop_in_omxplayer(tmp_path):
     assert killpgs(r)[0] == (2, 40)
     assert plays(r)[3:] == ['clip-loop.mp4']          # the first frame, in VLC
     held = [s for s in r['statuses'] if s['state'] == 'paused'][0]
-    assert held['file'].endswith('clip-loop.mp4') and held['position'] == 0
+    assert held['file'].endswith('clip-loop.mp4') and held['position'] == 0 and held['engine'] == 'vlc'
+    # omxplayer starts in front of the held frame (no black background), then VLC lets go of it
+    first, second = omx_starts(r)
+    assert '-b' in first['omxplayer'] and '-b' not in second['omxplayer']
+    let_go = [e['at'] for e in r['log'] if 'stop_call' in e and e['stop_call'].endswith('clip-loop.mp4')]
+    assert second['at'] + 1.4 <= let_go[-1] <= second['at'] + 1.7 and [s['engine'] for s in r['statuses'] if s['state'] == 'playing'][-1] == 'omxplayer'
 
 
 def test_rewind_then_next_leaves_nothing_behind(tmp_path):
@@ -470,7 +484,7 @@ def test_rewind_between_files_holds_the_next_one(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/b.mp4'], max_seconds=120,
             signals=[{'at': 25, 'command': 'rewind', 'when': 'settings'}])
     held = [s for s in r['statuses'] if s['state'] == 'paused']
-    assert held and held[0]['file'].endswith('b.mp4') and held[0]['position'] == 0
+    assert held and held[0]['file'].endswith('b.mp4') and held[0]['position'] < .1
     assert plays(r)[3:] == ['a.mp4', 'b.mp4']
 
 
@@ -537,3 +551,65 @@ def test_boot_video_forgiven_only_after_both_plays(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4'], write=custom, crashed={'file': '/boot/mp4museum-boot.mp4', 'times': 1},
             max_plays=4)
     assert r['skipped'] == []
+
+
+def test_bashrc_ctrl_c_with_a_player_script_from_before(tmp_path):
+    # an edited player kept by install.sh, without the quit handlers: Python 3.7 exits with 1 and a
+    # KeyboardInterrupt traceback on Ctrl-C (3.8 and later with 130). Either way it's a stop on purpose.
+    runs, log, sleeps = bashrc_autostart(tmp_path, [1, 0], output=0, last_line='KeyboardInterrupt')
+    assert runs == 1 and 'starting it again' not in log
+    runs, log, sleeps = bashrc_autostart(tmp_path / 'b', [130, 0])
+    assert runs == 1
+
+
+def test_rewind_a_loop_in_vlc(tmp_path):
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], media={'clip-loop.mp4': 30},
+            write={'/boot/mp4m-player.txt': 'loop_player=vlc\n'},
+            signals=[{'at': 40, 'command': 'rewind'}, {'at': 60, 'signal': 'SIGUSR2'}], max_seconds=150)
+    starts = [round(e['at']) for e in r['log'] if e.get('play', '').endswith('clip-loop.mp4')]
+    # pass at 20, started again at 40 and held until 60, then 30 s passes again
+    assert starts[:4] == [20, 40, 90, 120], starts
+    held = [s for s in r['statuses'] if s['state'] == 'paused']
+    assert held[0]['engine'] == 'vlc' and held[0]['position'] < .1
+
+
+def test_rewind_again_while_held(tmp_path):
+    # the rewind button stays on while the first frame is held: pressing it again mustn't stop play from working
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'],
+            signals=[{'at': 40, 'command': 'rewind'}, {'at': 50, 'command': 'rewind'},
+                     {'at': 60, 'signal': 'SIGUSR2'}], max_seconds=100)
+    starts = [round(e['at']) for e in omx_starts(r)]
+    assert len(starts) == 2 and 60 <= starts[1] <= 61, starts
+
+
+def test_play_pressed_for_a_file_that_fails_is_forgotten(tmp_path):
+    # rewind between files, play pressed, the file doesn't open: the next rewind still holds
+    files = ['/media/internal/a.mp4', '/media/internal/b.mp4', '/media/internal/c.mp4']
+    r = run(tmp_path, files=files, media={'b.mp4': 'stuck', 'c.mp4': 100}, max_seconds=150,
+            signals=[{'at': 25, 'command': 'rewind', 'when': 'settings'}, {'at': 30, 'signal': 'SIGUSR2'},
+                     {'at': 90, 'command': 'rewind'}])
+    assert 'c.mp4' in plays(r)
+    held = [s for s in r['statuses'] if s['state'] == 'paused']
+    assert held and held[-1]['file'].endswith('c.mp4')
+
+
+def test_status_says_which_program_loops_it(tmp_path):
+    # while an omxplayer loop's first frame is held, VLC shows it but the loop is still omxplayer's
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/b.mp4'], installed=['omxplayer'],
+            signals=[{'at': 40, 'command': 'rewind'}], max_seconds=80)
+    held = [s for s in r['statuses'] if s['state'] == 'paused'][0]
+    assert held['engine'] == 'vlc' and held['loop_player'] == 'omxplayer'
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/b.mp4'],
+            write={'/boot/mp4m-player.txt': 'loop_player=vlc\n'}, max_plays=6)
+    assert {s['loop_player'] for s in r['statuses'] if (s['file'] or '').endswith('clip-loop.mp4')} == {'vlc'}
+    assert {s['loop_player'] for s in r['statuses'] if (s['file'] or '').endswith('b.mp4')} == {None}
+
+
+def test_status_says_whether_omxplayer_could_loop_it(tmp_path):
+    # for the web interface: choosing omxplayer only changes anything for loops it can play
+    for name, codec, ok in (('clip-loop.mp4', 'h264', True), ('clip-loop.mp4', 'hevc', False), ('clip-loop.webm', 'h264', False)):
+        r = run(tmp_path, files=['/media/internal/' + name], installed=['omxplayer'], omx_codec=codec,
+                write={'/boot/mp4m-player.txt': 'loop_player=vlc\n'}, max_plays=5)
+        assert {s['loop_omx_ok'] for s in r['statuses'] if s['file'] == '/media/internal/' + name} == {ok}, (name, codec)
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], write={'/boot/mp4m-player.txt': 'loop_player=vlc\n'}, max_plays=5)
+    assert {s['loop_omx_ok'] for s in r['statuses'] if s['file'] == '/media/internal/clip-loop.mp4'} == {False}

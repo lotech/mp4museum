@@ -112,6 +112,9 @@ function showPlayer(view) {
   folder.hidden = !active || !view.folder;
   folder.textContent = view.folder || '';
   document.getElementById('playerLoop').hidden = !active || !view.loop;
+  const engine = document.getElementById('playerEngine');
+  engine.hidden = !active || !view.engine;
+  engine.querySelector('span').textContent = {vlc: 'VLC'}[view.engine] || view.engine || '';
   setIcon(card.querySelector('.player-kind'), active ? KIND_ICONS[view.kind] || 'file' : 'square-play');
 
   const controls = view.running && ['playing', 'paused'].includes(state) && !playerBusy;
@@ -295,6 +298,17 @@ function uploadFile(url, file, index, count) {
     data.append('file', file);
     request.send(data);
   });
+}
+
+function askNewName(form) {
+  const name = prompt('New name for ' + form.filename.value + '\n\nFiles play in alphabetical order. ' +
+                      'Put "-loop" before the extension (e.g. intro-loop.mp4) to repeat a video until Next.',
+                      form.filename.value);
+  if (name === null || !name.trim() || name.trim() === form.filename.value) {
+    return false;
+  }
+  form.new_name.value = name.trim();
+  return true;
 }
 
 // ----- Software update ----- //

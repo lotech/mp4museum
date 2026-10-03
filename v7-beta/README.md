@@ -71,11 +71,12 @@ in alphabetical order, over and over.
 
 Open `http://<network name>.local` in a browser on the same network.
 
-- **Media:** the player (what is playing, Pause/Resume, Next, and Rewind: back to the first
-  frame, held until play is pressed), playback settings, and the
+- **Media:** the player (what is playing and with which program, VLC or omxplayer; Pause/Resume,
+  Next, and Rewind: the file starts again and holds its first frame until play is pressed),
+  playback settings (changing the loop player starts the loop video playing now again), and the
   playlist: every file the player plays, from the media partition and USB sticks, in order.
-  Start any file from there (its play button or its name); upload files (several at once, with progress) or download and
-  delete them.
+  Start any file from there (its play button or its name); upload files (several at once, with progress),
+  rename them (files play in alphabetical order; add `-loop` to repeat a video), download or delete them.
 - **Updates:** when the player has an internet connection, the page checks for a new version
   by itself (at most every few hours) and shows a bar to install it.
 
@@ -88,6 +89,13 @@ Open `http://<network name>.local` in a browser on the same network.
 - **Read-only storage:** `/boot` and `/media/internal` stay read-only, and are only made
   writable while the web interface saves something.
 - **Video presets** only change the video lines in `/boot/config.txt`; other settings are kept.
+- **Graphics memory** (Video tab): `gpu_mem` in `/boot/config.txt`, 128 MB on the v7 image.
+  256 MB is recommended on a Pi 3 (1 GB), 512 MB on a Pi 4 with 2 GB or more. Needs a reboot.
+  Boards with 512 MB or less are only offered values Linux can still start with, and
+  `gpu_mem_256`/`_512`/`_1024` lines (which win over `gpu_mem`) are taken out, and `gpu_mem`
+  lines in model sections such as `[pi4]` get the same value.
+- **Device** (System tab): the Pi's model, memory, graphics memory in use, temperature, whether
+  the power supply has been too weak since it started, free space and OS version.
 
 Files the web interface may create in `/boot`: `mp4m-password.txt`, `hostname.txt`, `alsa.txt`,
 `mp4m-player.txt`, `mp4museum.py.new`. `mp4m-update.txt` is only read.

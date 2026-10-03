@@ -59,6 +59,7 @@
             <span id="playerState" class="badge state">{{ player.state or 'stopped' }}</span>
             <span id="playerLoop" class="badge" {% if not player.loop %}hidden{% endif %}>{{ icon('repeat') }}loop</span>
             <span id="playerFolder" class="badge" {% if not player.folder %}hidden{% endif %}>{{ player.folder }}</span>
+            <span id="playerEngine" class="badge" title="The program showing it" {% if not player.engine %}hidden{% endif %}>{{ icon('monitor-play') }}<span>{{ {'vlc': 'VLC'}.get(player.engine, player.engine) }}</span></span>
           </div>
           <div id="playerTitle" class="screen-title">{{ player.name if player.name and player.state in ('playing', 'paused', 'sync') else player.text }}</div>
         </div>
@@ -160,6 +161,11 @@
           </div>
           <div class="item-actions">
             {% if entry.internal %}
+            <form method="post" action="{{ url_for('rename_file') }}" onsubmit="return askNewName(this)">
+              <input type="hidden" name="filename" value="{{ entry.name }}">
+              <input type="hidden" name="new_name" value="">
+              <button type="submit" class="icon-button" title="Rename" aria-label="Rename {{ entry.name }}">{{ icon('pencil') }}</button>
+            </form>
             <a class="icon-button" href="{{ url_for('download_file', filename=entry.name) }}" title="Download" aria-label="Download {{ entry.name }}">{{ icon('download') }}</a>
             <form method="post" action="{{ url_for('delete_file') }}" onsubmit="return confirm('Delete ' + this.filename.value + '?')">
               <input type="hidden" name="filename" value="{{ entry.name }}">
@@ -235,6 +241,7 @@
 {# ----- Video ----- #}
 <div id="video" class="tab-content">
   <div class="grid-2">
+    <div class="stack">
     <section class="card">
       <h3>{{ icon('monitor') }}Video mode</h3>
       <p class="current">Now: <strong>{{ current_mode }}</strong></p>
@@ -255,6 +262,26 @@
       <p class="hint">Needs a reboot. Only the video lines in /boot/config.txt are changed, your other settings are kept.
         NTSC and PAL use the composite (3.5mm AV) output, which is only active when no HDMI display is connected.</p>
     </section>
+
+    <section class="card">
+      <h3>{{ icon('cpu') }}Graphics memory</h3>
+      <p class="current">Now: <strong>{{ gpu_mem ~ ' MB' if gpu_mem else 'not set (the firmware default)' }}</strong></p>
+      <form method="post" action="{{ url_for('set_gpu_mem') }}" class="setting">
+        <label for="gpu_mem">Change to</label>
+        <div class="input-row">
+          <select name="gpu_mem" id="gpu_mem" required>
+            {% for megabytes in gpu_mem_choices %}
+            <option value="{{ megabytes }}" {% if megabytes == (gpu_mem or gpu_mem_recommended) %}selected{% endif %}>{{ megabytes }} MB{% if megabytes == gpu_mem_recommended %} (recommended){% endif %}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="button">Apply</button>
+        </div>
+      </form>
+      <p class="hint">Needs a reboot. Memory for decoding video and drawing the screen.{% if memory_mb %}
+        Linux has {{ memory_mb }} MB besides it.{% endif %} Only the gpu_mem lines in /boot/config.txt are changed.{% if gpu_mem_in_sections %}
+        Some Pi models have their own setting there; Apply sets it for all of them.{% endif %}</p>
+    </section>
+    </div>
 
     <section class="card">
       <h3>{{ icon('info') }}Display</h3>
@@ -326,6 +353,16 @@
       </section>
     </div>
 
+    <div class="stack">
+    <section class="card">
+      <h3>{{ icon('circuit-board') }}Device</h3>
+      <dl class="device-info">
+        {% for label, value in device_info %}
+        <dt>{{ label }}</dt><dd>{{ value }}</dd>
+        {% endfor %}
+      </dl>
+    </section>
+
     <section class="card">
       <h3>{{ icon('key-round') }}Password</h3>
       {% if using_default_password %}
@@ -342,6 +379,7 @@
       </form>
       <p class="hint">Forgot it? Delete mp4m-password.txt from the SD card's boot partition to reset it to the default.</p>
     </section>
+    </div>
 
   </div>
   <section class="card network-card">
