@@ -90,7 +90,8 @@ a network is optional.
 - [ ] Updates that change files outside `/boot` (applied at boot, before the overlay is set up)
 
 - [x] Show the network name on screen: `http://<name>.local` and the IP address on the logo screen (VLC marquee), setting `show_address`
-- [ ] Test on the Pi: does the address show on the logo screen (VLC's marquee with the Pi's video output), is it readable, is it gone from the first file? Does the IP address appear when the network comes up during the logo?
+- [x] Tested on a Pi 3 B+: the address and IP show on the logo screen, then the playlist starts without them
+- [ ] Test on the Pi: does the IP address appear when the network comes up during the logo (e.g. boot video off, cold start)?
 - [ ] Announce the web interface over Bonjour/mDNS (`_http._tcp`) so players show up in network browsers
 - [ ] Offline setup: create a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (there is no Wi-Fi setting yet)
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
