@@ -53,6 +53,8 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   `loop_player`, `boot_video_plays`, `show_address`). Edited players from before may not
   write `play_file` in their status; the web interface then doesn't offer choosing a file.
   Keep the author's logo screen ("please do not remove my logo screen") and his `(c)` header.
+  The logo is `boot/mp4m-web/static/logo.jpg` (updates bring it; `/home/pi/mp4m-v7beta.jpg`
+  from the v7 image if it's missing); keep crediting MP4MUSEUM and Julius Schmiedel on it.
   Users can edit this file in the web interface, so the updater only replaces it if unedited.
 - `boot/mp4m-web/`: the web interface, on `/boot` so it can be updated with the overlay on.
   `webservice.py` (Flask routes), `system.py` (everything that touches the Pi),

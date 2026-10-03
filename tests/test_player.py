@@ -122,6 +122,23 @@ def test_address_on_the_logo_screen(tmp_path):
     assert not [e for e in r['log'] if 'stop_call' in e and logo < e['at'] <= first]
 
 
+
+def test_logo_from_the_web_interface_folder(tmp_path):
+    from pathlib import Path
+    logo = Path(__file__).resolve().parents[1] / 'v7-beta' / 'boot' / 'mp4m-web' / 'static' / 'logo.jpg'
+    r = run(tmp_path, files=['/media/internal/a.mp4'], logo=str(logo), max_plays=4)
+    # the one updates bring, 1920 x 1080: the address in proportion (24 on the old 1280 wide
+    # logo, 30 from the edges), grey like the logo's 'Please Wait'
+    assert plays(r)[2:4] == ['logo.jpg', 'a.mp4']
+    color, size, x, y = 2, 6, 8, 9
+    sizes = {e[0]: e[1] for e in marquee(r) if e[0] in (color, size, x, y)}
+    assert sizes == {color: 0xB0B0B0, size: 36, x: 45, y: 45}
+    # not there (installed before it existed, or removed): the old one in /home/pi
+    r = run(tmp_path, files=['/media/internal/a.mp4'], max_plays=4)
+    assert plays(r)[2] == 'mp4m-v7beta.jpg'
+    assert {e[0]: e[1] for e in marquee(r) if e[0] in (size, x)} == {size: 24, x: 30}
+
+
 def test_boot_video_plays_setting(tmp_path):
     for times in (0, 1, 2):
         r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=%d\n' % times},

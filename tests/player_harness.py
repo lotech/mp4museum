@@ -218,6 +218,7 @@ tmp = tempfile.mkdtemp()
 paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
          '/boot/alsa.txt': os.path.join(tmp, 'alsa.txt'), '/boot/mp4m-player.txt': os.path.join(tmp, 'mp4m-player.txt'),
          '/boot/hostname.txt': os.path.join(tmp, 'hostname.txt'),
+         '/boot/mp4m-web/static/logo.jpg': os.path.join(tmp, 'logo.jpg'),
          # scenario write: {'/proc/cpuinfo': 'Serial : ...'}; no network interfaces
          '/proc/cpuinfo': os.path.join(tmp, 'cpuinfo'), '/sys/class/net': os.path.join(tmp, 'net'),
          '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json'),
@@ -228,6 +229,9 @@ paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
 for real, fake in paths.items():
     if real in scenario.get('write', {}):
         open(fake, 'w').write(scenario['write'][real])
+# scenario logo: a file whose bytes are copied to the web interface's logo (else there is none)
+if 'logo' in scenario:
+    shutil.copyfile(scenario['logo'], paths['/boot/mp4m-web/static/logo.jpg'])
 # the boot video plays twice, as in the original, which most tests' times are written for (a
 # test's own boot_video_plays comes later in the file, so it wins). Scenario option
 # real_default: the player's own default

@@ -27,7 +27,10 @@ MEDIA_FILES = '/media/*/*.*'
 BOOT_VIDEO = '/home/pi/mp4museum-boot.mp4'
 # a boot video put on the boot partition (e.g. from a computer) is played instead
 CUSTOM_BOOT_VIDEO = '/boot/mp4museum-boot.mp4'
-LOGO = '/home/pi/mp4m-v7beta.jpg'
+# the logo screen: the one in the web interface's folder (updates bring it), else the one
+# install.sh put in /home/pi
+LOGO = '/boot/mp4m-web/static/logo.jpg'
+OLD_LOGO = '/home/pi/mp4m-v7beta.jpg'
 ALSA_FILE = '/boot/alsa.txt'
 # image_duration=<seconds>, loop_player=omxplayer|vlc, boot_video_plays=0|1|2 and
 # show_address=yes|no, set in the web interface
@@ -660,15 +663,19 @@ def address_text():
         pass
     return text
 
-def set_marquee(text):
+def set_marquee(text, width=1280):
     """Text in the bottom right corner of the picture, or None to take it off. VLC only sets it
-    on a picture being shown, so while a file plays."""
+    on a picture being shown, so while a file plays. Sizes are in the picture's pixels: width
+    is the picture's, so the text is the same size on any picture. Grey, like the logo's
+    'Please Wait', so it doesn't stand out more than the logo."""
     try:
         if text:
+            margin = max(10, round(30 * width / 1280))
             player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, text)
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, 30)
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.X, 30)
-            player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, 30)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, max(10, round(24 * width / 1280)))
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Color, 0xB0B0B0)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.X, margin)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, margin)
             player.video_set_marquee_int(vlc.VideoMarqueeOption.Position, 10)
         player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1 if text else 0)
         return True
@@ -679,7 +686,9 @@ def set_marquee(text):
 # the address on the logo screen, so it's easy to find the web interface: shown once the logo
 # is, and looked up again every 2 seconds until the Pi has an IP address
 class LogoAddress:
-    def __init__(self):
+    def __init__(self, picture):
+        size = image_size(picture)
+        self.width = size[0] if size else 1280
         self.text = None
         self.checked = 0
         self.failed = False
@@ -689,7 +698,7 @@ class LogoAddress:
             self.checked = time.time()
             text = address_text()
             if text != self.text:
-                if set_marquee(text):
+                if set_marquee(text, self.width):
                     self.text = text
                 else:
                     # VLC can't show it here: not tried again (it says why in the log once)
@@ -717,8 +726,9 @@ if boot_played and all(result == "ended" for result in boot_played):
 
 # please do not remove my logo screen
 skip_requested = False
-logo_address = LogoAddress() if settings['show_address'] else None
-vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,) + IMAGE_OPTIONS, while_playing=logo_address)
+logo = LOGO if os.path.isfile(LOGO) else OLD_LOGO
+logo_address = LogoAddress(logo) if settings['show_address'] else None
+vlc_play(logo, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,) + IMAGE_OPTIONS, while_playing=logo_address)
 if logo_address and logo_address.text is not None:
     # once the logo has ended, VLC can't take the address off: it would stay on the next file.
     # Stopping VLC drops its picture, and the address with it (a black moment, only at start-up)
