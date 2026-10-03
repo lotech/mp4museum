@@ -67,6 +67,7 @@ a network is optional.
 - [x] Rename files in the web interface (order, `-loop`)
 - [x] Graphics memory setting (Video tab): `gpu_mem`, recommended 256 MB on a Pi 3, 512 MB on a Pi 4
 - [x] Device info on the System tab: model, memory, graphics memory, temperature, power (under-voltage), media space, OS
+- [ ] Images keep VLC busy (one core at 100 % on a Pi 3, video ~0 %): it redraws the still about 10 times a second. Measure `--image-fps` / `--image-chroma` on the Pi, then use the best in the player
 - [ ] Test on the Pi: with 256 MB, does a 3300 x 2550 image show? (Then the 2048 pixel limit could go up)
 - [x] Tried mpv on the Pi 3B (Buster): it loops with a pause like omxplayer's, so no gain there. It also needs the KMS driver (`dtoverlay=vc4-fkms-v3d`, only set for a Pi 4 in `config.txt`; without it mpv has no video output: the Debian build has no `--vo=rpi`), installing from `legacy.raspbian.org` (Buster's packages moved there), `--hwdec=mmal-copy` (frames copied by the CPU, it dropped frames) and the picture was the wrong size. Worked: `mpv --fs --vo=gpu --gpu-context=drm --hwdec=mmal-copy --loop-file=inf <file>`
 - [ ] mpv again on a newer Raspberry Pi OS or a Pi 4 (KMS and hardware decoding are the default there, and omxplayer doesn't exist): seamless loops?, no black frames between files, images, control over its IPC socket

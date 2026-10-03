@@ -915,6 +915,14 @@ def test_device_info(pi, client, tmp_path, monkeypatch):
     answers['get_throttled'] = 'throttled=0x0'
     info = dict(system.get_device_info())
     assert info['Memory'] == '4 GB' and info['Power'] == 'OK' and 'Serial number' not in info
+    # slowed down by the heat: the power is fine (as seen on a Pi 3 B+ at 89 °C)
+    answers['get_throttled'], answers['measure_temp'] = 'throttled=0x60006', "temp=88.7'C"
+    info = dict(system.get_device_info())
+    assert info['Temperature'] == '88.7 °C (too hot: the Pi is slowing itself down)' and info['Power'] == 'OK'
+    # slowed down by low power: that is what the power line says
+    answers['get_throttled'] = 'throttled=0x50005'
+    info = dict(system.get_device_info())
+    assert info['Temperature'] == '88.7 °C' and info['Power'].startswith('Too low now')
     # old boards, no vcgencmd, nothing readable: only what is known
     revision.write_text('Revision\t: 000e\n')
     monkeypatch.setattr(system, 'run_command', lambda cmd: (False, 'not found'))
