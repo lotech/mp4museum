@@ -36,7 +36,8 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
 
 ## Code layout (`v7-beta/`)
 
-- `boot/mp4museum.py`: the player. One VLC instance; plays `/media/*/*.*` in order; GPIO
+- `boot/mp4museum.py`: the player. One VLC instance; plays the media files in `/media/*/` in order (`MEDIA_TYPES`, the same list as
+  `system.py`'s); GPIO
   pin 11 pause; pin 13 next (pressed once), previous (twice), back to the start (held). `.bashrc` starts it again unless it exits with 0 (Ctrl-C, SIGTERM,
   SIGHUP); a file it was playing when it died is skipped until replaced (`/tmp/mp4museum-skipped.json`),
   so one bad file can't stop it again and again. VLC is not stopped when a file ends by itself (`stop()` closes

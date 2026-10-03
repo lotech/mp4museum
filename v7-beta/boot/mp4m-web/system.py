@@ -673,9 +673,11 @@ def get_player_status():
         return None
     return status
 
-VIDEO_TYPES = ('.mp4', '.m4v', '.mov', '.mkv', '.avi', '.ts', '.h264', '.mpg', '.mpeg', '.webm', '.wmv')
+# the files the player plays (the same list is in mp4museum.py)
+VIDEO_TYPES = ('.mp4', '.m4v', '.mov', '.mkv', '.avi', '.ts', '.mts', '.m2ts', '.h264', '.mpg', '.mpeg',
+               '.m2v', '.vob', '.webm', '.wmv', '.flv', '.ogv', '.3gp')
 IMAGE_TYPES = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff')
-AUDIO_TYPES = ('.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus')
+AUDIO_TYPES = ('.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.aif', '.aiff')
 
 def media_kind(name):
     """'video', 'image', 'audio' or 'other', from the extension."""
@@ -793,8 +795,9 @@ def update_disabled_files(add=(), remove=()):
                 write_file(DISABLED_FILE, ''.join(path + '\n' for path in sorted(changed)))
 
 def get_playlist():
-    """Every file the player plays, in its order (/media/*/*.*: the media partition and USB
-    sticks), and the media partition's other files, which it doesn't play (no extension)."""
+    """Every file the player plays, in its order (media files in /media/*/: the media partition
+    and USB sticks), and the media partition's other files, which it doesn't play. (Other files
+    on USB sticks aren't listed: an SD card in a reader has a Pi's boot files.)"""
     skipped = get_skipped_files()
     disabled = get_disabled_files()
     limit = image_limit()
@@ -809,16 +812,19 @@ def get_playlist():
         if not os.path.isfile(path):
             continue
         name = os.path.basename(path)
+        kind = media_kind(name)
+        internal = os.path.dirname(path) == MEDIA_PATH
+        if kind == 'other' and not internal:
+            continue
         try:
             info = os.stat(path)
             size, version = info.st_size, [info.st_size, int(info.st_mtime)]
         except OSError:
             size, version = 0, None
-        kind = media_kind(name)
         pixels = image_size(path) if kind == 'image' else None
         entries.append({'path': path, 'name': name, 'folder': os.path.basename(os.path.dirname(path)),
-                        'internal': os.path.dirname(path) == MEDIA_PATH, 'kind': kind,
-                        'plays': '.' in name, 'loop': 'loop.' in path, 'size': size,
+                        'internal': internal, 'kind': kind,
+                        'plays': kind != 'other', 'loop': 'loop.' in path, 'size': size,
                         'pixels': pixels, 'large': is_large_image(pixels, limit),
                         # the player compares the same way: a replaced file is played again
                         'skipped': path in skipped and skipped[path] == version,

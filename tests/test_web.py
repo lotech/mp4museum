@@ -436,14 +436,17 @@ def test_status_for_the_player_card(client, monkeypatch):
 def test_playlist_shows_what_the_player_plays(pi, client):
     usb = pi.media.parent / 'usb0'
     usb.mkdir()
-    for path in (pi.media / 'b.mp4', pi.media / 'a-loop.mov', pi.media / 'notes', pi.media / '.hidden.mp4',
-                 usb / 'z.jpg'):
+    for path in (pi.media / 'b.mp4', pi.media / 'a-loop.mov', pi.media / 'notes', pi.media / 'notes.txt',
+                 pi.media / '.hidden.mp4', usb / 'z.jpg', usb / 'LICENCE.broadcom', usb / 'config.txt'):
         path.write_bytes(b'x' * 2048)
     names = [(e['name'], e['folder'], e['plays'], e['internal']) for e in system.get_playlist()]
+    # other files on the media partition are listed (to delete them), not those on USB sticks
+    # (an SD card in a reader has a Pi's boot files)
     assert names == [('a-loop.mov', 'internal', True, True), ('b.mp4', 'internal', True, True),
-                     ('notes', 'internal', False, True), ('z.jpg', 'usb0', True, False)]
+                     ('notes', 'internal', False, True), ('notes.txt', 'internal', False, True),
+                     ('z.jpg', 'usb0', True, False)]
     html = client.get('/').data.decode()
-    assert 'z.jpg' in html and 'usb0' in html and 'not played: no extension' in html
+    assert 'z.jpg' in html and 'usb0' in html and 'not played: not a media file' in html
     # files on USB sticks can be played but not deleted or downloaded here
     assert 'download/z.jpg' not in html and 'download/b.mp4' in html
 

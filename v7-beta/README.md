@@ -34,8 +34,9 @@ The player is meant to run offline. A network is optional and only needed for th
 ## Player
 
 The player (`/boot/mp4museum.py`, started from `.bashrc`) plays the boot video, the
-MP4MUSEUM logo, then every file in `/media/*/` (the internal media partition and USB sticks)
-in alphabetical order, over and over.
+MP4MUSEUM logo, then every video, image and sound file in `/media/*/` (the internal media
+partition and USB sticks) in alphabetical order, over and over. Other files are left out (an SD
+card in a USB reader has a Pi's boot files on it).
 
 - **Boot video:** the original MP4MUSEUM one (`/home/pi/mp4museum-boot.mp4`). To use your own,
   put it on the SD card's boot partition as `mp4museum-boot.mp4` (it shows up as a drive on

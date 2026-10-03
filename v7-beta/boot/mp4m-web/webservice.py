@@ -810,13 +810,12 @@ def check_for_update(auto):
     if not found:
         flash("The software is up to date.", "success")
     else:
-        message = f"An update is available: {latest['commit'][:7]} ({latest['date'][:10]})."
+        # the update bar shows it; a message only for what the bar doesn't say
         installed_branch = RUNNING_VERSION.get('branch')
         if installed_branch and installed_branch != config['branch']:
-            message += f" Installing it switches from branch {installed_branch} to {config['branch']}."
+            flash(f"Installing this update switches from branch {installed_branch} to {config['branch']}.", "warning")
         elif RUNNING_VERSION.get('date') and latest['date'] < RUNNING_VERSION['date']:
-            message += " It is older than the installed version."
-        flash(message, "success")
+            flash("This update is older than the installed version.", "warning")
     return redirect(url_for('index'))
 
 def update_answer(latest):

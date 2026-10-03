@@ -256,7 +256,9 @@ def test_web_check_and_install(pi, client, github):
     github.release('bbb1111', '2026-10-04T00:00:00Z', 'Even newer')
     github.api_calls = 0
     r = client.post('/check_update', follow_redirects=True)
-    assert b'An update is available: bbb1111' in r.data and b'Install Update' in r.data and b'Even newer' in r.data
+    assert b'Update available: <strong>bbb1111</strong>' in r.data and b'Even newer' in r.data
+    # the update bar says it: no message on top of it
+    assert b'class="toast ' not in r.data
     r = client.post('/install_update')
     assert b'Update installed' in r.data and b'Installed version bbb1111' in r.data
     assert installed()['commit'] == github.latest['commit']
@@ -347,7 +349,7 @@ def test_local_copy_with_outdated_files_outside_boot_is_offered(pi, client, gith
     boot_video = pi.path('installed-boot-video.mp4')
     open(boot_video, 'w').write('older boot video')
     monkeypatch.setattr(updater, 'SYSTEM_FILES', {'v7-beta/home/pi/mp4museum-boot.mp4': boot_video})
-    assert b'An update is available' in client.post('/check_update', follow_redirects=True).data
+    assert b'Update available: <strong>' in client.post('/check_update', follow_redirects=True).data
     assert installed()['commit'] == 'local'
     r = client.post('/install_update')
     assert b'install.sh' in r.data and boot_video.encode() in r.data
@@ -358,7 +360,7 @@ def test_local_copy_that_differs_is_offered(pi, client, github):
     webservice.RUNNING_VERSION = installed()
     with open(os.path.join(updater.APP_DIR, 'static', 'style.css'), 'a') as f:
         f.write('/* changed here */\n')
-    assert b'An update is available' in client.post('/check_update', follow_redirects=True).data
+    assert b'Update available: <strong>' in client.post('/check_update', follow_redirects=True).data
     assert installed()['commit'] == 'local'
 
 
@@ -370,7 +372,7 @@ def test_local_copy_comparison_failing_offers_the_update(pi, client, github, mon
         raise RuntimeError('mount failed')
     monkeypatch.setattr(system, 'writable', broken_mount)
     r = client.post('/check_update', follow_redirects=True)
-    assert r.status_code == 200 and b'An update is available' in r.data
+    assert r.status_code == 200 and b'Update available: <strong>' in r.data
 
 
 # ----- mp4m-update command ----- #

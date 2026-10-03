@@ -161,7 +161,7 @@
               {% if entry.large %}<span class="badge warning" title="A Pi 3 can't show images over 2048 pixels wide or high, so it skips it. Resize it to the screen's size, e.g. 1920×1080.">{{ icon('triangle-alert') }}too large</span>{% endif %}
               {% if not entry.internal %}<span class="badge">{{ icon('usb') }}{{ entry.folder }}</span>{% endif %}
               {% if entry.loop %}<span class="badge">{{ icon('repeat') }}loop</span>{% endif %}
-              {% if not entry.plays %}<span class="badge muted">not played: no extension</span>{% endif %}
+              {% if not entry.plays %}<span class="badge muted">not played: not a media file</span>{% endif %}
               {% if entry.disabled %}<span class="badge muted" title="The player leaves it out. The file isn't changed.">{{ icon('eye-off') }}off</span>{% endif %}
             </div>
           </div>
