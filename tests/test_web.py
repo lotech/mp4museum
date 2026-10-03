@@ -6,6 +6,7 @@ import io
 import json
 import os
 import signal
+import threading
 import time
 
 import system
@@ -371,3 +372,37 @@ def test_image_duration(client):
     assert system.get_image_duration() == 30
     open(system.PLAYER_SETTINGS_FILE, 'w').write('image_duration=²\n')
     assert system.get_image_duration() == 10 and client.get('/').status_code == 200
+
+
+def test_player_settings_saved_together(pi, monkeypatch):
+    # two saves at once (the web server is threaded) both read the file before either writes
+    real_read = system.read_player_settings
+    def slow_read():
+        settings = real_read()
+        time.sleep(.2)
+        return settings
+    monkeypatch.setattr(system, 'read_player_settings', slow_read)
+    saves = [threading.Thread(target=system.save_image_duration, args=(30,)),
+             threading.Thread(target=system.save_player_setting, args=('loop_player', 'omxplayer'))]
+    for save in saves:
+        save.start()
+    for save in saves:
+        save.join()
+    assert sorted(open(system.PLAYER_SETTINGS_FILE).read().split()) == ['image_duration=30', 'loop_player=omxplayer']
+
+
+def test_loop_player(client, monkeypatch):
+    assert system.get_loop_player() == 'vlc'
+    open(system.PLAYER_SETTINGS_FILE, 'w').write('image_duration=7\n')
+    monkeypatch.setattr(system.shutil, 'which', lambda name: None)
+    r = client.get('/')
+    assert b'<option value="vlc" selected>' in r.data and b'not installed on this player' in r.data
+    r = client.post('/set_loop_player', data={'loop_player': 'omxplayer'}, follow_redirects=True)
+    assert b'played with omxplayer' in r.data and b'<option value="omxplayer" selected>' in r.data
+    assert open(system.PLAYER_SETTINGS_FILE).read() == 'image_duration=7\nloop_player=omxplayer\n'
+    r = client.post('/set_loop_player', data={'loop_player': 'mplayer'}, follow_redirects=True)
+    assert b'choose VLC or omxplayer' in r.data and system.get_loop_player() == 'omxplayer'
+    monkeypatch.setattr(system.shutil, 'which', lambda name: '/usr/bin/' + name)
+    assert b'not installed on this player' not in client.get('/').data
+    open(system.PLAYER_SETTINGS_FILE, 'w').write('loop_player=OMX\n')
+    assert system.get_loop_player() == 'vlc'

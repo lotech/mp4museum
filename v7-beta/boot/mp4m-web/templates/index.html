@@ -81,6 +81,24 @@
   </div>
 
   <div class="form-group">
+    <h3>Loop videos</h3>
+    <form method="post" action="{{ url_for('set_loop_player') }}" class="video-form">
+      <div>
+        <label for="loop_player">Play loop videos with:</label>
+        <select name="loop_player" id="loop_player">
+          <option value="vlc"{% if loop_player == 'vlc' %} selected{% endif %}>VLC (default)</option>
+          <option value="omxplayer"{% if loop_player == 'omxplayer' %} selected{% endif %}>omxplayer</option>
+        </select>
+      </div>
+      <input type="submit" value="Save" class="button">
+    </form>
+    <p class="hint">Videos with "loop" before the extension (e.g. <code>intro-loop.mp4</code>) repeat until Next is pressed.
+      VLC holds the last frame while the video restarts. omxplayer loops on its own and may be smoother,
+      but is no longer developed.{% if not omxplayer_installed %} It is not installed on this player, so VLC is used.{% endif %}
+      Applies from the next loop video.</p>
+  </div>
+
+  <div class="form-group">
     <button class="button" onclick="reboot(true)" title="Restart the system to apply all changes">Reboot System</button>
   </div>
 </div>

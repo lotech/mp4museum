@@ -41,7 +41,11 @@ in alphabetical order, over and over.
   a computer); delete it to go back to the original.
 
 - **Loops:** a file with `loop.` in its name (e.g. `intro-loop.mp4`) plays again and again
-  until Next is pressed; then the playlist carries on.
+  until Next is pressed; then the playlist carries on. VLC starts each pass in the same
+  window, so the last frame stays on screen while it restarts (the same between files).
+  In the web interface (Media) loop videos can be played with omxplayer instead, which
+  loops on its own and may be smoother. omxplayer is no longer developed and isn't on newer
+  Raspberry Pi OS versions; it is used only when it is installed.
 - **Images** are shown for 10 seconds, or as set in the web interface (`/boot/mp4m-player.txt`,
   `image_duration=<seconds>`). A new setting applies from the next image.
 - A file that hasn't started playing after 20 seconds (broken file, stalled USB stick) is skipped.

@@ -181,7 +181,9 @@ def index():
                            update_config=updater.read_config(),
                            update_available=session.get('update'),
                            now_playing=describe_player_status(system.get_player_status()),
-                           image_duration=system.get_image_duration())
+                           image_duration=system.get_image_duration(),
+                           loop_player=system.get_loop_player(),
+                           omxplayer_installed=system.omxplayer_installed())
 
 
 # ----- Player ----- #
@@ -250,6 +252,19 @@ def set_image_duration():
         flash(f"Images are now shown for {int(seconds)} seconds.", "success")
     except Exception as e:
         flash(f"Failed to save the image duration: {e}", "error")
+    return redirect(url_for('index'))
+
+@app.route('/set_loop_player', methods=['POST'])
+def set_loop_player():
+    choice = request.form.get('loop_player', '')
+    if choice not in system.LOOP_PLAYERS:
+        flash("Please choose VLC or omxplayer.", "error")
+        return redirect(url_for('index'))
+    try:
+        system.save_player_setting('loop_player', choice)
+        flash(f"Loop videos are now played with {'omxplayer' if choice == 'omxplayer' else 'VLC'}.", "success")
+    except Exception as e:
+        flash(f"Failed to save the setting: {e}", "error")
     return redirect(url_for('index'))
 
 

@@ -1,0 +1,27 @@
+# GitHub Actions workflow that runs the test suite on every pull request.
+#
+# NOT ENABLED: GitHub only runs workflows from .github/workflows/, and Actions minutes
+# are shared with other projects. To enable it, move this file to .github/workflows/tests.yml.
+#
+# Part of https://github.com/lotech/mp4museum. Licensed under the GNU GPL v3, see LICENSE.
+name: Tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    # Ubuntu 22.04 still has Python 3.7, the Pi's version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # one test reads an earlier version of the player from git history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.7'
+      - run: pip install -r tests/requirements.txt vermin
+      - name: Code runs on the Pi's Python 3.7
+        run: vermin -t=3.7- --no-tips --violations v7-beta/boot/mp4museum.py v7-beta/boot/mp4m-web/*.py
+      - run: python -m pytest tests
