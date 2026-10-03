@@ -556,6 +556,9 @@ def switch_file():
         flash(f"{name} is marked {'off' if off else 'on'}, but the player script on this Pi was edited before "
               "switching files off existed, so it plays every file. Updates keep an edited script and save "
               "the new one as /boot/mp4museum.py.new.", "warning")
+    elif off and status.get('file') == path and status.get('state') == 'sync':
+        # omxplayer-sync runs until the player stops
+        flash(f"{name} is switched off: sync mode stops from the next start. Reboot to stop it now.", "success")
     elif off and status.get('file') == path and status.get('state') in ('playing', 'paused'):
         # playing now (a loop would go on until next): the player moves on
         system.signal_player(signal.SIGUSR1)
@@ -931,29 +934,33 @@ UPDATED_PAGE = """<!doctype html>
           .catch(() => setTimeout(waitForPlayer, 2000));
       }
       {% if restarting %}
-      let waited = 0;
+      let offered = false;
       function waitForNewVersion() {
-        fetch('{{ url_for('version') }}', {headers: {'X-Requested-With': 'fetch'}, cache: 'no-store'})
+        if (offered) {
+          return;
+        }
+        // (a request that never answers gives up, so the page doesn't wait on it)
+        fetch('{{ url_for('version') }}', {headers: {'X-Requested-With': 'fetch'}, cache: 'no-store',
+                                           signal: AbortSignal.timeout(5000)})
           .then(response => response.ok ? response.json() : {})
           .then(data => {
             if (data.commit === {{ new_commit|tojson }}) {
+              offered = true;
               offerReboot('Ready. Reboot the player to finish the update.');
             } else {
-              retry();
+              setTimeout(waitForNewVersion, 2000);
             }
           })
-          .catch(retry);
-      }
-      function retry() {
-        waited += 2;
-        if (waited >= 60) {
-          // the new version hasn't answered: the reboot starts it anyway
-          offerReboot("The web interface hasn't come back yet. Reboot the player to finish the update.");
-        } else {
-          setTimeout(waitForNewVersion, 2000);
-        }
+          .catch(() => setTimeout(waitForNewVersion, 2000));
       }
       setTimeout(waitForNewVersion, 3000);
+      // a minute on the clock without an answer: the reboot starts the new version anyway
+      setTimeout(() => {
+        if (!offered) {
+          offered = true;
+          offerReboot("The web interface hasn't come back yet. Reboot the player to finish the update.");
+        }
+      }, 60000);
       {% endif %}
     </script>
   </body>

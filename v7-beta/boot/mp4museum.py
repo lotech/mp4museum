@@ -717,6 +717,10 @@ def search_file(file_name):
 # sync mode (from v6): several players play sync.mp4 in sync with omxplayer-sync
 def sync_mode():
     sync_file = search_file("sync.mp4")
+    if sync_file and sync_file in read_disabled():
+        # switched off in the web interface: the playlist plays instead (without it)
+        print("%s is switched off: no sync mode" % sync_file, flush=True)
+        return
     for role, flag in (("leader", "-m"), ("player", "-l")):
         if sync_file and search_file(f"sync-{role}.txt"):
             if not shutil.which("omxplayer-sync"):

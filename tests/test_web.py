@@ -1052,6 +1052,13 @@ def test_switching_off_the_file_playing_moves_on(pi, client, monkeypatch):
     # (a loop would go on until next): the player is told to move on
     r = client.post('/switch_file', data={'file': a, 'off': '1'}, follow_redirects=True)
     assert b'the player moves on' in r.data and sent == [(4242, signal.SIGUSR1)]
+    # sync mode (omxplayer-sync runs until the player stops): from the next start
+    sent.clear()
+    (pi.media / 'sync.mp4').write_bytes(b'x')
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'sync', 'file': str(pi.media / 'sync.mp4'), 'since': time.time(), 'pid': 4242}, f)
+    r = client.post('/switch_file', data={'file': str(pi.media / 'sync.mp4'), 'off': '1'}, follow_redirects=True)
+    assert b'sync mode stops from the next start' in r.data and sent == []
     # another file: nothing is sent
     sent.clear()
     client.post('/switch_file', data={'file': str(pi.media / 'b.mp4'), 'off': '1'})

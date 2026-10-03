@@ -277,7 +277,8 @@ def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     page = r.data.decode()
     assert 'Restarting the web interface with the new version' in page and 'confirm_reboot' not in page
     assert 'id="rebootButtons" class="button-row" hidden' in page and "fetch('/reboot', {method: 'POST'" in page
-    assert 'waited >= 60' in page and 'Later' in page
+    # a minute by the clock (a timer of its own), and each check gives up after 5 s
+    assert '}, 60000);' in page and page.count('AbortSignal.timeout(5000)') == 2 and 'Later' in page
     # logged out: says so, instead of waiting for a reboot that isn't coming
     assert 'response.status === 401' in page and 'AbortSignal.timeout(5000)' in page
 

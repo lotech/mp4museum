@@ -849,3 +849,14 @@ def test_switched_off_files_are_left_out(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-disabled.txt': '/media/internal/a.mp4\n'},
             max_seconds=60)
     assert plays(r)[3:] == [] and r['statuses'][-1]['state'] == 'idle'
+
+
+def test_switched_off_sync_file_starts_no_sync_mode(tmp_path):
+    files = ['/media/internal/a.mp4', '/media/internal/sync.mp4', '/media/internal/sync-leader.txt']
+    r = run(tmp_path, files=files, installed=['omxplayer-sync'],
+            write={'/boot/mp4m-disabled.txt': '/media/internal/sync.mp4\n'}, max_plays=5)
+    assert not [e for e in r['log'] if 'run' in e] and 'sync.mp4 is switched off: no sync mode' in r['stdout']
+    assert 'a.mp4' in plays(r) and 'sync.mp4' not in plays(r)
+    # not switched off: sync mode, as before
+    r = run(tmp_path, files=files, installed=['omxplayer-sync'], max_plays=5)
+    assert [e['run'][0] for e in r['log'] if 'run' in e] == ['omxplayer-sync']
