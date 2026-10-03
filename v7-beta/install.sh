@@ -54,7 +54,8 @@ if ! command -v mkfs.exfat >/dev/null && ! command -v mkexfatfs >/dev/null; then
     # Buster's packages have moved to legacy.raspbian.org: a list just for this, the Pi's own is left as it is
     sources=$(mktemp)
     echo "deb http://legacy.raspbian.org/raspbian/ buster main" > "$sources"
-    apt_options=(-o Dir::Etc::SourceList="$sources" -o Dir::Etc::SourceParts=-)
+    # (List-Cleanup=0: the lists of the Pi's own sources are kept)
+    apt_options=(-o Dir::Etc::SourceList="$sources" -o Dir::Etc::SourceParts=- -o APT::Get::List-Cleanup=0)
     if apt-get "${apt_options[@]}" update -qq &&
        apt-get "${apt_options[@]}" install -y -qq --no-install-recommends exfat-utils; then
         echo "  Installed."

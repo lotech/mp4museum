@@ -395,6 +395,16 @@ def cli(monkeypatch, capsys, pi):
     return run
 
 
+def test_cli_waits_for_a_card_being_made(cli, github):
+    with open(updater.CLONE_MARKER, 'w') as f:
+        f.write('{}')
+    code, out = cli([], answers=['y'])
+    assert code == "A card is being made in the web interface: update when it's done."
+    assert github.downloads == []
+    # checking is fine meanwhile
+    assert 'An update is available' in cli(['--check'])[1]
+
+
 def test_cli_check_installs_nothing(cli, github):
     code, out = cli(['--check'])
     assert 'An update is available' in out and installed() == {}

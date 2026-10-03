@@ -140,7 +140,7 @@
         <div class="progress"><div id="uploadBar" class="progress-fill"></div></div>
       </div>
 
-      <ul class="playlist" id="playlist">
+      <ul class="playlist" id="playlist" data-copy-status-url="{{ url_for('copy_status') }}"{% if copying %} data-copying{% endif %}>
         {% for entry in playlist %}
         {% set playable = entry.plays and not entry.disabled %}
         <li class="playlist-item{% if not playable %} not-played{% endif %}{% if entry.disabled %} switched-off{% endif %}" data-path="{{ entry.path }}">
@@ -178,10 +178,15 @@
               <button type="submit" class="icon-button danger" title="Delete" aria-label="Delete {{ entry.name }}">{{ icon('trash-2') }}</button>
             </form>
             {% else %}
-            <form method="post" action="{{ url_for('copy_to_player') }}" onsubmit="return copyingFile(this)">
+            <form method="post" action="{{ url_for('copy_to_player') }}">
               <input type="hidden" name="file" value="{{ entry.path }}">
+              {% if entry.path in copying %}
+              <button type="button" class="icon-button" disabled title="Copying to this player…"
+                      aria-label="Copying {{ entry.name }} to this player"><span class="spinner"></span></button>
+              {% else %}
               <button type="submit" class="icon-button" title="Copy to this player, so it plays without the stick"
                       aria-label="Copy {{ entry.name }} to this player">{{ icon('hard-drive-download') }}</button>
+              {% endif %}
             </form>
             {% endif %}
             {# last, so it lines up on every row #}
@@ -447,16 +452,17 @@
           <p class="hint">Leave the card in until it's done. Rebooting and updates wait until then.</p>
         </div>
         <p id="cloneResult" class="current" hidden></p>
-        {% if not clone_tool %}
-        <p class="hint">Making the card's media partition needs exfat-utils: run install.sh once, with an internet connection.</p>
+        {% if clone_unavailable %}
+        <p class="hint">{{ clone_unavailable }}</p>
         {% elif clone_cards %}
         <form method="post" action="{{ url_for('clone_card') }}" class="setting" id="cloneForm"
               {% if clone_state.running %}hidden{% endif %} onsubmit="return confirmClone(this)">
           <label for="clone_device">Card</label>
           <div class="input-row">
-            <select name="device" id="clone_device">
+            <select name="device" id="clone_device" required>
+              <option value="">Choose a card</option>
               {% for card in clone_cards %}
-              <option value="{{ card.device }}" data-name="{{ card.size|size }} {{ card.model }}">{{ card.model }}, {{ card.size|size }} ({{ card.device }})</option>
+              <option value="{{ card.device }}|{{ card.size }}" data-name="{{ card.size|size }} {{ card.model }}">{{ card.model }}, {{ card.size|size }} ({{ card.device }})</option>
               {% endfor %}
             </select>
           </div>

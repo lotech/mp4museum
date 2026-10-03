@@ -85,7 +85,7 @@ class Disks:
 
     def run(self, cmd, input=None):
         self.pi.commands.append(list(cmd))
-        if self.fail and cmd[0] == self.fail:
+        if self.fail and cmd[0] == self.fail and '-J' not in cmd:
             raise clone.CloneError(cmd[0] + ': failed')
         if cmd[0] == 'sfdisk' and cmd[1] == '-J':
             return table(SOURCE_ID if cmd[2] == clone.SOURCE_DISK else self.card_id)
@@ -93,6 +93,8 @@ class Disks:
             self.sfdisk_input = input
             with open(clone.USBMOUNT_CONF) as f:
                 self.automount_while_partitioning = f.read()
+            with open(clone.MARKER) as f:
+                self.marker_while_partitioning = f.read()
         if cmd[0] == 'mount':
             device, path = cmd[-2:]
             os.rmdir(path)
@@ -131,6 +133,14 @@ def test_lists_cards_in_usb_readers_only(pi):
 def test_never_lists_the_card_the_pi_runs_from(pi):
     pi.disks = [dict(READER, name='mmcblk0')]
     assert clone.list_cards() == []
+
+
+def test_never_lists_a_disk_the_system_uses(pi):
+    # e.g. the Pi started with a card of the same image in the reader, and mounted its /boot from it
+    pi.disks += [READER, dict(READER, name='sdb', size='8000000000')]
+    with open(clone.PROC_MOUNTS, 'a') as f:
+        f.write('/dev/sda1 /media/usb0 vfat ro 0 0\n/dev/sdb1 /boot vfat ro 0 0\n')
+    assert [card['device'] for card in clone.list_cards()] == ['/dev/sda']
 
 
 def test_no_cards_when_lsblk_fails(pi, monkeypatch):
@@ -198,6 +208,40 @@ def test_copies_this_player_to_the_card(pi, disks):
     # everything unmounted again, the work folder gone
     assert disks.mounted() == [] and not list(pi.root.glob('mp4m-clone-*'))
     assert pi.commands[-1] == ['sync']
+
+
+def test_card_in_use_is_left_as_it_was(pi, disks):
+    disks.fail = 'sfdisk'
+    with pytest.raises(clone.CloneError, match="The card is in use, so it wasn't changed"):
+        clone.clone(CARD, with_media=False)
+
+
+def test_marker_while_making_a_card(pi, disks):
+    clone.clone(CARD, with_media=False)
+    assert json.loads(disks.marker_while_partitioning) == {'usbmount': 'ENABLED=1\nMOUNTPOINTS="/media/usb0"\n'}
+    assert not os.path.exists(clone.MARKER)
+
+
+def test_recovers_after_the_web_interface_stopped_part_way(pi, tmp_path):
+    # usbmount left off, and the copy's folders mounted
+    with open(clone.USBMOUNT_CONF, 'w') as f:
+        f.write('ENABLED=0\n')
+    with open(clone.MARKER, 'w') as f:
+        json.dump({'usbmount': 'ENABLED=1\n'}, f)
+    work = tmp_path / 'mp4m-clone-abc'
+    (work / 'source-root').mkdir(parents=True)
+    (work / 'card-root').mkdir()
+    with open(clone.PROC_MOUNTS, 'a') as f:
+        f.write(f'/dev/mmcblk0p2 {work}/source-root ext4 ro 0 0\n/dev/sda2 {work}/card-root ext4 rw 0 0\n')
+    clone.recover()
+    assert ['umount', '-l', f'{work}/card-root'] in pi.commands and ['umount', '-l', f'{work}/source-root'] in pi.commands
+    assert open(clone.USBMOUNT_CONF).read() == 'ENABLED=1\n'
+    assert not os.path.exists(clone.MARKER) and not work.exists()
+
+
+def test_recover_does_nothing_normally(pi):
+    clone.recover()
+    assert pi.commands == [] and open(clone.USBMOUNT_CONF).read().startswith('ENABLED=1')
 
 
 def test_copies_without_the_media_files(pi, disks):
@@ -284,6 +328,32 @@ def test_start_refuses_anything_but_a_card_in_a_reader(ready, device):
     assert ready == [] and not clone.is_running()
 
 
+def test_start_refuses_a_card_that_has_changed(ready, pi):
+    # the page was loaded with a 32 GB card as /dev/sda; now /dev/sda is a 4 GB stick
+    pi.disks[-1] = dict(READER, size=str(4 * 1024 ** 3), model='USB stick')
+    with pytest.raises(clone.CloneError, match="/dev/sda isn't the card that was chosen any more"):
+        clone.start('/dev/sda', False, CARD['size'])
+    assert ready == []
+
+
+def test_start_refuses_when_not_started_from_the_sd_card(ready, pi):
+    # a Pi 4 started from a USB disk: /dev/mmcblk0 isn't the system
+    with open(clone.PROC_MOUNTS, 'w') as f:
+        f.write(f'/dev/sdb1 {pi.boot} vfat ro 0 0\n/dev/mmcblk0p1 /media/usb0 vfat ro 0 0\n')
+    with pytest.raises(clone.CloneError, match="doesn't start from its SD card"):
+        clone.start('/dev/sda', False)
+    assert ready == []
+
+
+def test_start_refuses_with_the_overlay_off(ready):
+    # the system partition is then mounted read-write, and changing
+    with open(clone.PROC_CMDLINE, 'w') as f:
+        f.write('console=tty1 root=PARTUUID=18512e38-02 rootfstype=ext4 quiet\n')
+    with pytest.raises(clone.CloneError, match='Turn the overlay file system back on'):
+        clone.start('/dev/sda', False)
+    assert ready == []
+
+
 def test_start_refuses_without_exfat_tools(ready, monkeypatch):
     monkeypatch.setattr(clone, 'exfat_tool', lambda: None)
     with pytest.raises(clone.CloneError, match='needs exfat-utils'):
@@ -308,7 +378,12 @@ def test_start_refuses_a_card_too_small(ready, pi):
 def test_state_when_done_or_failed(pi, monkeypatch):
     monkeypatch.setattr(clone, 'clone', lambda card, with_media: None)
     clone._clone(CARD, False)
-    assert clone.get_state()['done'] and not clone.get_state()['running']
+    assert clone.get_state()['done'] and clone.get_state()['recent'] and not clone.get_state()['running']
+    # the page stops saying how it went after a while
+    finished = clone.state['finished']
+    with monkeypatch.context() as m:
+        m.setattr(clone.time, 'monotonic', lambda: finished + clone.RESULT_SHOWN)
+        assert not clone.get_state()['recent']
     monkeypatch.setattr(clone, 'clone', lambda card, with_media: (_ for _ in ()).throw(clone.CloneError('sfdisk: no')))
     clone._clone(CARD, False)
     assert clone.get_state()['error'] == 'sfdisk: no' and not clone.get_state()['running']
@@ -324,7 +399,9 @@ def test_system_tab_asks_for_a_card(client):
 def test_system_tab_offers_the_cards(client, pi):
     pi.disks.append(READER)
     page = client.get('/').get_data(as_text=True)
-    assert '<option value="/dev/sda" data-name="32.0 GB SD_Transcend">' in page
+    assert '<option value="/dev/sda|34359738368" data-name="32.0 GB SD_Transcend">' in page
+    # nothing chosen until the user chooses
+    assert '<select name="device" id="clone_device" required>\n              <option value="">Choose a card</option>' in page
     assert 'id="cloneForm"' in page and 'Leave them out' in page
 
 
@@ -336,7 +413,7 @@ def test_system_tab_says_when_exfat_tools_are_missing(client, pi, monkeypatch):
 
 
 def test_copy_from_the_web_interface(client, ready):
-    response = client.post('/clone', data={'device': '/dev/sda', 'media': 'without'})
+    response = client.post('/clone', data={'device': '/dev/sda|%d' % CARD['size'], 'media': 'without'})
     assert response.status_code == 302
     assert ready == [('/dev/sda', False)]
     assert client.get('/clone/status').get_json()['running'] is True

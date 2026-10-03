@@ -104,24 +104,31 @@ def pi(tmp_path, monkeypatch):
     monkeypatch.setattr(system, '_mount_states', {})
 
     (tmp_path / 'usbmount.conf').write_text('ENABLED=1\nMOUNTPOINTS="/media/usb0"\n')
-    (tmp_path / 'mounts').write_text('/dev/mmcblk0p1 /boot vfat ro 0 0\n')
+    # started from its SD card, with the overlay on
+    (tmp_path / 'mounts').write_text(f'overlay / overlay rw 0 0\n/dev/mmcblk0p2 /lower ext4 ro 0 0\n'
+                                     f'/dev/mmcblk0p1 {p.boot} vfat ro 0 0\n/dev/mmcblk0p3 {p.media} exfat ro 0 0\n')
+    (tmp_path / 'cmdline').write_text('console=tty1 root=PARTUUID=18512e38-02 rootfstype=ext4 boot=overlay quiet\n')
     for name, value in {
         'USBMOUNT_CONF': str(tmp_path / 'usbmount.conf'),
         'PROC_MOUNTS': str(tmp_path / 'mounts'),
+        'PROC_CMDLINE': str(tmp_path / 'cmdline'),
+        'MARKER': str(tmp_path / 'mp4m-clone.json'),
         'TEMP_DIR': str(tmp_path),
+        'partition': lambda disk, number: str(tmp_path / 'dev' / ('%s-%d' % (os.path.basename(disk), number))),
         'run': p.clone_run,
         'exfat_tool': lambda: 'mkfs.exfat',
         'state': dict(clone.state, running=False, done=False, error=None),
     }.items():
         monkeypatch.setattr(clone, name, value)
     real = [name for name, value in vars(clone).items()
-            if isinstance(value, str) and value.startswith(('/etc', '/proc', '/tmp', '/boot', '/media'))
+            if isinstance(value, str) and value.startswith(('/etc', '/proc', '/run', '/tmp', '/boot', '/media'))
             and not value.startswith(str(tmp_path))]
     assert not real, 'add these to the pi fixture: %s' % real
 
     monkeypatch.setattr(updater, 'APP_DIR', p.path('mp4m-web'))
     monkeypatch.setattr(updater, 'UPDATE_CONFIG_FILE', p.path('mp4m-update.txt'))
     monkeypatch.setattr(updater, 'SYSTEM_FILES', {})
+    monkeypatch.setattr(updater, 'CLONE_MARKER', clone.MARKER)
     monkeypatch.setattr(updater, '_differs_from_local_copy', {})
 
     monkeypatch.setattr(webservice, 'RUNNING_VERSION', {})

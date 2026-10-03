@@ -92,7 +92,8 @@ Open `http://<network name>.local` in a browser on the same network.
   playlist: every file the player plays, from the media partition and USB sticks, in order.
   Start any file from there (its play button or its name); upload files (several at once, with progress),
   rename them (files play in alphabetical order; add `-loop` to repeat a video), download or delete them.
-  Files on a USB stick can be copied to the player, so they play without the stick.
+  Files on a USB stick can be copied to the player, so they play without the stick. The copy runs
+  in the background (reboots and updates wait for it); on a Pi 3 it may slow down playback meanwhile.
 - **Updates:** when the player has an internet connection, the page checks for a new version
   by itself (at most every few hours) and shows a bar to install it.
 
@@ -214,8 +215,11 @@ then Copy. It takes a few minutes, plus about a minute per GB of media.
   afterwards.
 
 It needs `mkfs.exfat` from exfat-utils, which isn't on the v7 image: `install.sh` installs it
-when the Pi has an internet connection (run it again later if it didn't). While a card is
-being made, the web interface doesn't reboot or install updates.
+when the Pi has an internet connection (run it again later if it didn't). It only works with the
+overlay file system on, on a player started from its own SD card. While a card is being made,
+the web interface doesn't reboot or install updates, and neither does `mp4m-update`.
+Every card made this way, like every card made from the v7 image, shares this player's SSH host
+keys and machine ID.
 
 ## License
 

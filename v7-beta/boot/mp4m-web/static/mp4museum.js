@@ -468,15 +468,19 @@ function showStoredToasts() {
 }
 
 // ----- Copying a file from a USB stick to this player ----- //
-function copyingFile(form) {
-  const button = form.querySelector('button');
-  // (after the form has sent the button, or it would be left out)
-  setTimeout(() => {
-    button.disabled = true;
-    button.title = 'Copying…';
-    button.innerHTML = '<span class="spinner"></span>';
-  });
-  return true;
+function followCopies() {
+  // the page again when they're done, which says how they went
+  const playlist = document.getElementById('playlist');
+  fetch(playlist.dataset.copyStatusUrl, {headers: {'X-Requested-With': 'fetch'}, cache: 'no-store'})
+    .then(response => response.ok ? response.json() : null)
+    .then(status => {
+      if (status && status.copying.length === 0) {
+        location.reload();
+      } else if (status) {
+        setTimeout(followCopies, 2000);
+      }
+    })
+    .catch(() => setTimeout(followCopies, 5000));
 }
 
 // ----- Copying this player to an SD card ----- //
@@ -495,7 +499,8 @@ function showClone(state) {
   bar.parentElement.classList.toggle('indeterminate', state.percent === null);
   bar.style.width = state.percent === null ? '' : state.percent + '%';
   const result = document.getElementById('cloneResult');
-  result.hidden = !(state.done || state.error);
+  // (said for a while after it finished)
+  result.hidden = !(state.recent && (state.done || state.error));
   if (state.done) {
     result.textContent = 'Done: the card can be taken out and put in another Pi.' + (state.same_id_before
       ? ' Reboot this Pi once too: the card had the same partition IDs as this one before.' : '');
@@ -538,6 +543,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   if (document.getElementById('clone')) {
     followClone();
+  }
+  const playlist = document.getElementById('playlist');
+  if (playlist && playlist.hasAttribute('data-copying')) {
+    setTimeout(followCopies, 2000);
   }
   checkForUpdate();
 });

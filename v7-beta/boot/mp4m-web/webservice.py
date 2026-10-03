@@ -158,8 +158,12 @@ def index():
     current_mode_key, current_mode = system.get_current_video_mode(config_text)
     free_space = system.get_free_space() if is_available else 0
     board = system.board_memory_megabytes()
+    # how the copies from USB sticks that have finished went
+    for category, message in system.take_copy_results():
+        flash(message, category)
 
     return render_template('index.html',
+                           copying=system.copies_running(),
                            playlist=system.get_playlist(),
                            player_log=system.read_player_log(),
                            player=player_view(system.get_player_status()),
@@ -194,7 +198,7 @@ def index():
                            show_address=system.get_show_address(),
                            start_up_settings=system.player_has_start_up_settings(),
                            clone_cards=clone.list_cards(),
-                           clone_tool=clone.exfat_tool(),
+                           clone_unavailable=clone.unavailable(),
                            clone_state=clone.get_state(),
                            media_used=system.format_size(clone.used_bytes(system.MEDIA_PATH)) if is_available else None)
 
@@ -552,19 +556,23 @@ def copy_to_player():
         flash("That file isn't on a USB stick any more.", "error")
     elif not system.is_valid_filename(entry['name']):
         flash(f"'{entry['name']}' has characters in its name the player can't store. Rename it on a computer first.", "error")
+    elif os.path.islink(path):
+        # a stick formatted ext4 could point anywhere
+        flash(f"'{entry['name']}' is a link, not a file.", "error")
+    elif entry['size'] > system.get_free_space():
+        flash(f"Not enough space to copy '{entry['name']}' ({system.format_size(entry['size'])}).", "error")
     else:
-        name = entry['name']
+        # in the background: a large file takes minutes, longer than a browser waits
         try:
-            system.copy_to_media(path)
-            flash(f"'{name}' copied to this player. While the stick is in, its copy plays too: "
-                  "switch that one off, or take the stick out.", "success")
+            system.start_copy(path)
+            flash(f"Copying '{entry['name']}' to this player.", "success")
         except FileExistsError:
-            flash(f"This player already has a file called '{name}'. Rename one of them first.", "error")
-        except system.NotEnoughSpace:
-            flash(f"Not enough space for '{name}' ({system.format_size(entry['size'])}).", "error")
-        except Exception as e:
-            flash(f"Couldn't copy '{name}': {e}", "error")
+            flash(f"This player already has a file called '{entry['name']}', or it's being copied.", "error")
     return redirect(url_for('index'))
+
+@app.route('/copy_status')
+def copy_status():
+    return {'copying': system.copies_running()}
 
 
 @app.route('/switch_file', methods=['POST'])
@@ -658,7 +666,9 @@ def rename_file():
 @app.route('/clone', methods=['POST'])
 def clone_card():
     try:
-        clone.start(request.form.get('device', ''), request.form.get('media') == 'with')
+        # "<device>|<size>": the card chosen, as it was when the page was loaded
+        device, _, size = request.form.get('device', '').partition('|')
+        clone.start(device, request.form.get('media') == 'with', int(size) if size.isdigit() else None)
         flash("Copying this player to the card. It takes a few minutes: leave the card in until it's done.", "success")
     except clone.CloneError as e:
         flash(str(e), "error")
@@ -672,11 +682,19 @@ def clone_status():
 
 
 # ----- Reboot ----- #
+def busy():
+    """Why the player shouldn't reboot (or the web interface restart) now, or None."""
+    if clone.is_running():
+        return "A card is being made: reboot when it's done."
+    if system.copies_running():
+        return "A file is being copied to this player: reboot when it's done."
+    return None
+
+
 @app.route('/reboot', methods=['POST'])
 def reboot_system():
-    if clone.is_running():
-        # the card would be left half made
-        message = "A card is being made: reboot when it's done."
+    message = busy()
+    if message:
         if is_fetch():
             return message, 409
         flash(message, "error")
@@ -902,9 +920,10 @@ def find_update(config, latest):
 @app.route('/install_update', methods=['POST'])
 def install_update():
     latest = session.get('update')
-    if clone.is_running():
+    message = busy()
+    if message:
         # the web interface restarts with the new version, which would stop it half way
-        flash("A card is being made: install the update when it's done.", "error")
+        flash(message.replace('reboot', 'install the update'), "error")
         return redirect(url_for('index'))
     if not latest:
         flash("Check for updates first.", "error")
@@ -1038,6 +1057,8 @@ UPDATED_PAGE = """<!doctype html>
 if __name__ == '__main__':
     # A crash or restart can leave /boot or the media partition writable
     system.restore_read_only_mounts()
+    # and usbmount, if it stopped while making a card
+    clone.recover()
     # Keep using the templates this version started with, even after an update replaces the files
     for template_name in app.jinja_env.list_templates():
         app.jinja_env.get_template(template_name)

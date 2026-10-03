@@ -794,12 +794,18 @@ def update_disabled_files(add=(), remove=()):
             with writable(BOOT_PATH):
                 write_file(DISABLED_FILE, ''.join(path + '\n' for path in sorted(changed)))
 
+def player_plays_media_files_only():
+    """Whether the player script leaves out files that aren't media (one edited here before
+    that is kept by updates, and plays every file with an extension)."""
+    return 'MEDIA_TYPES' in read_script_file()
+
 def get_playlist():
     """Every file the player plays, in its order (media files in /media/*/: the media partition
     and USB sticks), and the media partition's other files, which it doesn't play. (Other files
     on USB sticks aren't listed: an SD card in a reader has a Pi's boot files.)"""
     skipped = get_skipped_files()
     disabled = get_disabled_files()
+    media_only = player_plays_media_files_only()
     limit = image_limit()
     media_root = os.path.dirname(MEDIA_PATH)
     paths = set(glob.glob(os.path.join(media_root, '*', '*.*')))
@@ -814,7 +820,8 @@ def get_playlist():
         name = os.path.basename(path)
         kind = media_kind(name)
         internal = os.path.dirname(path) == MEDIA_PATH
-        if kind == 'other' and not internal:
+        plays = kind != 'other' if media_only else '.' in name
+        if not plays and not internal:
             continue
         try:
             info = os.stat(path)
@@ -824,7 +831,7 @@ def get_playlist():
         pixels = image_size(path) if kind == 'image' else None
         entries.append({'path': path, 'name': name, 'folder': os.path.basename(os.path.dirname(path)),
                         'internal': internal, 'kind': kind,
-                        'plays': kind != 'other', 'loop': 'loop.' in path, 'size': size,
+                        'plays': plays, 'loop': 'loop.' in path, 'size': size,
                         'pixels': pixels, 'large': is_large_image(pixels, limit),
                         # the player compares the same way: a replaced file is played again
                         'skipped': path in skipped and skipped[path] == version,
@@ -975,24 +982,79 @@ def remove_stale_uploads():
         except OSError:
             pass
 
+# Files being copied from USB sticks (lower-case names: exFAT doesn't tell case apart), and how
+# the copies that have finished went, for the next page shown
+_copies = {}
+_copy_results = []
+_copies_lock = threading.Lock()
+
+def _media_has(name):
+    try:
+        return name.lower() in (other.lower() for other in os.listdir(MEDIA_PATH))
+    except OSError:
+        return False
+
+def start_copy(source):
+    """Copy a file (from a USB stick) to the media partition in the background. FileExistsError
+    if it has a file of that name, or one is being copied."""
+    name = os.path.basename(source)
+    with _copies_lock:
+        if name.lower() in _copies or _media_has(name):
+            raise FileExistsError(name)
+        _copies[name.lower()] = source
+    threading.Thread(target=_copy, args=(source,), daemon=True).start()
+
+def _copy(source):
+    name = os.path.basename(source)
+    try:
+        copy_to_media(source)
+        result = ('success', f"'{name}' copied to this player. While the stick is in, its copy plays "
+                             "too: switch that one off, or take the stick out.")
+    except FileExistsError:
+        result = ('error', f"This player already has a file called '{name}'. Rename one of them first.")
+    except NotEnoughSpace:
+        result = ('error', f"Not enough space to copy '{name}'.")
+    except Exception as e:
+        result = ('error', f"Couldn't copy '{name}': {e}")
+    with _copies_lock:
+        _copy_results.append(result)
+        del _copies[name.lower()]
+
+def copies_running():
+    """The files being copied (their paths on the stick)."""
+    with _copies_lock:
+        return sorted(_copies.values())
+
+def take_copy_results():
+    """[(category, message)] for the copies that have finished since the last call."""
+    with _copies_lock:
+        results = list(_copy_results)
+        del _copy_results[:]
+    return results
+
 def copy_to_media(source):
-    """Copy a file (from a USB stick) to the media partition, under the same name. It's written
-    under a temporary name (which the player doesn't play) and renamed when it's all there.
-    FileExistsError if the media partition has a file of that name, NotEnoughSpace."""
+    """Copy a file to the media partition, under the same name. It's written under a temporary
+    name (which the player doesn't play) and renamed when it's all there. FileExistsError if
+    the media partition has a file of that name, NotEnoughSpace."""
     name = os.path.basename(source)
     target = os.path.join(MEDIA_PATH, name)
     size = os.path.getsize(source)
     with writable(MEDIA_PATH):
         remove_stale_uploads()
-        if os.path.exists(target):
+        if _media_has(name):
             raise FileExistsError(name)
         fd, temp = tempfile.mkstemp(dir=MEDIA_PATH, prefix=UPLOAD_PREFIX)
         try:
             with os.fdopen(fd, 'wb') as dst:
-                with upload_space(size, lambda: os.path.getsize(temp)), open(source, 'rb') as src:
+                # (not through a link: a stick formatted ext4 could point anywhere)
+                src_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+                with upload_space(size, lambda: os.path.getsize(temp)), os.fdopen(src_fd, 'rb') as src:
                     shutil.copyfileobj(src, dst, 4 * 1024 * 1024)
                     dst.flush()
                     os.fsync(dst.fileno())
+            # an upload of the same name may have arrived meanwhile: that one stays
+            if _media_has(name):
+                raise FileExistsError(name)
             os.replace(temp, target)
         except BaseException:
             if os.path.exists(temp):

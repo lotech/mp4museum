@@ -29,7 +29,12 @@ import system
 SOURCE_DISK = '/dev/mmcblk0'
 USBMOUNT_CONF = '/etc/usbmount/usbmount.conf'
 PROC_MOUNTS = '/proc/mounts'
+PROC_CMDLINE = '/proc/cmdline'
 TEMP_DIR = '/tmp'
+# there while a card is being made, with usbmount's settings to put back if the web interface
+# stops part way (it's in RAM: a reboot clears it). mp4m-update doesn't update meanwhile
+MARKER = '/run/mp4m-clone.json'
+WORK_PREFIX = 'mp4m-clone-'
 SECTOR = 512
 ALIGN = 8192                    # partitions start on 4 MB boundaries, as on the image
 ROOT_ROOM = 1024 ** 3           # free space on the clone's system partition
@@ -84,9 +89,50 @@ def list_cards():
         except ValueError:
             size = 0
         # (a reader without a card has size 0)
-        if disk.get('type') == 'disk' and disk.get('tran') == 'usb' and size > 0 and device != SOURCE_DISK:
+        if (disk.get('type') == 'disk' and disk.get('tran') == 'usb' and size > 0 and device != SOURCE_DISK
+                and not _in_use_by_system(device)):
             cards.append({'device': device, 'size': size, 'model': (disk.get('model') or 'USB disk').strip()})
     return cards
+
+
+def _mounts():
+    """[(device, mount point)] from /proc/mounts."""
+    try:
+        with open(PROC_MOUNTS, 'r') as f:
+            return [(fields[0], fields[1].replace('\\040', ' ')) for fields in (line.split() for line in f)
+                    if len(fields) > 1]
+    except OSError:
+        return []
+
+
+def _partition_of(device, disk):
+    return re.match(re.escape(disk) + r'p?\d+$', device) is not None
+
+
+def _in_use_by_system(disk):
+    """True if a partition of this disk is mounted anywhere but /media/usbN (where usbmount puts
+    a stick or card plugged in): e.g. the Pi started from it."""
+    return any(_partition_of(device, disk) and not re.match(r'/media/usb\d*$', mount_point)
+               for device, mount_point in _mounts())
+
+
+def unavailable():
+    """Why a card can't be made now, or None."""
+    if not exfat_tool():
+        return ("Making the card's media partition needs exfat-utils: run install.sh once, with an "
+                "internet connection.")
+    boot = next((device for device, mount_point in _mounts() if mount_point == system.BOOT_PATH), '')
+    if not _partition_of(boot, SOURCE_DISK):
+        return "This player doesn't start from its SD card, so it can't be copied from here."
+    try:
+        with open(PROC_CMDLINE, 'r') as f:
+            overlay = 'boot=overlay' in f.read().split()
+    except OSError:
+        overlay = False
+    if not overlay:
+        # (the system partition is then mounted read-write: it can't be copied while it changes)
+        return "Turn the overlay file system back on and reboot first (raspi-config)."
+    return None
 
 
 def source_partitions():
@@ -120,7 +166,7 @@ def plan(card_size, root_used, media_used, with_media, boot_sectors):
 def sizes():
     """What a clone needs to know before it starts: the system partition's used space and the
     media files' (both in bytes)."""
-    mount_point = tempfile.mkdtemp(prefix='mp4m-clone-', dir=TEMP_DIR)
+    mount_point = tempfile.mkdtemp(prefix=WORK_PREFIX, dir=TEMP_DIR)
     try:
         run(['mount', '-o', 'ro', partition(SOURCE_DISK, 2), mount_point])
         try:
@@ -135,12 +181,16 @@ def sizes():
 # ----- Cloning (one at a time, in the background) ----- #
 _lock = threading.Lock()
 state = {'running': False, 'step': '', 'percent': None, 'done': False, 'error': None, 'card': None,
-         'same_id_before': False}
+         'same_id_before': False, 'finished': None}
+RESULT_SHOWN = 30 * 60      # how long the page says how the last copy went
 
 
 def get_state():
     with _lock:
-        return dict(state)
+        current = dict(state)
+    finished = current.pop('finished')
+    current['recent'] = finished is not None and time.monotonic() - finished < RESULT_SHOWN
+    return current
 
 
 def is_running():
@@ -153,14 +203,18 @@ def _set(**changes):
         state.update(changes)
 
 
-def start(device, with_media):
-    """Start cloning onto device (one of list_cards()). CloneError if it can't start."""
+def start(device, with_media, size=None):
+    """Start cloning onto device (one of list_cards(); size: the one it had when it was chosen).
+    CloneError if it can't start."""
+    reason = unavailable()
+    if reason:
+        raise CloneError(reason)
     card = next((c for c in list_cards() if c['device'] == device), None)
     if not card:
         raise CloneError("That card isn't in a USB reader any more.")
-    if not exfat_tool():
-        raise CloneError("Making the media partition needs exfat-utils: run install.sh once (with an "
-                         "internet connection) to install it.")
+    if size is not None and card['size'] != size:
+        # something else has been plugged in since the page was loaded
+        raise CloneError(f"{device} isn't the card that was chosen any more. Choose it again.")
     if is_running():
         raise CloneError("A card is being made already.")
     # too small: said now, not after it has started
@@ -170,16 +224,16 @@ def start(device, with_media):
         if state['running']:
             raise CloneError("A card is being made already.")
         state.update(running=True, step='Starting', percent=None, done=False, error=None, card=card,
-                     same_id_before=False)
+                     same_id_before=False, finished=None)
     threading.Thread(target=_clone, args=(card, with_media), daemon=True).start()
 
 
 def _clone(card, with_media):
     try:
         clone(card, with_media)
-        _set(running=False, done=True, step='Done', percent=100)
+        _set(running=False, done=True, step='Done', percent=100, finished=time.monotonic())
     except Exception as e:
-        _set(running=False, error=str(e), step='Stopped')
+        _set(running=False, error=str(e), step='Stopped', finished=time.monotonic())
 
 
 def clone(card, with_media, progress=_set):
@@ -191,7 +245,7 @@ def clone(card, with_media, progress=_set):
     new_id = disk_id
     while new_id == disk_id:
         new_id = '%08x' % random.randrange(1, 2 ** 32)
-    work = tempfile.mkdtemp(prefix='mp4m-clone-', dir=TEMP_DIR)
+    work = tempfile.mkdtemp(prefix=WORK_PREFIX, dir=TEMP_DIR)
     usbmount = _stop_automount()
     mounted = []
 
@@ -222,7 +276,12 @@ def clone(card, with_media, progress=_set):
                   f"start={boot[0]}, size={boot[1]}, type=c\n"
                   f"start={root[0]}, size={root[1]}, type=83\n"
                   f"start={media[0]}, type=7\n")
-        run(['sfdisk', '--wipe', 'always', '--wipe-partitions', 'always', device], input=script)
+        try:
+            run(['sfdisk', '--wipe', 'always', '--wipe-partitions', 'always', device], input=script)
+        except CloneError as e:
+            # e.g. a file on it still open: sfdisk leaves the card as it was
+            raise CloneError(f"The card is in use, so it wasn't changed. Take it out, put it back in and "
+                             f"try again. ({e})")
         run(['partprobe', device])
         run(['udevadm', 'settle'])
         _unmount_card(device)
@@ -271,8 +330,44 @@ def clone(card, with_media, progress=_set):
                 run(['umount', path])
             except CloneError:
                 pass
-        shutil.rmtree(work, ignore_errors=True)
+        _remove_work(work)
         _restore_automount(usbmount)
+
+
+def _remove_work(work):
+    """Remove the work folder's mount points, never what's in one still mounted."""
+    for name in os.listdir(work):
+        path = os.path.join(work, name)
+        if not os.path.ismount(path):
+            try:
+                os.rmdir(path)
+            except OSError:
+                pass
+    try:
+        os.rmdir(work)
+    except OSError:
+        pass
+
+
+def recover():
+    """After the web interface stopped while making a card (restart, crash): usbmount back on,
+    the copy's folders unmounted. Called when it starts."""
+    try:
+        with open(MARKER, 'r') as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        return
+    work = os.path.join(TEMP_DIR, WORK_PREFIX)
+    for _, mount_point in reversed(_mounts()):
+        if mount_point.startswith(work):
+            try:
+                run(['umount', '-l', mount_point])
+            except CloneError:
+                pass
+    for name in os.listdir(TEMP_DIR):
+        if name.startswith(WORK_PREFIX):
+            _remove_work(os.path.join(TEMP_DIR, name))
+    _restore_automount(saved.get('usbmount'))
 
 
 def _new_disk_id(path, old_id, new_id):
@@ -289,7 +384,7 @@ def _new_disk_id(path, old_id, new_id):
 def _leases(root):
     folder = os.path.join(root, 'var', 'lib', 'dhcpcd5')
     try:
-        return [os.path.join(folder, name) for name in os.listdir(folder) if name.endswith('.lease')]
+        return [os.path.join(folder, name) for name in os.listdir(folder) if name.endswith(('.lease', '.lease6'))]
     except OSError:
         return []
 
@@ -326,15 +421,13 @@ def _copy_tree(cmd, target, total, progress):
 
 def _unmount_card(device):
     """Unmount the card's partitions (mounted when it was plugged in)."""
-    pattern = re.compile(re.escape(device) + r'p?\d+ ')
-    with open(PROC_MOUNTS, 'r') as f:
-        mounts = [line.split()[1].replace('\\040', ' ') for line in f if pattern.match(line)]
+    mounts = [mount_point for dev, mount_point in _mounts() if _partition_of(dev, device)]
     busy = []
     for mount_point in mounts:
         try:
             run(['umount', mount_point])
         except CloneError:
-            # in use: the player plays /media/*/*.*, so it may be playing a file from the card.
+            # in use: the player plays the media files in /media/*/, so it may be playing one from the card.
             # Taken out of the folder now (-l); it's let go when the file is closed
             run(['umount', '-l', mount_point])
             busy.append(mount_point)
@@ -359,14 +452,16 @@ def _player_leaves(mount_points, wait=10):
 
 def _stop_automount():
     """Turn off usbmount while cloning, so the new partitions aren't mounted (and played); the
-    old setting, to put back. (/etc is in RAM: a reboot puts it back too.)"""
+    old setting, to put back (also kept in MARKER). (/etc is in RAM: a reboot puts it back too.)"""
     try:
         with open(USBMOUNT_CONF, 'r') as f:
             text = f.read()
     except OSError:
-        return None
-    with open(USBMOUNT_CONF, 'w') as f:
-        f.write(re.sub(r'^ENABLED=.*$', 'ENABLED=0', text, flags=re.M))
+        text = None
+    system.write_file(MARKER, json.dumps({'usbmount': text}))
+    if text is not None:
+        with open(USBMOUNT_CONF, 'w') as f:
+            f.write(re.sub(r'^ENABLED=.*$', 'ENABLED=0', text, flags=re.M))
     return text
 
 
@@ -374,3 +469,7 @@ def _restore_automount(text):
     if text is not None:
         with open(USBMOUNT_CONF, 'w') as f:
             f.write(text)
+    try:
+        os.remove(MARKER)
+    except OSError:
+        pass
