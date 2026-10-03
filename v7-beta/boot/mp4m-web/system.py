@@ -562,12 +562,20 @@ _play_request_lock = threading.Lock()
 
 def request_play(path):
     """Ask the player to play this file now, then carry on from there. False if it isn't running."""
+    return send_player_request({'file': path})
+
+def request_rewind():
+    """Ask the player to go back to the first frame and hold it until play. False if it isn't running."""
+    return send_player_request({'command': 'rewind'})
+
+def send_player_request(request_data):
+    """Write a request for the player (it reads it when it gets SIGUSR1), then send the signal."""
     with _play_request_lock:
         # A new file with a random name: /tmp is shared with other users, so never a name chosen in advance
         fd, request = tempfile.mkstemp(dir=os.path.dirname(PLAY_REQUEST_FILE), prefix='.mp4museum-play-')
         try:
             with os.fdopen(fd, 'w') as f:
-                json.dump({'id': uuid.uuid4().hex, 'file': path}, f)
+                json.dump(dict(request_data, id=uuid.uuid4().hex), f)
                 # The player runs as pi, the web interface as root
                 os.fchmod(f.fileno(), 0o644)
             os.replace(request, PLAY_REQUEST_FILE)

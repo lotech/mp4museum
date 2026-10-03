@@ -422,3 +422,31 @@ def test_images_too_large_for_a_pi_3_are_skipped(tmp_path):
     for model in ({'/proc/device-tree/model': 'Raspberry Pi 4 Model B Rev 1.4\0'}, {}):
         r = run(tmp_path, files=files, contents=contents, write=model, max_plays=7)
         assert plays(r)[3:7] == ['a.mp4', 'b-poster.png', 'c-photo.jpg', 'd-fine.png']
+
+
+# ----- Rewind: back to the first frame, held until play ----- #
+def test_rewind_holds_the_first_frame(tmp_path):
+    files = ['/media/internal/a.mp4', '/media/internal/b.mp4']
+    r = run(tmp_path, files=files, media={'a.mp4': 100},
+            signals=[{'at': 50, 'command': 'rewind'}, {'at': 70, 'signal': 'SIGUSR2'}], max_plays=5)
+    assert [e['set_time'] for e in r['log'] if 'set_time' in e] == [0]
+    held = [s for s in r['statuses'] if s['state'] == 'paused'][0]
+    assert held['file'].endswith('a.mp4') and held['position'] == 0 and held['rewind'] is True
+    # held for 20 seconds, then the whole file plays from the start
+    assert 169 <= first_play(r, 'b.mp4')['at'] <= 172
+    # already paused: it stays paused, at the start
+    r = run(tmp_path, files=files, media={'a.mp4': 100},
+            signals=[{'at': 40, 'signal': 'SIGUSR2'}, {'at': 50, 'command': 'rewind'}], max_seconds=200)
+    assert 'b.mp4' not in plays(r) and [s['state'] for s in r['statuses']][-1] == 'paused'
+
+
+def test_rewind_a_loop_in_omxplayer(tmp_path):
+    # omxplayer can't hold a frame: VLC shows the first frame until play, then omxplayer loops again
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'],
+            signals=[{'at': 40, 'command': 'rewind'}, {'at': 60, 'signal': 'SIGUSR2'}], max_seconds=100)
+    starts = [round(e['at']) for e in omx_starts(r)]
+    assert starts[0] == 20 and 60 <= starts[1] <= 61 and len(starts) == 2
+    assert killpgs(r)[0] == (2, 40)
+    assert plays(r)[3:] == ['clip-loop.mp4']          # the first frame, in VLC
+    held = [s for s in r['statuses'] if s['state'] == 'paused'][0]
+    assert held['file'].endswith('clip-loop.mp4') and held['position'] == 0

@@ -21,9 +21,12 @@ def fire_signals(place=None):
     for event in scenario.get('signals', []):
         if not event.get('done') and clock['now'] - 1000 >= event['at'] and event.get('when') == place:
             event['done'] = True
-            if 'play' in event:
+            if 'play' in event or 'command' in event:
+                # {'play': path} or {'command': 'rewind'}, as the web interface sends them
+                request = {'id': 'request-%s' % event['at']}
+                request.update({'file': event['play']} if 'play' in event else {'command': event['command']})
                 with open(paths['/tmp/mp4museum-play.json'], 'w') as f:
-                    json.dump({'id': 'request-%s' % event['at'], 'file': event['play']}, f)
+                    json.dump(request, f)
             os.kill(os.getpid(), getattr(signal, event.get('signal', 'SIGUSR1')))
 
 active_omx = []
@@ -66,7 +69,7 @@ class Player:
         if any('input-repeat' in o for o in m.options):
             self.length = 10 ** 9
     def get_state(self):
-        if self.state == _S.Playing and clock['now'] - self.started >= self.length and self.length:
+        if self.state == _S.Playing and self.get_time() / 1000 >= self.length and self.length:
             self.state = _S.Ended
         fire_signals()
         return self.state
@@ -83,6 +86,15 @@ class Player:
             self.paused_total += clock['now'] - self.paused_at
             self.paused_at = None
         log.append({'pause': self.state == _S.Paused})
+    def set_time(self, ms):
+        log.append({'set_time': ms, 'at': round(clock['now'] - 1000, 2)})
+        self.started, self.paused_total = clock['now'] - ms / 1000, 0
+        if self.state == _S.Paused:
+            self.paused_at = clock['now']
+    def set_pause(self, on):
+        log.append({'set_pause': on, 'at': round(clock['now'] - 1000, 2)})
+        if bool(on) != (self.state == _S.Paused) and self.state in (_S.Playing, _S.Paused):
+            self.pause()
     def get_length(self):
         # known once it is playing, as in VLC
         playing = self.state in (_S.Playing, _S.Paused, _S.Ended)

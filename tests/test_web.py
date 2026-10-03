@@ -651,3 +651,28 @@ def test_image_size_odd_headers(pi):
     for junk in (b'', b'\xff\xd8', b'\xff\xd8\xff\xe0\x00\x01', b'\x89PNG\r\n\x1a\n', b'GIF89a\x01'):
         (pi.media / 'junk.jpg').write_bytes(junk)
         assert system.image_size(str(pi.media / 'junk.jpg')) is None
+
+
+def test_rewind(client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    monkeypatch.setattr(webservice.time, 'sleep', lambda s: None)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    fetch = {'X-Requested-With': 'fetch'}
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': '/media/internal/a.mp4', 'since': time.time(), 'pid': 4242,
+                   'play_file': True, 'rewind': True}, f)
+    assert client.get('/player/status').get_json()['rewind'] is True
+    r = client.post('/player/rewind', headers=fetch)
+    assert r.status_code == 200 and sent == [(4242, signal.SIGUSR1)]
+    request = json.load(open(system.PLAY_REQUEST_FILE))
+    assert request['command'] == 'rewind' and request['id'] and 'file' not in request
+    assert b'Press play to start' in client.post('/player/rewind', follow_redirects=True).data
+    # an older player would take the signal for Next: nothing is sent
+    sent.clear()
+    write_status('playing', '/media/internal/a.mp4')
+    r = client.post('/player/rewind', headers=fetch)
+    assert r.status_code == 409 and 'older version' in r.get_json()['error'] and sent == []
+    write_status('idle')
+    assert client.post('/player/rewind', headers=fetch).get_json()['error'] == 'Nothing is playing.'
+    assert 'id="rewindButton"' in client.get('/').data.decode()

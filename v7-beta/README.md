@@ -54,9 +54,9 @@ in alphabetical order, over and over.
   than the screen), `.bashrc` starts it again, and the file it was playing is skipped until it
   is replaced or chosen in the web interface. Its output is in `/tmp/mp4museum.log` (also on
   the System tab). Ctrl-C on the console stops it for good, as before.
-- **Images** bigger than a 4K screen are marked "very large" in the web interface, with a
-  warning when uploaded: they gain nothing on screen and may be too much for a Pi 3's memory.
-  Resize them to the screen's size, e.g. 1920×1080.
+- **Images** more than 2048 pixels wide or high come out scrambled on a Pi 3 (after a long
+  wait), so a Pi 3 or older skips them. The web interface marks them "too large" and warns
+  when one is uploaded. Resize them to the screen's size, e.g. 1920×1080.
 - **Buttons:** GPIO pin 11 pauses and resumes, pin 13 skips to the next file. The web interface
   has the same buttons, shows what is playing and how far it has got (the player writes
   `/tmp/mp4museum-status.json`), and can start any file in the playlist (it writes
@@ -71,7 +71,8 @@ in alphabetical order, over and over.
 
 Open `http://<network name>.local` in a browser on the same network.
 
-- **Media:** the player (what is playing, Pause/Resume, Next), playback settings, and the
+- **Media:** the player (what is playing, Pause/Resume, Next, and Rewind: back to the first
+  frame, held until play is pressed), playback settings, and the
   playlist: every file the player plays, from the media partition and USB sticks, in order.
   Start any file from there (its play button or its name); upload files (several at once, with progress) or download and
   delete them.

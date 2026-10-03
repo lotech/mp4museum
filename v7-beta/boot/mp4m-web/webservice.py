@@ -209,11 +209,12 @@ def player_view(status):
     browser doesn't depend on the Pi's clock (which may be wrong without a network)."""
     view = {'running': bool(status), 'state': None, 'text': describe_player_status(status), 'file': None,
             'name': None, 'folder': None, 'kind': None, 'loop': False, 'position': None, 'length': None,
-            'play_file': False}
+            'play_file': False, 'rewind': False}
     if not status:
         return view
     path = status.get('file') or None
     view.update(state=status.get('state'), file=path, play_file=status.get('play_file') is True,
+                rewind=status.get('rewind') is True,
                 name=os.path.basename(path) if path else None,
                 folder=os.path.basename(os.path.dirname(path)) if path else None,
                 kind=system.media_kind(path) if path else None, loop='loop.' in (path or ''))
@@ -306,6 +307,35 @@ def player_play():
         return player_view(system.get_player_status())
     else:
         flash(f"Playing {entry['name']}.", "success")
+    return redirect(url_for('index'))
+
+@app.route('/player/rewind', methods=['POST'])
+def player_rewind():
+    status = system.get_player_status()
+    if not status:
+        error = "The player is not running."
+    elif status.get('state') not in ('playing', 'paused'):
+        error = "Nothing is playing." if status.get('state') != 'sync' else "This doesn't work in sync mode."
+    elif status.get('rewind') is not True:
+        error = "This player script can't go back to the start (it is from an older version)."
+    else:
+        error = None
+    if not error:
+        try:
+            if system.request_rewind():
+                time.sleep(0.5)
+            else:
+                error = "The player is not running."
+        except OSError as e:
+            error = f"Couldn't ask the player: {e}"
+    if error:
+        if is_fetch():
+            return dict(player_view(system.get_player_status()), error=error), 409
+        flash(error, "error")
+    elif is_fetch():
+        return player_view(system.get_player_status())
+    else:
+        flash("Back at the first frame. Press play to start.", "success")
     return redirect(url_for('index'))
 
 @app.route('/set_image_duration', methods=['POST'])

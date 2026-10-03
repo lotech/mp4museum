@@ -69,6 +69,9 @@
         <span id="playerLength" class="time"></span>
       </div>
       <div class="transport">
+        <form method="post" action="{{ url_for('player_rewind') }}" class="js-player">
+          <button type="submit" id="rewindButton" class="round-button" title="Back to the first frame, held until play is pressed" aria-label="Back to the start and hold">{{ icon('skip-back') }}</button>
+        </form>
         <form method="post" action="{{ url_for('player_pause') }}" class="js-player">
           <button type="submit" id="pauseButton" class="round-button big" title="Pause or resume (same as the button on GPIO pin 11)" aria-label="Pause or resume">
             <span class="when-playing">{{ icon('pause') }}</span><span class="when-paused">{{ icon('play') }}</span>
