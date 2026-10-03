@@ -11,7 +11,7 @@
 # video from /boot; VLC kept open between files (no black frames); optional
 # omxplayer for loop videos
 
-import time, vlc, os, glob, json, signal, shutil
+import time, vlc, os, glob, json, signal, shutil, sys
 import RPi.GPIO as GPIO
 import subprocess
 
@@ -92,23 +92,26 @@ def buttonNext(channel):
 # omxplayer, when it is playing a loop file (see omx_loop)
 omx = None
 omx_paused = False
+omx_started = 0
+omx_last_key = 0
 
-# stop the current file; also ends a loop file
+# stop the current file; also ends a loop file (omx_loop stops omxplayer)
 skip_requested = False
 def next_file():
     global skip_requested
     skip_requested = True
-    process = omx
-    if process:
-        omx_key(process, b'q')
-    else:
+    if not omx:
         player.stop()
 
 def pause_toggle():
-    global omx_paused
+    global omx_paused, omx_last_key
     process = omx
     if process:
-        if omx_key(process, b'p'):
+        # omxplayer only reads keys once it has started, and keys that arrive together are
+        # read as one unknown key, so presses too early or too close together are ignored
+        now = time.time()
+        if now - omx_started >= 3 and now - omx_last_key >= .3 and omx_key(process, b'p'):
+            omx_last_key = now
             omx_paused = not omx_paused
     else:
         player.pause()
@@ -160,33 +163,43 @@ def vlc_play(source, options=()):
 OMX_LOOP_TYPES = ('.mp4', '.m4v', '.mov', '.mkv', '.avi', '.ts', '.h264')
 
 def omx_key(process, key):
-    """Send omxplayer one of its keyboard controls (p pauses, q quits). True if it was sent."""
+    """Send omxplayer one of its keyboard controls (p pauses). True if it was sent.
+    Unbuffered: it is called from button and signal handlers."""
     try:
-        process.stdin.write(key)
-        process.stdin.flush()
-        return True
+        return os.write(process.stdin.fileno(), key) == len(key)
     except (OSError, ValueError):
         return False
 
+def omx_running(process):
+    """True while anything of omxplayer runs: /usr/bin/omxplayer is a script that starts
+    omxplayer.bin, both in the process group started for it."""
+    if process.poll() is None:
+        return True
+    try:
+        os.killpg(process.pid, 0)
+        return True
+    except OSError:
+        return False
+
 def stop_omx(process):
-    """Wait for omxplayer to quit after q; if it doesn't, interrupt it (its clean shutdown),
-    then terminate and finally kill it, so it can never block the player."""
-    for signum in (None, signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
-        if signum:
-            try:
-                os.killpg(process.pid, signum)
-            except OSError:
-                pass
-        try:
-            process.wait(timeout=2)
+    """Interrupt omxplayer (its clean shutdown); if it doesn't stop, terminate and finally
+    kill it, so it can never block the player or stay on screen."""
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
+        if not omx_running(process):
             return
-        except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signum)
+        except OSError:
             pass
+        waited = 0
+        while waited < 2 and omx_running(process):
+            time.sleep(.05)
+            waited += .05
 
 def omx_loop(source):
     """Loop a video with omxplayer until next is pressed.
     Returns 'skipped', or 'failed' if omxplayer couldn't play it (then VLC takes over)."""
-    global omx, omx_paused
+    global omx, omx_paused, omx_started
     # VLC lets go of the screen; omxplayer blanks the background behind the video (-b)
     player.stop()
     while not skip_requested:
@@ -199,10 +212,8 @@ def omx_loop(source):
                                        stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
             return 'failed'
+        omx_started = started
         omx = process
-        if skip_requested:
-            # next was pressed while it was starting
-            omx_key(process, b'q')
         shown_state = None
         while process.poll() is None and not skip_requested:
             state = 'paused' if omx_paused else 'playing'
@@ -210,9 +221,8 @@ def omx_loop(source):
                 shown_state = state
                 write_status(state, source)
             time.sleep(.05)
+        stop_omx(process)
         omx = None
-        if process.poll() is None:
-            stop_omx(process)
         if skip_requested:
             break
         # with --loop it only stops by itself if something went wrong
@@ -261,30 +271,40 @@ GPIO.add_event_detect(13, GPIO.RISING, callback = buttonNext, bouncetime = 1234)
 # check for sync mode instructions
 sync_mode()
 
+# stop omxplayer if the player is stopped, so it isn't left looping on screen
+def quit_player(signum, frame):
+    sys.exit(0)
+signal.signal(signal.SIGTERM, quit_player)
+signal.signal(signal.SIGHUP, quit_player)
+
 # the loop
-while(1):
-    files = sorted(glob.glob(MEDIA_FILES))
-    # nothing to play yet (no USB stick, empty media partition): check again shortly
-    if not files:
-        # don't leave the last frame of a deleted file on screen
-        player.stop()
-        write_status('idle')
-        time.sleep(2)
-    for file in files:
-        # read for every file, so a new image duration applies straight away
-        settings = read_settings()
-        options = [':image-duration=%d' % settings['image_duration']]
-        # a next press from here on skips this file
-        skip_requested = False
-        if "loop." in file:
-            # play it again and again until next is pressed
-            if (settings['loop_player'] == 'omxplayer' and file.lower().endswith(OMX_LOOP_TYPES)
-                    and shutil.which("omxplayer")):
-                if omx_loop(file) != 'failed':
-                    continue
-                print("falling back to VLC for %s" % file, flush=True)
-            # VLC starts it again in the same window each time it ends
-            while not skip_requested and vlc_play(file, options) == 'ended':
-                pass
-        else:
-            vlc_play(file, options)
+try:
+    while(1):
+        files = sorted(glob.glob(MEDIA_FILES))
+        # nothing to play yet (no USB stick, empty media partition): check again shortly
+        if not files:
+            # don't leave the last frame of a deleted file on screen
+            player.stop()
+            write_status('idle')
+            time.sleep(2)
+        for file in files:
+            # read for every file, so a new image duration applies straight away
+            settings = read_settings()
+            options = [':image-duration=%d' % settings['image_duration']]
+            # a next press from here on skips this file
+            skip_requested = False
+            if "loop." in file:
+                # play it again and again until next is pressed
+                if (settings['loop_player'] == 'omxplayer' and file.lower().endswith(OMX_LOOP_TYPES)
+                        and shutil.which("omxplayer")):
+                    if omx_loop(file) != 'failed':
+                        continue
+                    print("falling back to VLC for %s" % file, flush=True)
+                # VLC starts it again in the same window each time it ends
+                while not skip_requested and vlc_play(file, options) == 'ended':
+                    pass
+            else:
+                vlc_play(file, options)
+finally:
+    if omx:
+        stop_omx(omx)

@@ -95,15 +95,12 @@ import fnmatch; _glob.fnmatch = fnmatch
 subprocess.run = lambda cmd, *a, **k: log.append({'run': cmd}) or (_ for _ in ()).throw(SystemExit('sync ran'))
 
 # --- fake omxplayer ---
-# scenario options: omx_fails (exits at once), omx_exits_after (seconds), omx_ignores_q,
-# omx_hangs (ignores q, SIGINT and SIGTERM)
+# /usr/bin/omxplayer is a script that runs omxplayer.bin; both are modelled. Scenario options:
+# omx_fails (exits at once), omx_exits_after (seconds), omx_hangs (omxplayer.bin ignores SIGINT
+# and SIGTERM; the script dies on SIGTERM)
 class FakeStdin:
     def __init__(self, process): self.process = process
-    def write(self, data):
-        log.append({'key': data.decode(), 'at': round(clock['now'] - 1000, 2)})
-        if data == b'q' and not scenario.get('omx_ignores_q') and not scenario.get('omx_hangs'):
-            self.process.end(0)
-    def flush(self): pass
+    def fileno(self): return -self.process.pid
 class FakeOmxplayer:
     def __init__(self, cmd, **kwargs):
         log.append({'omxplayer': cmd, 'at': round(clock['now'] - 1000, 2)})
@@ -112,32 +109,46 @@ class FakeOmxplayer:
         self.pid = 90000 + len(log)
         self.stdin = FakeStdin(self)
         self.returncode = None
+        self.bin_running = True
         self.started = clock['now']
         omx_processes[self.pid] = self
         active_omx.append(self)
         if scenario.get('omx_fails'):
             self.end(1)
-    def end(self, code):
-        self.returncode = code
-        if self in active_omx:
+    def end(self, code, script_only=False):
+        if self.returncode is None:
+            self.returncode = code
+        if not script_only:
+            self.bin_running = False
+        if not self.bin_running and self in active_omx:
             active_omx.remove(self)
     def poll(self):
         after = scenario.get('omx_exits_after')
         if self.returncode is None and after and clock['now'] - self.started >= after:
             self.end(0)
         return self.returncode
-    def wait(self, timeout=None):
-        if self.poll() is None:
-            fake_sleep(timeout or 0)
-            raise subprocess.TimeoutExpired('omxplayer', timeout)
-        return self.returncode
 omx_processes = {}
 def fake_killpg(pid, signum):
-    log.append({'killpg': int(signum)})
     process = omx_processes[pid]
+    if signum == 0:
+        if process.returncode is None or process.bin_running:
+            return
+        raise ProcessLookupError(pid)
+    log.append({'killpg': int(signum), 'at': round(clock['now'] - 1000, 2)})
     if signum == signal.SIGKILL or not scenario.get('omx_hangs'):
         process.end(-int(signum))
+    elif signum == signal.SIGTERM:
+        process.end(-int(signum), script_only=True)
 os.killpg = fake_killpg
+_real_write = os.write
+def fake_write(fd, data):
+    if -fd in omx_processes:
+        log.append({'key': data.decode(), 'at': round(clock['now'] - 1000, 2)})
+        if not omx_processes[-fd].bin_running:
+            raise BrokenPipeError()
+        return len(data)
+    return _real_write(fd, data)
+os.write = fake_write
 def fake_popen(cmd, **kwargs):
     if cmd[0] == 'omxplayer':
         return FakeOmxplayer(cmd, **kwargs)

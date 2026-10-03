@@ -145,6 +145,10 @@ def omx_starts(result):
     return [event for event in result['log'] if 'omxplayer' in event]
 
 
+def killpgs(result):
+    return [(event['killpg'], round(event['at'])) for event in result['log'] if 'killpg' in event]
+
+
 def test_loop_with_vlc_unless_omxplayer_is_chosen(tmp_path):
     r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'],
             media={'clip-loop.mp4': 3}, max_plays=6)
@@ -161,9 +165,11 @@ def test_loop_with_omxplayer(tmp_path):
     assert omx_starts(r)[0]['omxplayer'] == ['omxplayer', '--loop', '--no-osd', '-b', '-o', 'alsa:plughw:1,0',
                                              '/media/internal/00VJSurvivalKit_06-loop.mp4']
     # VLC lets go of the screen first
-    assert stop_calls(r)
-    # pause, resume and next go to omxplayer as its keys
-    assert [event['key'] for event in r['log'] if 'key' in event] == ['p', 'p', 'q']
+    first_omx = r['log'].index(omx_starts(r)[0])
+    assert any('stop_call' in event for event in r['log'][first_omx - 3:first_omx])
+    # pause and resume are omxplayer's p key; next stops it with SIGINT (its clean shutdown)
+    assert [event['key'] for event in r['log'] if 'key' in event] == ['p', 'p']
+    assert killpgs(r)[:1] == [(2, 60)]
     states = [status['state'] for status in r['statuses']
               if (status.get('file') or '').endswith('-loop.mp4') and status['since'] < 1060]
     assert states == ['playing', 'paused', 'playing']
@@ -177,16 +183,29 @@ def test_omxplayer_restarted_if_it_stops_by_itself(tmp_path):
     assert len(omx_starts(r)) >= 3 and 100 <= first_play(r, 'zz.mp4')['at'] <= 102
 
 
-def test_omxplayer_that_ignores_quit_is_stopped(tmp_path):
-    r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/zz.mp4'], installed=['omxplayer'],
-            write=OMX_SETTING, omx_ignores_q=True, signals=[{'at': 40, 'signal': 'SIGUSR1'}], max_plays=6)
-    assert [event['killpg'] for event in r['log'] if 'killpg' in event] == [2]       # SIGINT: clean shutdown
-    assert 'zz.mp4' in plays(r)
-
+def test_omxplayer_that_hangs_is_killed(tmp_path):
+    # /usr/bin/omxplayer is a script: it dies on SIGTERM, but omxplayer.bin can still be running
     r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/zz.mp4'], installed=['omxplayer'],
             write=OMX_SETTING, omx_hangs=True, signals=[{'at': 40, 'signal': 'SIGUSR1'}], max_plays=6)
-    assert [event['killpg'] for event in r['log'] if 'killpg' in event] == [2, 15, 9]   # until it's gone
-    assert 'zz.mp4' in plays(r)
+    assert [signum for signum, at in killpgs(r)][:3] == [2, 15, 9]
+    assert 44 <= first_play(r, 'zz.mp4')['at'] <= 46
+
+
+def test_omxplayer_keys_not_sent_too_early_or_together(tmp_path):
+    # omxplayer ignores keys until it has started, and reads two keys at once as an unknown key
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'], write=OMX_SETTING,
+            signals=[{'at': 21, 'signal': 'SIGUSR2'}, {'at': 30, 'signal': 'SIGUSR2'}, {'at': 30.1, 'signal': 'SIGUSR2'}],
+            max_seconds=60)
+    assert [round(event['at']) for event in r['log'] if 'key' in event] == [30]
+    assert [status['state'] for status in r['statuses'] if status['file']][-1] == 'paused'
+
+
+def test_omxplayer_stopped_when_player_exits(tmp_path):
+    for signals in ([], [{'at': 40, 'signal': 'SIGTERM'}], [{'at': 40, 'signal': 'SIGHUP'}]):
+        r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'], write=OMX_SETTING,
+                signals=signals, max_seconds=100)
+        assert len(omx_starts(r)) == 1 and [signum for signum, at in killpgs(r)] == [2]
+        assert r['log'][-1] == {'exit': '0' if signals else 'time limit'}
 
 
 def test_loop_falls_back_to_vlc_when_omxplayer_fails(tmp_path):

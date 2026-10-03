@@ -39,7 +39,7 @@ a network is optional.
 - [x] Loop files froze on the last frame (VLC's input-repeat); the player now restarts them itself
 - [x] Black frames between loop passes and between files: VLC is no longer stopped when a file ends, so the next one starts in the same window
 - [x] Option to loop videos with `omxplayer --loop` instead (web interface, Media)
-- [ ] Test on the Pi: does VLC hold the last frame at the loop and between files? Compare with omxplayer (seamless?, pause/next, audio device, back to VLC afterwards)
+- [ ] Test on the Pi: does VLC hold the last frame at the loop and between files? Does a video's last frame stay up during an audio-only file after it (if so, stop VLC before audio files)? Compare with omxplayer (seamless?, pause/next, audio device, back to VLC afterwards)
 - [ ] If neither loops well enough: try a VLC playlist with the file twice, or a gapless player such as mpv (not on the image)
 - [ ] Test on the Pi 3B: boot video shows, images use the set duration, loop files, pause/next from the web and GPIO, sync mode (needs omxplayer-sync on the image?)
 
