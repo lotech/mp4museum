@@ -79,6 +79,7 @@ loop_omx_ok = None
 
 def write_status(state, source=None, position=None, length=None, temp='.tmp', engine='vlc'):
     # position and length in seconds, when known; play_file: this player reads PLAY_REQUEST_FILE.
+    # rewind: it can go back to the first frame (False until the playlist starts)
     # temp: the quit signal handler uses its own temp file, as it can interrupt this one
     try:
         with open(STATUS_FILE + temp, 'w') as f:
@@ -86,7 +87,7 @@ def write_status(state, source=None, position=None, length=None, temp='.tmp', en
             # the Pi sets its time from the network (it has no clock of its own)
             json.dump({'state': state, 'file': source, 'since': time.time(), 'mono': time.monotonic(),
                        'pid': os.getpid(), 'position': position, 'length': length, 'play_file': True,
-                       'rewind': True, 'engine': engine, 'loop_player': loop_engine,
+                       'rewind': playlist_started, 'engine': engine, 'loop_player': loop_engine,
                        'loop_omx_ok': loop_omx_ok}, f)
         os.replace(STATUS_FILE + temp, STATUS_FILE)
     except OSError:

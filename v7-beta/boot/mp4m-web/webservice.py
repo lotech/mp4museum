@@ -174,6 +174,7 @@ def index():
                            gpu_mem_recommended=system.recommended_gpu_mem(),
                            memory_mb=system.memory_megabytes(),
                            network_status=system.get_network_status(),
+                           device_info=system.get_device_info(),
                            display_info=system.get_display_info(),
                            current_sound_card=system.get_current_sound_card(),
                            script_content=system.read_script_file(),
@@ -323,6 +324,8 @@ def player_rewind():
         error = "The player is not running."
     elif status.get('state') not in ('playing', 'paused'):
         error = "Nothing is playing." if status.get('state') != 'sync' else "This doesn't work in sync mode."
+    elif status.get('rewind') is False:
+        error = "The start-up video can't go back to the start."
     elif status.get('rewind') is not True:
         error = "This player script can't go back to the start (it is from an older version)."
     else:

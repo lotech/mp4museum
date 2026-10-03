@@ -675,6 +675,13 @@ def test_rewind(client, monkeypatch):
     assert r.status_code == 409 and 'older version' in r.get_json()['error'] and sent == []
     write_status('idle')
     assert client.post('/player/rewind', headers=fetch).get_json()['error'] == 'Nothing is playing.'
+    # the boot video is playing: the player can rewind, but not that
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': '/home/pi/mp4museum-boot.mp4', 'since': time.time(), 'pid': 4242,
+                   'play_file': True, 'rewind': False}, f)
+    assert client.get('/player/status').get_json()['rewind'] is False
+    r = client.post('/player/rewind', headers=fetch)
+    assert r.status_code == 409 and 'start-up video' in r.get_json()['error'] and sent == []
     assert 'id="rewindButton"' in client.get('/').data.decode()
 
 
@@ -854,3 +861,36 @@ def test_graphics_memory_only_changes_the_line_for_every_pi():
     assert changed == '# comment\n\ngpu_mem=256\ndisable_splash=1\n[pi4]\ndtoverlay=x\n' and system.get_gpu_mem(changed) == 256
     # two lines for every Pi: one is left
     assert system.set_gpu_mem_in_config('gpu_mem=64\ngpu_mem=128\n', 256) == 'gpu_mem=256\n'
+
+
+def test_device_info(pi, client, tmp_path, monkeypatch):
+    revision = tmp_path / 'cpuinfo'
+    revision.write_text('Hardware\t: BCM2835\nRevision\t: a02082\nSerial\t\t: 00000000deadbeef\nModel\t\t: Raspberry Pi 3\n')
+    (tmp_path / 'os-release').write_text('PRETTY_NAME="Raspbian GNU/Linux 10 (buster)"\nNAME="Raspbian GNU/Linux"\n')
+    (tmp_path / 'uptime').write_text('11520.42 40000.00\n')
+    monkeypatch.setattr(system, 'CPUINFO_FILE', str(revision))
+    monkeypatch.setattr(system, 'OS_RELEASE_FILE', str(tmp_path / 'os-release'))
+    monkeypatch.setattr(system, 'UPTIME_FILE', str(tmp_path / 'uptime'))
+    answers = {'get_mem gpu': 'gpu=256M', 'measure_temp': "temp=48.3'C", 'get_throttled': 'throttled=0x50000'}
+    monkeypatch.setattr(system, 'run_command', lambda cmd: (True, answers[' '.join(cmd[1:])]) if cmd[0] == 'vcgencmd'
+                        else pi.run_command(cmd))
+    info = dict(system.get_device_info())
+    assert info['Model'] == 'Raspberry Pi 3 Model B Rev 1.2' and info['Memory'] == '1 GB'
+    assert info['Graphics memory'] == '256 MB' and info['Temperature'] == '48.3 °C'
+    assert 'Was too low' in info['Power'] and info['Running for'] == '3 h 12 min'
+    assert info['Operating system'] == 'Raspbian GNU/Linux 10 (buster)' and info['Serial number'] == '00000000deadbeef'
+    assert 'free of' in info['Media partition']
+    page = client.get('/').data.decode()
+    assert '<dt>Memory</dt><dd>1 GB</dd>' in page and 'Raspbian GNU/Linux 10 (buster)' in page
+    # a Pi 4 with 4 GB; power fine
+    revision.write_text('Revision\t: c03114\n')
+    answers['get_throttled'] = 'throttled=0x0'
+    info = dict(system.get_device_info())
+    assert info['Memory'] == '4 GB' and info['Power'] == 'OK' and 'Serial number' not in info
+    # old boards, no vcgencmd, nothing readable: only what is known
+    revision.write_text('Revision\t: 000e\n')
+    monkeypatch.setattr(system, 'run_command', lambda cmd: (False, 'not found'))
+    (tmp_path / 'model').unlink()
+    info = dict(system.get_device_info())
+    assert info['Memory'] == '861 MB for programs' and 'Model' not in info and 'Power' not in info
+    assert system.format_duration(59) == '0 min' and system.format_duration(3 * 86400 + 7200) == '3 d 2 h'

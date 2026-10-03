@@ -91,6 +91,8 @@ Open `http://<network name>.local` in a browser on the same network.
 - **Video presets** only change the video lines in `/boot/config.txt`; other settings are kept.
 - **Graphics memory** (Video tab): `gpu_mem` in `/boot/config.txt`, 128 MB on the v7 image.
   256 MB is recommended on a Pi 3 (1 GB), 512 MB on a Pi 4 with 2 GB or more. Needs a reboot.
+- **Device** (System tab): the Pi's model, memory, graphics memory in use, temperature, whether
+  the power supply has been too weak since it started, free space and OS version.
 
 Files the web interface may create in `/boot`: `mp4m-password.txt`, `hostname.txt`, `alsa.txt`,
 `mp4m-player.txt`, `mp4museum.py.new`. `mp4m-update.txt` is only read.

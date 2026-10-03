@@ -439,6 +439,10 @@ def test_rewind_holds_the_first_frame(tmp_path):
     assert held['file'].endswith('a.mp4') and held['position'] < .1 and held['rewind'] is True
     # held for 20 seconds, then the whole file plays from the start
     assert 169 <= first_play(r, 'b.mp4')['at'] <= 172
+    # not offered for the boot video and logo
+    playlist = [i for i, s in enumerate(r['statuses']) if s['file'] and s['file'].startswith('/media/')][0]
+    assert playlist > 0 and not any(s['rewind'] for s in r['statuses'][:playlist])
+    assert all(s['rewind'] is True for s in r['statuses'][playlist:])
     # already paused: it stays paused, at the start
     r = run(tmp_path, files=files, media={'a.mp4': 100},
             signals=[{'at': 40, 'signal': 'SIGUSR2'}, {'at': 50, 'command': 'rewind'}], max_seconds=200)

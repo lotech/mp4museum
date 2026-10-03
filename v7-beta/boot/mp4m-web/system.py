@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import platform
 import re
 import shutil
 import signal
@@ -91,7 +92,7 @@ INVALID_FILENAME_CHARS = set('/\\:*?"<>|')
 def read_serial():
     """The Pi's serial number, or '' if it can't be read."""
     try:
-        with open('/proc/cpuinfo', 'r') as f:
+        with open(CPUINFO_FILE, 'r') as f:
             for line in f:
                 if line.startswith('Serial'):
                     return line.split(':', 1)[1].strip()
@@ -433,6 +434,99 @@ def get_network_status():
             lines.append("  No IP address")
     return "\n".join(lines)
 
+# ----- Device ----- #
+CPUINFO_FILE = '/proc/cpuinfo'
+OS_RELEASE_FILE = '/etc/os-release'
+UPTIME_FILE = '/proc/uptime'
+
+def _read_text(path):
+    try:
+        with open(path, 'r', errors='replace') as f:
+            return f.read()
+    except OSError:
+        return ''
+
+def read_model():
+    """e.g. 'Raspberry Pi 3 Model B Rev 1.2', or ''."""
+    return _read_text(MODEL_FILE).strip('\0 \n')
+
+def installed_memory_megabytes():
+    """All the memory on the board in MB (Linux gets it less the graphics memory), or None.
+    From the revision code: on newer boards bits 20-22 give the size, 256 MB << n."""
+    match = re.search(r'^Revision\s*:\s*([0-9a-fA-F]+)\s*$', _read_text(CPUINFO_FILE), re.M)
+    if not match:
+        return None
+    revision = int(match.group(1), 16)
+    if not revision & (1 << 23):
+        return None
+    return 256 << ((revision >> 20) & 7)
+
+def _vcgencmd(*args):
+    """The value of `vcgencmd ...`, e.g. '256M' from 'gpu=256M', or None."""
+    ok, output = run_command(['vcgencmd'] + list(args))
+    if not ok or '=' not in output:
+        return None
+    return output.split('=', 1)[1].strip()
+
+def format_megabytes(megabytes):
+    return f"{megabytes // 1024} GB" if megabytes >= 1024 and megabytes % 1024 == 0 else f"{megabytes} MB"
+
+def format_duration(seconds):
+    minutes = int(seconds) // 60
+    days, hours, minutes = minutes // 1440, minutes // 60 % 24, minutes % 60
+    if days:
+        return f"{days} d {hours} h"
+    return f"{hours} h {minutes} min" if hours else f"{minutes} min"
+
+def get_device_info():
+    """(label, value) pairs about this Pi for the System tab, leaving out what can't be read."""
+    info = []
+    model = read_model()
+    if model:
+        info.append(("Model", model))
+    memory = installed_memory_megabytes()
+    linux_memory = memory_megabytes()
+    if memory:
+        info.append(("Memory", format_megabytes(memory)))
+    elif linux_memory:
+        info.append(("Memory", f"{linux_memory} MB for programs"))
+    gpu = _vcgencmd('get_mem', 'gpu')
+    if gpu and gpu.endswith('M') and gpu[:-1].isdigit():
+        info.append(("Graphics memory", f"{gpu[:-1]} MB"))
+    temperature = _vcgencmd('measure_temp')
+    if temperature:
+        info.append(("Temperature", temperature.replace("'C", " °C")))
+    throttled = _vcgencmd('get_throttled')
+    try:
+        throttled = int(throttled, 16) if throttled else None
+    except ValueError:
+        throttled = None
+    if throttled is not None:
+        if throttled & 0x1:
+            info.append(("Power", "Too low now: use a stronger power supply"))
+        elif throttled & 0x10000:
+            info.append(("Power", "Was too low since the Pi started: use a stronger power supply"))
+        else:
+            info.append(("Power", "OK"))
+    if media_available():
+        try:
+            usage = shutil.disk_usage(MEDIA_PATH)
+            info.append(("Media partition", f"{format_size(usage.free)} free of {format_size(usage.total)}"))
+        except OSError:
+            pass
+    match = re.search(r'^PRETTY_NAME="?([^"\n]*)"?$', _read_text(OS_RELEASE_FILE), re.M)
+    if match:
+        info.append(("Operating system", match.group(1)))
+    info.append(("Linux kernel", platform.release()))
+    try:
+        info.append(("Running for", format_duration(float(_read_text(UPTIME_FILE).split()[0]))))
+    except (IndexError, ValueError):
+        pass
+    serial = read_serial()
+    if serial:
+        info.append(("Serial number", serial))
+    return info
+
 def get_display_info():
     try:
         result = subprocess.run(['tvservice', '-s'], capture_output=True, text=True)
@@ -522,11 +616,7 @@ MODEL_FILE = '/proc/device-tree/model'
 
 def image_limit():
     """LARGE_IMAGE_SIDE on a Pi 3 or older, else None."""
-    try:
-        with open(MODEL_FILE, 'r', errors='replace') as f:
-            model = f.read()
-    except OSError:
-        return None
+    model = read_model()
     if any(newer in model for newer in ('Pi 4', 'Pi 5', 'Pi 400', 'Pi 500', 'Compute Module 4', 'Compute Module 5')):
         return None
     return LARGE_IMAGE_SIDE if 'Raspberry Pi' in model else None

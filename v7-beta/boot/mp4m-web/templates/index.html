@@ -352,6 +352,16 @@
       </section>
     </div>
 
+    <div class="stack">
+    <section class="card">
+      <h3>{{ icon('circuit-board') }}Device</h3>
+      <dl class="device-info">
+        {% for label, value in device_info %}
+        <dt>{{ label }}</dt><dd>{{ value }}</dd>
+        {% endfor %}
+      </dl>
+    </section>
+
     <section class="card">
       <h3>{{ icon('key-round') }}Password</h3>
       {% if using_default_password %}
@@ -368,6 +378,7 @@
       </form>
       <p class="hint">Forgot it? Delete mp4m-password.txt from the SD card's boot partition to reset it to the default.</p>
     </section>
+    </div>
 
   </div>
   <section class="card network-card">
