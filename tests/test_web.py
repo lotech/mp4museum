@@ -392,17 +392,17 @@ def test_player_settings_saved_together(pi, monkeypatch):
 
 
 def test_loop_player(client, monkeypatch):
-    assert system.get_loop_player() == 'vlc'
+    assert system.get_loop_player() == 'omxplayer'
     open(system.PLAYER_SETTINGS_FILE, 'w').write('image_duration=7\n')
     monkeypatch.setattr(system.shutil, 'which', lambda name: None)
     r = client.get('/')
-    assert b'<option value="vlc" selected>' in r.data and b'not installed on this player' in r.data
-    r = client.post('/set_loop_player', data={'loop_player': 'omxplayer'}, follow_redirects=True)
-    assert b'played with omxplayer' in r.data and b'<option value="omxplayer" selected>' in r.data
-    assert open(system.PLAYER_SETTINGS_FILE).read() == 'image_duration=7\nloop_player=omxplayer\n'
+    assert b'<option value="omxplayer" selected>' in r.data and b'not installed on this player' in r.data
+    r = client.post('/set_loop_player', data={'loop_player': 'vlc'}, follow_redirects=True)
+    assert b'played with VLC' in r.data and b'<option value="vlc" selected>' in r.data
+    assert open(system.PLAYER_SETTINGS_FILE).read() == 'image_duration=7\nloop_player=vlc\n'
     r = client.post('/set_loop_player', data={'loop_player': 'mplayer'}, follow_redirects=True)
-    assert b'choose VLC or omxplayer' in r.data and system.get_loop_player() == 'omxplayer'
+    assert b'choose VLC or omxplayer' in r.data and system.get_loop_player() == 'vlc'
     monkeypatch.setattr(system.shutil, 'which', lambda name: '/usr/bin/' + name)
     assert b'not installed on this player' not in client.get('/').data
-    open(system.PLAYER_SETTINGS_FILE, 'w').write('loop_player=OMX\n')
-    assert system.get_loop_player() == 'vlc'
+    open(system.PLAYER_SETTINGS_FILE, 'w').write('loop_player=VLC\n')
+    assert system.get_loop_player() == 'omxplayer'

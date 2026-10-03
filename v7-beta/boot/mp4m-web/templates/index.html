@@ -86,15 +86,15 @@
       <div>
         <label for="loop_player">Play loop videos with:</label>
         <select name="loop_player" id="loop_player">
-          <option value="vlc"{% if loop_player == 'vlc' %} selected{% endif %}>VLC (default)</option>
-          <option value="omxplayer"{% if loop_player == 'omxplayer' %} selected{% endif %}>omxplayer</option>
+          <option value="omxplayer"{% if loop_player == 'omxplayer' %} selected{% endif %}>omxplayer (default)</option>
+          <option value="vlc"{% if loop_player == 'vlc' %} selected{% endif %}>VLC</option>
         </select>
       </div>
       <input type="submit" value="Save" class="button">
     </form>
     <p class="hint">Videos with "loop" before the extension (e.g. <code>intro-loop.mp4</code>) repeat until Next is pressed.
-      VLC holds the last frame while the video restarts. omxplayer loops on its own and may be smoother,
-      but is no longer developed.{% if not omxplayer_installed %} It is not installed on this player, so VLC is used.{% endif %}
+      omxplayer holds the last frame with a short pause at each loop; VLC shows a black frame.
+      omxplayer is no longer developed and isn't on newer Raspberry Pi OS versions.{% if not omxplayer_installed %} It is not installed on this player, so VLC is used.{% endif %}
       Applies from the next loop video.</p>
   </div>
 

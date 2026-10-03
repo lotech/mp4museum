@@ -39,9 +39,11 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
 - `boot/mp4museum.py`: the player. One VLC instance; plays `/media/*/*.*` in order; GPIO
   pin 11 pause, pin 13 next. VLC is not stopped when a file ends by itself (`stop()` closes
   the video output: black frames), only on skip, failure, idle or before handing the screen to
-  omxplayer. `loop.` files are restarted by the player (VLC's `input-repeat` froze on the Pi),
-  or looped by `omxplayer --loop` with the setting `loop_player=omxplayer` (opt-in: omxplayer
-  is no longer developed and isn't on newer OS versions). Talks to the web interface through
+  omxplayer. `loop.` video files are looped by `omxplayer --loop` when it is installed (it
+  holds the last frame; VLC still shows a black frame each time it starts a file again on
+  the Pi). omxplayer is no longer developed and isn't on newer OS versions, so with
+  `loop_player=vlc` or without omxplayer, the player restarts them in VLC (VLC's
+  `input-repeat` froze on the Pi). Talks to the web interface through
   `/tmp/mp4museum-status.json` (status it writes), `SIGUSR1` (next), `SIGUSR2` (pause) and
   `/boot/mp4m-player.txt` (settings).
   Keep the author's logo screen ("please do not remove my logo screen") and his `(c)` header.

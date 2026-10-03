@@ -149,10 +149,14 @@ def killpgs(result):
     return [(event['killpg'], round(event['at'])) for event in result['log'] if 'killpg' in event]
 
 
-def test_loop_with_vlc_unless_omxplayer_is_chosen(tmp_path):
-    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'],
-            media={'clip-loop.mp4': 3}, max_plays=6)
-    assert omx_starts(r) == [] and plays(r)[3:5] == ['clip-loop.mp4'] * 2
+def test_loop_with_omxplayer_by_default(tmp_path):
+    # omxplayer holds the last frame at the loop; VLC showed a black frame on the Pi
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'], max_seconds=60)
+    assert len(omx_starts(r)) == 1 and plays(r)[3:] == []
+    # VLC when chosen in the web interface, or when omxplayer isn't installed
+    for options in ({'installed': ['omxplayer'], 'write': {'/boot/mp4m-player.txt': 'loop_player=vlc\n'}}, {}):
+        r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], media={'clip-loop.mp4': 3}, max_plays=6, **options)
+        assert omx_starts(r) == [] and plays(r)[3:5] == ['clip-loop.mp4'] * 2
 
 
 def test_loop_with_omxplayer(tmp_path):

@@ -8,8 +8,8 @@
 # everything; image duration setting; now playing, pause and next for the web
 # interface; sync mode back from v6; sound cards 10 and above; skips files
 # that don't start playing; loop files restarted by the player; custom boot
-# video from /boot; VLC kept open between files (no black frames); optional
-# omxplayer for loop videos
+# video from /boot; VLC kept open between files; omxplayer for loop videos
+# when it is installed
 
 import time, vlc, os, glob, json, signal, shutil, sys
 import RPi.GPIO as GPIO
@@ -21,7 +21,7 @@ BOOT_VIDEO = '/home/pi/mp4museum-boot.mp4'
 CUSTOM_BOOT_VIDEO = '/boot/mp4museum-boot.mp4'
 LOGO = '/home/pi/mp4m-v7beta.jpg'
 ALSA_FILE = '/boot/alsa.txt'
-# image_duration=<seconds> and loop_player=vlc|omxplayer, set in the web interface
+# image_duration=<seconds> and loop_player=omxplayer|vlc, set in the web interface
 SETTINGS_FILE = '/boot/mp4m-player.txt'
 # what is playing, for the web interface
 STATUS_FILE = '/tmp/mp4museum-status.json'
@@ -38,7 +38,7 @@ if os.path.isfile(ALSA_FILE):
         audiodevice = card
 
 def read_settings():
-    settings = {'image_duration': DEFAULT_IMAGE_DURATION, 'loop_player': 'vlc'}
+    settings = {'image_duration': DEFAULT_IMAGE_DURATION, 'loop_player': 'omxplayer'}
     try:
         with open(SETTINGS_FILE, 'r') as f:
             for line in f:
@@ -157,9 +157,10 @@ def vlc_play(source, options=()):
         return 'skipped'
     return 'ended' if has_played else 'failed'
 
-# loop video files with omxplayer (setting loop_player=omxplayer): it loops inside the
-# player. omxplayer is no longer developed (it doesn't work on newer Raspberry Pi OS), but
-# it is on the v7 image; VLC is used if it isn't installed or can't play the file
+# loop video files with omxplayer (unless the setting is loop_player=vlc): it loops inside
+# the player and holds the last frame, where VLC shows a black frame each time it starts the
+# file again on the Pi. omxplayer is no longer developed (it doesn't work on newer Raspberry
+# Pi OS), but it is on the v7 image; VLC is used if it isn't installed or can't play the file
 OMX_LOOP_TYPES = ('.mp4', '.m4v', '.mov', '.mkv', '.avi', '.ts', '.h264')
 
 def omx_key(process, key):

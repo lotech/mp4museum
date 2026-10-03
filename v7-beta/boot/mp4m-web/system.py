@@ -406,9 +406,9 @@ def save_image_duration(seconds):
 LOOP_PLAYERS = ('vlc', 'omxplayer')
 
 def get_loop_player():
-    """What plays loop videos: 'vlc' (default) or 'omxplayer'."""
+    """What plays loop videos: 'omxplayer' (default, if installed) or 'vlc'."""
     value = read_player_settings().get('loop_player', '')
-    return value if value in LOOP_PLAYERS else 'vlc'
+    return value if value in LOOP_PLAYERS else 'omxplayer'
 
 def omxplayer_installed():
     return bool(shutil.which('omxplayer'))
