@@ -20,7 +20,7 @@ import signal, sys
 for quit_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(quit_signal, lambda signum, frame: sys.exit(0))
 
-import time, vlc, os, glob, json, shutil, re, struct, hashlib
+import time, vlc, os, glob, json, shutil, re, struct, hashlib, threading
 import RPi.GPIO as GPIO
 import subprocess
 
@@ -140,11 +140,15 @@ BUTTON_TWICE = .4       # pressed again within this long of letting go: twice
 BUTTON_HELD = 1         # down this long: held
 BUTTON_STEADY = .03     # a press or a release counts once it has lasted this long, so switch
                         # bounce and interference / static discharges aren't taken for presses
-button_done = 0
+# what the button asked for ('press', 'twice' or 'held'), done by the SIGUSR1 handler: on the
+# main thread, like the web interface's buttons, so it doesn't change what the loop is in the
+# middle of
+button_pressed = None
+button_reader = None
 
 def pin_stays(pin, level, seconds):
-    end = time.time() + seconds
-    while time.time() < end:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
         if GPIO.input(pin) != level:
             return False
         time.sleep(.005)
@@ -152,33 +156,42 @@ def pin_stays(pin, level, seconds):
 
 def wait_for(pin, level, seconds):
     """Wait up to seconds for the pin to be steadily at level (1: pressed); True if it was."""
-    end = time.time() + seconds
-    while time.time() < end:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
         if GPIO.input(pin) == level and pin_stays(pin, level, BUTTON_STEADY):
             return True
         time.sleep(.005)
     return False
 
+def read_button():
+    """Whether the press now starting is one, two or held (None: not a press)."""
+    if not wait_for(13, 1, .1):
+        return None
+    if not wait_for(13, 0, BUTTON_HELD - BUTTON_STEADY):
+        # held: let go first, or the rest of the hold would be read as another press
+        wait_for(13, 0, 10)
+        return 'held'
+    if wait_for(13, 1, BUTTON_TWICE):
+        wait_for(13, 0, 10)
+        return 'twice'
+    return 'press'
+
+def read_and_send():
+    global button_pressed
+    pressed = read_button()
+    if pressed:
+        button_pressed = pressed
+        os.kill(os.getpid(), signal.SIGUSR1)
+
 def buttonNext(channel):
-    global button_done
-    # the edges of a press already handled here (the second of two, or switch bounce) come after
-    if time.time() - button_done < .15:
+    # read on a thread of its own, so the pause button (RPi.GPIO calls them one at a time) isn't
+    # kept waiting. The edges of a press being read (switch bounce, the second of two) are left
+    # to it; any after it read as not pressed
+    global button_reader
+    if button_reader and button_reader.is_alive():
         return
-    try:
-        if not wait_for(13, 1, .1):
-            return
-        if not wait_for(13, 0, BUTTON_HELD - BUTTON_STEADY):
-            rewind()
-            wait_for(13, 0, 60)
-        elif wait_for(13, 1, BUTTON_TWICE):
-            previous_file()
-            wait_for(13, 0, 60)
-        elif is_paused():
-            pause_toggle()
-        else:
-            next_file()
-    finally:
-        button_done = time.time()
+    button_reader = threading.Thread(target=read_and_send, daemon=True)
+    button_reader.start()
 
 # omxplayer, when it is playing a loop file (see omx_loop)
 omx = None
@@ -196,6 +209,10 @@ def read_play_request():
 
 # a request left from before the player started is not played
 handled_play_request = read_play_request()[0]
+
+def play_request_waiting():
+    request_id = read_play_request()[0]
+    return request_id is not None and request_id != handled_play_request
 
 def play_request():
     """The request from the web interface since the last time, or None."""
@@ -233,6 +250,22 @@ skip_requested = False
 requested_file = None
 # previous pressed this many times since the loop last chose a file (two quick presses: two back)
 previous_requested = 0
+def next_signal():
+    """SIGUSR1: from the web interface (next, or its request), or the button on pin 13."""
+    global button_pressed
+    pressed, button_pressed = button_pressed, None
+    if pressed is None or play_request_waiting():
+        next_file()
+    if pressed == 'twice':
+        previous_file()
+    elif pressed == 'held':
+        rewind()
+    elif pressed == 'press':
+        if is_paused():
+            pause_toggle()
+        else:
+            skip()
+
 def next_file():
     global requested_file, previous_requested
     request = play_request()
@@ -291,7 +324,7 @@ def pause_toggle():
         player.pause()
 
 # the web interface sends signals for its pause and next buttons
-signal.signal(signal.SIGUSR1, lambda signum, frame: next_file())
+signal.signal(signal.SIGUSR1, lambda signum, frame: next_signal())
 signal.signal(signal.SIGUSR2, lambda signum, frame: pause_toggle())
 
 # stopped on purpose: as at the top, and omxplayer is stopped too (see the end) so it isn't left
@@ -815,8 +848,13 @@ if logo_address and logo_address.text is not None:
     player.stop()
 
 # add event listener which reacts to GPIO signal
+# (RPi.GPIO's thread, and the button's, are started with the signals from the web interface
+# blocked, so those always go to the main thread, where the loop can hold them off while it
+# picks the next file)
+signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1, signal.SIGUSR2})
 GPIO.add_event_detect(11, GPIO.RISING, callback = buttonPause, bouncetime = 234)
 GPIO.add_event_detect(13, GPIO.RISING, callback = buttonNext, bouncetime = 50)
+signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1, signal.SIGUSR2})
 
 # check for sync mode instructions
 sync_mode()

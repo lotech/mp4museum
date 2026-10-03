@@ -28,24 +28,44 @@ def fire_signals(place=None):
                 with open(paths['/tmp/mp4museum-play.json'], 'w') as f:
                     json.dump(request, f)
             os.kill(os.getpid(), getattr(signal, event.get('signal', 'SIGUSR1')))
-    # scenario button: [[seconds, how long it is held down], ...] on pin 13; the player's callback
-    # runs here, as RPi.GPIO's thread would run it (not inside itself: its waits sleep too)
-    if not button['busy'] and 13 in button['callbacks']:
-        for press in scenario.get('button', []):
-            if clock['now'] - 1000 >= press[0] and press[0] not in button['fired']:
-                button['fired'].add(press[0])
-                log.append({'button': press, 'at': round(clock['now'] - 1000, 2)})
-                button['busy'] = True
-                try:
-                    button['callbacks'][13](13)
-                finally:
-                    button['busy'] = False
+    fire_button()
+
+def fire_button(until=None):
+    # scenario button: [[seconds, how long it is held down], ...] on pin 13. The player's callback
+    # runs at the moment the press starts, as RPi.GPIO calls it (also in the middle of the
+    # player's sleeps), and not inside itself (its waits sleep too)
+    if button['busy'] or 13 not in button['callbacks']:
+        return
+    until = clock['now'] if until is None else until
+    for press in sorted(scenario.get('button', [])):
+        if press[0] + 1000 <= until and press[0] not in button['fired']:
+            button['fired'].add(press[0])
+            clock['now'] = max(clock['now'], press[0] + 1000)
+            log.append({'button': press, 'at': round(clock['now'] - 1000, 2)})
+            button['busy'] = True
+            try:
+                button['callbacks'][13](13)
+            finally:
+                button['busy'] = False
 
 active_omx = []
 button = {'callbacks': {}, 'fired': set(), 'busy': False}
+# the button is read on a thread of its own on the Pi; here it runs straight away, on the virtual
+# clock (a real thread would race the player for it)
+import threading
+class InlineThread:
+    def __init__(self, target=None, daemon=None):
+        self.target = target
+    def start(self):
+        self.target()
+    def is_alive(self):
+        return False
+threading.Thread = InlineThread
 
 def fake_sleep(seconds):
-    clock['now'] += seconds
+    target = clock['now'] + seconds
+    fire_button(until=target)
+    clock['now'] = max(clock['now'], target)
     if clock['now'] - 1000 > scenario.get('max_seconds', 600):
         raise SystemExit('time limit')
     # while omxplayer plays, VLC isn't polled, so signals are sent from here

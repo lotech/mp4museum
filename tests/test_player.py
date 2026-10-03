@@ -770,9 +770,10 @@ def test_button_pressed_once_twice_or_held(tmp_path):
     # twice within 0.4 s: previous (from the first, the last)
     r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .1], [30.3, .1]], max_plays=5)
     assert plays(r)[3:5] == ['a.mp4', 'd.mp4'] and 30.3 <= first_play(r, 'd.mp4')['at'] <= 31
-    # twice, but further apart: next twice
-    r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .1], [32, .1]], max_plays=6)
-    assert plays(r)[3:6] == ['a.mp4', 'b.mp4', 'c.mp4']
+    # twice, but further apart: next twice, including just after the 0.4 s
+    for second in (32, 30.55):
+        r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .1], [second, .1]], max_plays=6)
+        assert plays(r)[3:6] == ['a.mp4', 'b.mp4', 'c.mp4'] and first_play(r, 'c.mp4')['at'] < second + 1
     # held: back to the start of a.mp4, held at its first frame; pressed once: it plays on (no next)
     r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, 1.5], [40, .1]], max_seconds=60)
     assert plays(r)[3:] == ['a.mp4', 'a.mp4']
