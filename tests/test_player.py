@@ -346,3 +346,17 @@ def test_everything_skipped_waits(tmp_path):
 def test_stopping_on_purpose_says_so_in_the_status(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4'], signals=[{'at': 30, 'signal': 'SIGTERM'}], max_plays=20)
     assert r['statuses'][-1]['state'] == 'stopped' and r['log'][-1] == {'exit': '0'}
+
+
+def test_image_that_never_ends_is_moved_on_from(tmp_path):
+    # a very large image on a Pi: VLC can take far longer than the image duration
+    files = ['/media/internal/a.mp4', '/media/internal/b-huge.png', '/media/internal/c.mp4']
+    r = run(tmp_path, files=files, media={'b-huge.png': 'slow'}, write={'/boot/mp4m-player.txt': 'image_duration=5\n'},
+            max_plays=6)
+    shown = first_play(r, 'b-huge.png')['at']
+    assert 25 <= first_play(r, 'c.mp4')['at'] - shown <= 27
+    assert plays(r)[3:6] == ['a.mp4', 'b-huge.png', 'c.mp4']      # and shown again next time round
+    # paused, it isn't moved on from
+    r = run(tmp_path, files=files, media={'b-huge.png': 'slow'}, write={'/boot/mp4m-player.txt': 'image_duration=5\n'},
+            signals=[{'at': 26, 'signal': 'SIGUSR2'}, {'at': 66, 'signal': 'SIGUSR2'}], max_plays=6)
+    assert first_play(r, 'c.mp4')['at'] - first_play(r, 'b-huge.png')['at'] >= 60

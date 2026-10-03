@@ -33,6 +33,10 @@ SKIPPED_FILE = '/tmp/mp4museum-skipped.json'
 DEFAULT_IMAGE_DURATION = 10
 # a file that hasn't started playing after this long is skipped (broken file, stalled USB stick)
 OPEN_TIMEOUT = 20
+# an image still showing this long after its time is over is moved on from (a very large image
+# can take VLC a long time on a Pi, and come out scrambled)
+IMAGE_GRACE = 20
+IMAGE_TYPES = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff')
 
 # read audio device config: the card number, "0" if not set
 audiodevice = "0"
@@ -165,7 +169,8 @@ for quit_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
 
 # play media with vlc and wait until it has finished
 # returns 'ended', 'skipped' (next was pressed) or 'failed' (it didn't play)
-def vlc_play(source, options=()):
+def vlc_play(source, options=(), limit=None):
+    """limit: seconds it may play (not counting pauses) before it is stopped."""
     media = vlc_instance.media_new(source, *options)
     player.set_media(media)
     player.play()
@@ -176,9 +181,18 @@ def vlc_play(source, options=()):
     time.sleep(1)
     current_state = player.get_state()
     has_played = False
+    unpaused, checked = 1, time.time()
     while current_state in (vlc.State.Opening, vlc.State.Buffering, vlc.State.Playing, vlc.State.Paused):
         if skip_requested:
             # next was pressed while this file was being started
+            break
+        now = time.time()
+        if current_state != vlc.State.Paused:
+            unpaused += now - checked
+        checked = now
+        if limit and unpaused > limit:
+            print("moving on from %s: still showing after %d seconds" % (source, limit), flush=True)
+            has_played = True
             break
         if current_state in (vlc.State.Playing, vlc.State.Paused):
             has_played = True
@@ -417,6 +431,8 @@ try:
                 # VLC starts it again in the same window each time it ends
                 while not skip_requested and vlc_play(file, options) == 'ended':
                     pass
+            elif file.lower().endswith(IMAGE_TYPES):
+                vlc_play(file, options, limit=settings['image_duration'] + IMAGE_GRACE)
             else:
                 vlc_play(file, options)
         if files and not played:
