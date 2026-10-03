@@ -830,16 +830,20 @@ UPDATED_PAGE = """<!doctype html>
       <h2>Update installed</h2>
       {% for line in lines %}<p>{{ line }}</p>{% endfor %}
       {% if restarting %}
-      <p id="status" class="hint">The web interface is restarting with the new version...</p>
+      <p id="status" class="hint">The web interface is restarting with the new version, then it offers to reboot...</p>
+      <p><a href="{{ url_for('index') }}" class="button button-link">Later</a></p>
       {% else %}
       <p class="hint">Reboot to use the new version.</p>
+      <form method="post" action="{{ url_for('reboot_system') }}">
+        <button type="submit" class="button primary">Reboot now</button>
+        <a href="{{ url_for('index') }}" class="button button-link">Later</a>
+      </form>
       {% endif %}
-      <p><a href="{{ url_for('confirm_reboot') }}" class="button button-link">Reboot</a>
-        <a href="{{ url_for('index') }}" class="button button-link">Later</a></p>
     </div>
     {% if restarting %}
     <script>
-      // Wait for the new version to answer, then offer the reboot
+      // Wait for the new version to answer, then offer the reboot (on one page, the new version's;
+      // a Reboot button here only led to that page)
       function waitForNewVersion() {
         fetch('{{ url_for('version') }}', {headers: {'X-Requested-With': 'fetch'}})
           .then(response => response.ok ? response.json() : {})
