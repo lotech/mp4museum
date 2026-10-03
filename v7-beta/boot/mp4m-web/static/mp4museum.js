@@ -467,6 +467,56 @@ function showStoredToasts() {
   }
 }
 
+// ----- Copying a file from a USB stick to this player ----- //
+function copyingFile(form) {
+  const button = form.querySelector('button');
+  // (after the form has sent the button, or it would be left out)
+  setTimeout(() => {
+    button.disabled = true;
+    button.title = 'Copying…';
+    button.innerHTML = '<span class="spinner"></span>';
+  });
+  return true;
+}
+
+// ----- Copying this player to an SD card ----- //
+function confirmClone(form) {
+  const card = form.device.selectedOptions[0].dataset.name;
+  return confirm('Erase everything on the ' + card + ' card and copy this player to it?');
+}
+
+function showClone(state) {
+  const running = state.running;
+  document.getElementById('cloneProgress').hidden = !running;
+  const form = document.getElementById('cloneForm');
+  if (form) form.hidden = running;
+  document.getElementById('cloneStep').textContent = state.step + '…';
+  const bar = document.getElementById('cloneBar');
+  bar.parentElement.classList.toggle('indeterminate', state.percent === null);
+  bar.style.width = state.percent === null ? '' : state.percent + '%';
+  const result = document.getElementById('cloneResult');
+  result.hidden = !(state.done || state.error);
+  if (state.done) {
+    result.textContent = 'Done: the card can be taken out and put in another Pi.' + (state.same_id_before
+      ? ' Reboot this Pi once too: the card had the same partition IDs as this one before.' : '');
+  } else if (state.error) {
+    result.textContent = "The card couldn't be made: " + state.error;
+  }
+  return running;
+}
+
+function followClone() {
+  const card = document.getElementById('clone');
+  fetch(card.dataset.statusUrl, {headers: {'X-Requested-With': 'fetch'}, cache: 'no-store'})
+    .then(response => response.ok ? response.json() : null)
+    .then(state => {
+      if (state && showClone(state)) {
+        setTimeout(followClone, 1500);
+      }
+    })
+    .catch(() => setTimeout(followClone, 5000));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.toast').forEach(setUpToast);
   showStoredToasts();
@@ -485,6 +535,9 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(refreshPlayer, 3000);
     setInterval(showProgress, 250);
     document.addEventListener('visibilitychange', refreshPlayer);
+  }
+  if (document.getElementById('clone')) {
+    followClone();
   }
   checkForUpdate();
 });

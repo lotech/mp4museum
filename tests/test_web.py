@@ -9,6 +9,8 @@ import signal
 import threading
 import time
 
+import pytest
+
 import system
 import webservice
 
@@ -1098,3 +1100,57 @@ def test_reboot_from_the_page_says_when_it_failed(pi, client, monkeypatch):
     r = client.post('/reboot', headers=fetch)
     assert r.status_code == 500 and r.data == b'Failed to reboot: not allowed'
     assert b'Failed to reboot: not allowed' in client.post('/reboot', follow_redirects=True).data
+
+
+# ----- Copying a file from a USB stick ----- #
+@pytest.fixture
+def stick(pi):
+    usb = pi.media.parent / 'usb0'
+    usb.mkdir()
+    (usb / 'film.mp4').write_bytes(b'f' * 5000)
+    return usb
+
+
+def test_copy_a_file_from_a_usb_stick(pi, client, stick):
+    html = client.get('/').data.decode()
+    assert 'Copy film.mp4 to this player' in html
+    assert 'Copy b.mp4' not in html
+    r = client.post('/copy_to_player', data={'file': str(stick / 'film.mp4')}, follow_redirects=True)
+    assert "&#39;film.mp4&#39; copied to this player" in r.data.decode()
+    assert (pi.media / 'film.mp4').read_bytes() == b'f' * 5000
+    # written under a temporary name, then renamed: nothing else left behind
+    assert sorted(os.listdir(pi.media)) == ['film.mp4']
+    assert pi.mounts()[-2:] == [['mount', '-o', 'remount,rw', str(pi.media)], ['mount', '-o', 'remount,ro', str(pi.media)]]
+
+
+def test_copy_refuses_to_replace_a_file(pi, client, stick):
+    (pi.media / 'film.mp4').write_bytes(b'mine')
+    r = client.post('/copy_to_player', data={'file': str(stick / 'film.mp4')}, follow_redirects=True)
+    assert 'This player already has a file called' in r.data.decode()
+    assert (pi.media / 'film.mp4').read_bytes() == b'mine'
+
+
+@pytest.mark.parametrize('name', ['b.mp4', '../usb0/film.mp4', '/etc/passwd'])
+def test_copy_only_from_usb_sticks(pi, client, stick, name):
+    (pi.media / 'b.mp4').write_bytes(b'b')
+    path = name if name.startswith('/') else str(pi.media / name)
+    r = client.post('/copy_to_player', data={'file': path}, follow_redirects=True)
+    assert "That file isn&#39;t on a USB stick any more." in r.data.decode()
+    assert sorted(os.listdir(pi.media)) == ['b.mp4']
+
+
+def test_copy_without_space_leaves_nothing(pi, client, stick, monkeypatch):
+    monkeypatch.setattr(system, 'get_free_space', lambda: 1000)
+    r = client.post('/copy_to_player', data={'file': str(stick / 'film.mp4')}, follow_redirects=True)
+    assert 'Not enough space for' in r.data.decode()
+    assert os.listdir(pi.media) == []
+
+
+def test_copy_that_fails_part_way_leaves_nothing(pi, client, stick, monkeypatch):
+    def broken(src, dst, length):
+        dst.write(b'half')
+        raise OSError(5, 'Input/output error')
+    monkeypatch.setattr(system.shutil, 'copyfileobj', broken)
+    r = client.post('/copy_to_player', data={'file': str(stick / 'film.mp4')}, follow_redirects=True)
+    assert 'Input/output error' in r.data.decode()
+    assert os.listdir(pi.media) == []

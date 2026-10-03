@@ -19,6 +19,7 @@ from datetime import timedelta
 
 from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, g
 
+import clone
 import system
 import updater
 
@@ -191,7 +192,11 @@ def index():
                            loop_player=system.get_loop_player(),
                            boot_video_plays=system.get_boot_video_plays(),
                            show_address=system.get_show_address(),
-                           start_up_settings=system.player_has_start_up_settings())
+                           start_up_settings=system.player_has_start_up_settings(),
+                           clone_cards=clone.list_cards(),
+                           clone_tool=clone.exfat_tool(),
+                           clone_state=clone.get_state(),
+                           media_used=system.format_size(clone.used_bytes(system.MEDIA_PATH)) if is_available else None)
 
 
 # ----- Player ----- #
@@ -536,6 +541,32 @@ def delete_file():
     return redirect(url_for('index'))
 
 
+@app.route('/copy_to_player', methods=['POST'])
+def copy_to_player():
+    """Copy a file from a USB stick to the media partition."""
+    path = request.form.get('file', '')
+    entry = next((e for e in system.get_playlist() if e['path'] == path and not e['internal']), None)
+    if not system.media_available():
+        flash(f"The media partition {system.MEDIA_PATH} is not mounted.", "error")
+    elif not entry:
+        flash("That file isn't on a USB stick any more.", "error")
+    elif not system.is_valid_filename(entry['name']):
+        flash(f"'{entry['name']}' has characters in its name the player can't store. Rename it on a computer first.", "error")
+    else:
+        name = entry['name']
+        try:
+            system.copy_to_media(path)
+            flash(f"'{name}' copied to this player. While the stick is in, its copy plays too: "
+                  "switch that one off, or take the stick out.", "success")
+        except FileExistsError:
+            flash(f"This player already has a file called '{name}'. Rename one of them first.", "error")
+        except system.NotEnoughSpace:
+            flash(f"Not enough space for '{name}' ({system.format_size(entry['size'])}).", "error")
+        except Exception as e:
+            flash(f"Couldn't copy '{name}': {e}", "error")
+    return redirect(url_for('index'))
+
+
 @app.route('/switch_file', methods=['POST'])
 def switch_file():
     """Switch a file off (the player leaves it out) or on again, without changing the file."""
@@ -623,9 +654,33 @@ def rename_file():
     return redirect(url_for('index'))
 
 
+# ----- Copying this player to an SD card ----- #
+@app.route('/clone', methods=['POST'])
+def clone_card():
+    try:
+        clone.start(request.form.get('device', ''), request.form.get('media') == 'with')
+        flash("Copying this player to the card. It takes a few minutes: leave the card in until it's done.", "success")
+    except clone.CloneError as e:
+        flash(str(e), "error")
+    except Exception as e:
+        flash(f"Couldn't start copying: {e}", "error")
+    return redirect(url_for('index'))
+
+@app.route('/clone/status')
+def clone_status():
+    return clone.get_state()
+
+
 # ----- Reboot ----- #
 @app.route('/reboot', methods=['POST'])
 def reboot_system():
+    if clone.is_running():
+        # the card would be left half made
+        message = "A card is being made: reboot when it's done."
+        if is_fetch():
+            return message, 409
+        flash(message, "error")
+        return redirect(url_for('index'))
     status, output = system.run_command(["reboot"])
     if is_fetch():
         # the page's script shows a failure (a redirect would hide it)
@@ -847,6 +902,10 @@ def find_update(config, latest):
 @app.route('/install_update', methods=['POST'])
 def install_update():
     latest = session.get('update')
+    if clone.is_running():
+        # the web interface restarts with the new version, which would stop it half way
+        flash("A card is being made: install the update when it's done.", "error")
+        return redirect(url_for('index'))
     if not latest:
         flash("Check for updates first.", "error")
         return redirect(url_for('index'))

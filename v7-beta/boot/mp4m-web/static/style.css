@@ -534,6 +534,11 @@ select {
   flex-wrap: wrap;
 }
 
+.input-row + label {
+  /* a second field in the same form */
+  margin-top: 12px;
+}
+
 .input-row select, .input-row input[type="text"] {
   flex: 1 1 160px;
 }

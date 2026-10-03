@@ -146,7 +146,7 @@
         <li class="playlist-item{% if not playable %} not-played{% endif %}{% if entry.disabled %} switched-off{% endif %}" data-path="{{ entry.path }}">
           <form method="post" action="{{ url_for('player_play') }}" class="js-player" id="play-{{ loop.index }}">
             <input type="hidden" name="file" value="{{ entry.path }}">
-            <button type="submit" class="item-play js-play" {% if playable %}title="Play this file now"{% elif entry.disabled %}disabled title="Switched off: switch it on to play it"{% else %}disabled title="Not played: the name has no extension"{% endif %}
+            <button type="submit" class="item-play js-play" {% if playable %}title="Play this file now"{% elif entry.disabled %}disabled title="Switched off: switch it on to play it"{% else %}disabled title="Not played: not a media file"{% endif %}
                     aria-label="Play {{ entry.name }}">
               <span class="item-index">{{ loop.index }}</span>{{ icon('play', 'item-play-icon') }}
             </button>
@@ -177,8 +177,14 @@
               <input type="hidden" name="filename" value="{{ entry.name }}">
               <button type="submit" class="icon-button danger" title="Delete" aria-label="Delete {{ entry.name }}">{{ icon('trash-2') }}</button>
             </form>
+            {% else %}
+            <form method="post" action="{{ url_for('copy_to_player') }}" onsubmit="return copyingFile(this)">
+              <input type="hidden" name="file" value="{{ entry.path }}">
+              <button type="submit" class="icon-button" title="Copy to this player, so it plays without the stick"
+                      aria-label="Copy {{ entry.name }} to this player">{{ icon('hard-drive-download') }}</button>
+            </form>
             {% endif %}
-            {# last, so it lines up on every row (USB sticks only have this one) #}
+            {# last, so it lines up on every row #}
             {% if entry.plays %}
             <form method="post" action="{{ url_for('switch_file') }}">
               <input type="hidden" name="file" value="{{ entry.path }}">
@@ -432,6 +438,42 @@
         </div>
         <p class="hint">From {{ update_config.repo }}{% if update_config.branch != 'master' %} (branch {{ update_config.branch }}){% endif %}.
           Custom player script is untouched. Over SSH: <code>sudo mp4m-update</code></p>
+      </section>
+      <section class="card" id="clone" data-status-url="{{ url_for('clone_status') }}">
+        <h3>{{ icon('copy') }}Copy to an SD card</h3>
+        <div id="cloneProgress" {% if not clone_state.running %}hidden{% endif %}>
+          <p class="update-status"><span class="spinner"></span><span id="cloneStep">{{ clone_state.step }}…</span></p>
+          <div class="progress indeterminate"><div id="cloneBar" class="progress-fill"></div></div>
+          <p class="hint">Leave the card in until it's done. Rebooting and updates wait until then.</p>
+        </div>
+        <p id="cloneResult" class="current" hidden></p>
+        {% if not clone_tool %}
+        <p class="hint">Making the card's media partition needs exfat-utils: run install.sh once, with an internet connection.</p>
+        {% elif clone_cards %}
+        <form method="post" action="{{ url_for('clone_card') }}" class="setting" id="cloneForm"
+              {% if clone_state.running %}hidden{% endif %} onsubmit="return confirmClone(this)">
+          <label for="clone_device">Card</label>
+          <div class="input-row">
+            <select name="device" id="clone_device">
+              {% for card in clone_cards %}
+              <option value="{{ card.device }}" data-name="{{ card.size|size }} {{ card.model }}">{{ card.model }}, {{ card.size|size }} ({{ card.device }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <label for="clone_media">Media files</label>
+          <div class="input-row">
+            <select name="media" id="clone_media">
+              <option value="with">Copy them{% if media_used %} ({{ media_used }}){% endif %}</option>
+              <option value="without">Leave them out</option>
+            </select>
+            <button type="submit" class="button">Copy</button>
+          </div>
+        </form>
+        {% else %}
+        <p class="current">Plug a USB SD card reader with a card into the Pi, then reload this page.</p>
+        {% endif %}
+        <p class="hint">The card is erased, then gets this player: its settings, software and password, and a network name
+          of its own. A few minutes, plus about a minute per GB of media.</p>
       </section>
     </div>
   </div>

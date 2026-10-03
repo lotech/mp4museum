@@ -975,6 +975,31 @@ def remove_stale_uploads():
         except OSError:
             pass
 
+def copy_to_media(source):
+    """Copy a file (from a USB stick) to the media partition, under the same name. It's written
+    under a temporary name (which the player doesn't play) and renamed when it's all there.
+    FileExistsError if the media partition has a file of that name, NotEnoughSpace."""
+    name = os.path.basename(source)
+    target = os.path.join(MEDIA_PATH, name)
+    size = os.path.getsize(source)
+    with writable(MEDIA_PATH):
+        remove_stale_uploads()
+        if os.path.exists(target):
+            raise FileExistsError(name)
+        fd, temp = tempfile.mkstemp(dir=MEDIA_PATH, prefix=UPLOAD_PREFIX)
+        try:
+            with os.fdopen(fd, 'wb') as dst:
+                with upload_space(size, lambda: os.path.getsize(temp)), open(source, 'rb') as src:
+                    shutil.copyfileobj(src, dst, 4 * 1024 * 1024)
+                    dst.flush()
+                    os.fsync(dst.fileno())
+            os.replace(temp, target)
+        except BaseException:
+            if os.path.exists(temp):
+                os.remove(temp)
+            raise
+    return target
+
 # ----- Network name ----- #
 def default_hostname():
     """mp4museum-xxxx, where xxxx comes from the Pi's serial number (or MAC address).

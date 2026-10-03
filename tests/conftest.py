@@ -7,6 +7,7 @@ Updater tests get a fake GitHub that serves a temporary copy of this repository.
 Part of https://github.com/lotech/mp4museum. Licensed under the GNU GPL v3, see LICENSE.
 """
 import io
+import json
 import os
 import shutil
 import sys
@@ -19,6 +20,7 @@ REPO = Path(__file__).resolve().parents[1]
 APP = REPO / 'v7-beta' / 'boot' / 'mp4m-web'
 sys.path.insert(0, str(APP))
 
+import clone  # noqa: E402
 import system  # noqa: E402
 import updater  # noqa: E402
 import webservice  # noqa: E402
@@ -34,12 +36,22 @@ class FakePi:
         self.commands = []
         self.hostnames = []
         self.read_only = True
+        # the card the Pi runs from, and a reader without a card
+        self.disks = [{'name': 'mmcblk0', 'size': '31914983424', 'type': 'disk', 'tran': None, 'rm': False, 'model': None},
+                      {'name': 'sdb', 'size': '0', 'type': 'disk', 'tran': 'usb', 'rm': True, 'model': 'Reader'}]
 
     def run_command(self, cmd):
         self.commands.append(list(cmd))
         if cmd[0] == 'aplay':
             return True, 'card 0: Headphones\ncard 1: vc4hdmi'
         return True, ''
+
+    def clone_run(self, cmd, input=None):
+        """clone.run: lsblk lists self.disks (cards in USB readers); the rest is recorded."""
+        self.commands.append(list(cmd))
+        if cmd[0] == 'lsblk':
+            return json.dumps({'blockdevices': self.disks})
+        return ''
 
     def mounts(self):
         return [cmd for cmd in self.commands if cmd[0] == 'mount']
@@ -90,6 +102,22 @@ def pi(tmp_path, monkeypatch):
     monkeypatch.setattr(system, 'media_available', lambda: True)
     monkeypatch.setattr(system, 'apply_hostname', lambda name: (p.hostnames.append(name), (True, ''))[1])
     monkeypatch.setattr(system, '_mount_states', {})
+
+    (tmp_path / 'usbmount.conf').write_text('ENABLED=1\nMOUNTPOINTS="/media/usb0"\n')
+    (tmp_path / 'mounts').write_text('/dev/mmcblk0p1 /boot vfat ro 0 0\n')
+    for name, value in {
+        'USBMOUNT_CONF': str(tmp_path / 'usbmount.conf'),
+        'PROC_MOUNTS': str(tmp_path / 'mounts'),
+        'TEMP_DIR': str(tmp_path),
+        'run': p.clone_run,
+        'exfat_tool': lambda: 'mkfs.exfat',
+        'state': dict(clone.state, running=False, done=False, error=None),
+    }.items():
+        monkeypatch.setattr(clone, name, value)
+    real = [name for name, value in vars(clone).items()
+            if isinstance(value, str) and value.startswith(('/etc', '/proc', '/tmp', '/boot', '/media'))
+            and not value.startswith(str(tmp_path))]
+    assert not real, 'add these to the pi fixture: %s' % real
 
     monkeypatch.setattr(updater, 'APP_DIR', p.path('mp4m-web'))
     monkeypatch.setattr(updater, 'UPDATE_CONFIG_FILE', p.path('mp4m-update.txt'))

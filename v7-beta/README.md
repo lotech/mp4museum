@@ -92,6 +92,7 @@ Open `http://<network name>.local` in a browser on the same network.
   playlist: every file the player plays, from the media partition and USB sticks, in order.
   Start any file from there (its play button or its name); upload files (several at once, with progress),
   rename them (files play in alphabetical order; add `-loop` to repeat a video), download or delete them.
+  Files on a USB stick can be copied to the player, so they play without the stick.
 - **Updates:** when the player has an internet connection, the page checks for a new version
   by itself (at most every few hours) and shows a bar to install it.
 
@@ -155,7 +156,8 @@ It stops when you close the SSH session; reboot to go back to the installed vers
    ```
    It installs the web interface to `/boot/mp4m-web` and the player to `/boot/mp4museum.py`
    (an edited player is kept; the new one is saved as `mp4museum.py.new`), the boot video,
-   logo and `.bashrc` to `/home/pi`, the `mp4m-webservice` service and the `mp4m-update` command.
+   logo and `.bashrc` to `/home/pi`, the `mp4m-webservice` service and the `mp4m-update` command,
+   and exfat-utils if it can (for copying to an SD card; it needs an internet connection).
 3. Run `sudo raspi-config` again, open **Overlay File System** and answer **Yes**. If it asks
    "Would you like the boot partition to be write-protected?", answer **Yes**; if it says the boot
    partition is already read-only, nothing more is needed. Reboot.
@@ -191,6 +193,29 @@ branch, put it in `/boot/mp4m-update.txt`:
 repo=lotech/mp4museum
 branch=master
 ```
+
+## Copying a player to another SD card
+
+To set up another Pi the same way, put an SD card in a USB card reader and plug it into the
+player. System → Copy to an SD card lists the card; choose whether to copy the media files,
+then Copy. It takes a few minutes, plus about a minute per GB of media.
+
+- **The card is erased**, also if it already has MP4MUSEUM on it.
+- **It gets this player:** the boot partition as it is (settings, password, `config.txt`, the
+  player and web interface), and the system as installed (not what is only in RAM now).
+- **Its own network name:** `hostname.txt` isn't copied, so the new player makes its name from
+  its own serial number. Set a name in the web interface once it's running.
+- **Media files:** copied, or left out (an empty media partition).
+- **Partitions:** the system partition is the size the system needs plus 1 GB, and the media
+  partition fills the rest of the card. Use a card of 8 GB or more, bigger with the media files;
+  the page says if it's too small.
+- **Partition IDs:** the card gets new ones, so it can't be mixed up with this player's card.
+  If it had the same ones before (a card made from the same image), reboot this player once
+  afterwards.
+
+It needs `mkfs.exfat` from exfat-utils, which isn't on the v7 image: `install.sh` installs it
+when the Pi has an internet connection (run it again later if it didn't). While a card is
+being made, the web interface doesn't reboot or install updates.
 
 ## License
 
