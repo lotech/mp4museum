@@ -43,6 +43,11 @@ a network is optional.
 
 - [ ] Install script to set up v7 on a fresh Raspberry Pi OS, instead of depending on the image (`install.sh` only covers the v7 image so far)
 
+## Development
+
+- [x] `CLAUDE.md` with the constraints and conventions for working on the code
+- [ ] Commit the test suite (web interface, updater, player harness) to the repository, with a script to run it
+
 ## Ideas
 
 - [ ] Update from a file (USB stick or upload) for players that are never online
