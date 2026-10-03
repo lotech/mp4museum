@@ -627,6 +627,9 @@ def rename_file():
 @app.route('/reboot', methods=['POST'])
 def reboot_system():
     status, output = system.run_command(["reboot"])
+    if is_fetch():
+        # the page's script shows a failure (a redirect would hide it)
+        return ("Rebooting.", 200) if status else (f"Failed to reboot: {output}", 500)
     if status:
         flash("System is rebooting...", "success")
     else:
@@ -918,6 +921,10 @@ UPDATED_PAGE = """<!doctype html>
               // logged out (e.g. the password was changed): nothing was rebooted
               stopWaiting = true;
               statusLine.textContent = 'You have been logged out, so the player was not rebooted. Log in again and reboot it.';
+            } else if (!response.ok) {
+              // the reboot command failed: say so, and offer it again
+              stopWaiting = true;
+              response.text().then(text => offerReboot(text || "The player couldn't reboot."));
             }
           })
           .catch(() => {});

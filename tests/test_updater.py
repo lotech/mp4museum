@@ -281,6 +281,8 @@ def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     assert '}, 60000);' in page and page.count('AbortSignal.timeout(5000)') == 2 and 'Later' in page
     # logged out: says so, instead of waiting for a reboot that isn't coming
     assert 'response.status === 401' in page and 'AbortSignal.timeout(5000)' in page
+    # a failed reboot command: said, and offered again (not waited on)
+    assert '} else if (!response.ok) {' in page
 
     # if the restart can't be scheduled, the page doesn't pretend it is restarting: the reboot
     # is offered straight away

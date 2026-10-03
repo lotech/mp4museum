@@ -1084,3 +1084,14 @@ def test_disabled_list_from_windows_and_deleting(pi, client, monkeypatch):
     monkeypatch.setattr(system, 'update_disabled_files', fails)
     r = client.post('/delete', data={'filename': 'a.mp4'}, follow_redirects=True).data
     assert b'deleted successfully' in r and b'Failed to delete' not in r and b"Couldn&#39;t take it off" in r
+
+
+def test_reboot_from_the_page_says_when_it_failed(pi, client, monkeypatch):
+    fetch = {'X-Requested-With': 'fetch'}
+    r = client.post('/reboot', headers=fetch)
+    assert r.status_code == 200 and ['reboot'] in pi.commands
+    # the page's script gets the failure (a redirect would hide it behind the page it waits for)
+    monkeypatch.setattr(system, 'run_command', lambda cmd: (False, 'not allowed') if cmd == ['reboot'] else pi.run_command(cmd))
+    r = client.post('/reboot', headers=fetch)
+    assert r.status_code == 500 and r.data == b'Failed to reboot: not allowed'
+    assert b'Failed to reboot: not allowed' in client.post('/reboot', follow_redirects=True).data
