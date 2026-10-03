@@ -140,10 +140,13 @@ BUTTON_TWICE = .4       # pressed again within this long of letting go: twice
 BUTTON_HELD = 1         # down this long: held
 BUTTON_STEADY = .03     # a press or a release counts once it has lasted this long, so switch
                         # bounce and interference / static discharges aren't taken for presses
-# what the button asked for ('press', 'twice' or 'held'), done by the SIGUSR1 handler: on the
-# main thread, like the web interface's buttons, so it doesn't change what the loop is in the
-# middle of
+# what the button asked for ('press', 'twice' or 'held', and files_started when the press
+# began), done by the SIGUSR1 handler: on the main thread, like the web interface's buttons, so
+# it doesn't change what the loop is in the middle of
 button_pressed = None
+# how many playlist files the loop has started: a press is only known for what it is up to 1 s
+# later, when the file it was meant for may have ended by itself and the next one started
+files_started = 0
 button_reader = None
 
 def pin_stays(pin, level, seconds):
@@ -163,25 +166,25 @@ def wait_for(pin, level, seconds):
         time.sleep(.005)
     return False
 
-def read_button():
-    """Whether the press now starting is one, two or held (None: not a press)."""
-    if not wait_for(13, 1, .1):
-        return None
-    if not wait_for(13, 0, BUTTON_HELD - BUTTON_STEADY):
-        # held: let go first, or the rest of the hold would be read as another press
-        wait_for(13, 0, 10)
-        return 'held'
-    if wait_for(13, 1, BUTTON_TWICE):
-        wait_for(13, 0, 10)
-        return 'twice'
-    return 'press'
-
-def read_and_send():
+def read_and_send(started):
+    """Read the press now starting and send what it is, as soon as that's known: held at 1 s
+    (not when let go), twice at the second press, once when no second one has come. started:
+    the playlist's file count when it began (see next_signal)."""
     global button_pressed
-    pressed = read_button()
-    if pressed:
-        button_pressed = pressed
-        os.kill(os.getpid(), signal.SIGUSR1)
+    if not wait_for(13, 1, .1):
+        return
+    if not wait_for(13, 0, BUTTON_HELD - BUTTON_STEADY):
+        pressed = 'held'
+    elif wait_for(13, 1, BUTTON_TWICE):
+        pressed = 'twice'
+    else:
+        pressed = 'press'
+    button_pressed = (pressed, started)
+    os.kill(os.getpid(), signal.SIGUSR1)
+    if pressed != 'press':
+        # let go first (while this thread is busy, new presses aren't read), or the rest of a
+        # hold would be read as another press
+        wait_for(13, 0, 10)
 
 def buttonNext(channel):
     # read on a thread of its own, so the pause button (RPi.GPIO calls them one at a time) isn't
@@ -190,7 +193,7 @@ def buttonNext(channel):
     global button_reader
     if button_reader and button_reader.is_alive():
         return
-    button_reader = threading.Thread(target=read_and_send, daemon=True)
+    button_reader = threading.Thread(target=read_and_send, args=(files_started,), daemon=True)
     button_reader.start()
 
 # omxplayer, when it is playing a loop file (see omx_loop)
@@ -256,11 +259,23 @@ def next_signal():
     pressed, button_pressed = button_pressed, None
     if pressed is None or play_request_waiting():
         next_file()
+    if pressed is None:
+        return
+    pressed, started = pressed
+    # files the playlist has moved on by itself since the press began: it is meant for the file
+    # playing then
+    moved_on = files_started - started
     if pressed == 'twice':
-        previous_file()
+        for _ in range(1 + moved_on):
+            previous_file()
     elif pressed == 'held':
-        rewind()
-    elif pressed == 'press':
+        if moved_on:
+            for _ in range(moved_on):
+                previous_file()
+        else:
+            rewind()
+    elif pressed == 'press' and not moved_on:
+        # (moved on: that was the next file already)
         if is_paused():
             pause_toggle()
         else:
@@ -922,6 +937,7 @@ try:
                                 % (file, size[0], size[1], image_limit))
                     continue
             played = True
+            files_started += 1
             # read for every file, so a new image duration applies straight away
             settings = read_settings()
             options = [':image-duration=%d' % settings['image_duration']] + list(IMAGE_OPTIONS)

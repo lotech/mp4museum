@@ -30,12 +30,32 @@ def fire_signals(place=None):
             os.kill(os.getpid(), getattr(signal, event.get('signal', 'SIGUSR1')))
     fire_button()
 
+# the button's signals: logged; scenario button_delay holds them back that many seconds (the
+# loop moving on while a press is still being read, as on the Pi, where the reader is a thread)
+_real_kill = os.kill
+held_signals = []
+def button_kill(pid, signum):
+    if pid == os.getpid() and button['busy']:
+        log.append({'button_signal': int(signum), 'at': round(clock['now'] - 1000, 2)})
+        if scenario.get('button_delay'):
+            held_signals.append((clock['now'] + scenario['button_delay'], signum))
+            return
+    _real_kill(pid, signum)
+os.kill = button_kill
+
+def deliver_held_signals():
+    for item in list(held_signals):
+        if clock['now'] >= item[0]:
+            held_signals.remove(item)
+            _real_kill(os.getpid(), item[1])
+
 def fire_button(until=None):
     # scenario button: [[seconds, how long it is held down], ...] on pin 13. The player's callback
     # runs at the moment the press starts, as RPi.GPIO calls it (also in the middle of the
     # player's sleeps), and not inside itself (its waits sleep too)
     if button['busy'] or 13 not in button['callbacks']:
         return
+    deliver_held_signals()
     until = clock['now'] if until is None else until
     for press in sorted(scenario.get('button', [])):
         if press[0] + 1000 <= until and press[0] not in button['fired']:
@@ -54,10 +74,10 @@ button = {'callbacks': {}, 'fired': set(), 'busy': False}
 # clock (a real thread would race the player for it)
 import threading
 class InlineThread:
-    def __init__(self, target=None, daemon=None):
-        self.target = target
+    def __init__(self, target=None, args=(), daemon=None):
+        self.target, self.args = target, args
     def start(self):
-        self.target()
+        self.target(*self.args)
     def is_alive(self):
         return False
 threading.Thread = InlineThread

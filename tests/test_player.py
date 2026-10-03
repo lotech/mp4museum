@@ -777,8 +777,9 @@ def test_button_pressed_once_twice_or_held(tmp_path):
     # held: back to the start of a.mp4, held at its first frame; pressed once: it plays on (no next)
     r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, 1.5], [40, .1]], max_seconds=60)
     assert plays(r)[3:] == ['a.mp4', 'a.mp4']
-    # (at 31 s on the Pi, where RPi.GPIO runs the button in its own thread; here it runs in the
-    # player's loop, which waits until the button is let go at 31.5 s)
+    # sent at 1 s, while it's still held (not when it's let go). (Here the reader runs in the
+    # player's loop, which only gets the signal once it is let go at 31.5 s; on the Pi it is a thread)
+    assert [e['at'] for e in r['log'] if 'button_signal' in e][0] <= 31.05
     restarts = [e['at'] for e in r['log'] if e.get('play', '').endswith('a.mp4')]
     assert len(restarts) == 2 and 31 <= restarts[1] <= 31.6
     states = [(s['state'], round(s['position'] or 0, 1)) for s in r['statuses'] if s['file'].endswith('a.mp4')]
@@ -811,3 +812,21 @@ def test_button_held_on_an_omxplayer_loop(tmp_path):
     assert starts[0] == 20 and 60 <= starts[1] <= 62 and len(starts) == 2
     held = [s for s in r['statuses'] if s['state'] == 'paused'][0]
     assert held['file'].endswith('clip-loop.mp4') and held['position'] == 0 and held['engine'] == 'vlc'
+
+
+def test_button_press_meant_for_the_file_playing_when_it_began(tmp_path):
+    # a.mp4 plays from 20 s to 35 s. Pressed at 34.5 s, but only known to be one press at about
+    # 35 s, when b.mp4 has started by itself (held back here to 36 s): that was the next file
+    # already, so b.mp4 isn't skipped
+    media = dict(BUTTON_MEDIA, **{'a.mp4': 15})
+    r = run(tmp_path, files=BUTTON_FILES, media=media, button=[[34.5, .1]], button_delay=1, max_seconds=60)
+    assert plays(r)[3:] == ['a.mp4', 'b.mp4']
+    # twice: the one before a.mp4 (d.mp4), not before b.mp4
+    r = run(tmp_path, files=BUTTON_FILES, media=media, button=[[34.5, .1], [34.7, .1]], button_delay=1, max_plays=5)
+    assert plays(r)[3:6] == ['a.mp4', 'b.mp4', 'd.mp4']
+    # held: back to a.mp4 (the file it was held on), not b.mp4 held
+    r = run(tmp_path, files=BUTTON_FILES, media=media, button=[[33.5, 2]], button_delay=2, max_plays=5)
+    assert plays(r)[3:6] == ['a.mp4', 'b.mp4', 'a.mp4']
+    # not moved on: as usual
+    r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .1]], button_delay=1, max_plays=5)
+    assert plays(r)[3:5] == ['a.mp4', 'b.mp4'] and 31 <= first_play(r, 'b.mp4')['at'] <= 32
