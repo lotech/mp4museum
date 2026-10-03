@@ -188,7 +188,7 @@ def test_pause_and_next_signals(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/b.mp4'], media={'a.mp4': 100},
             signals=[{'at': 30, 'signal': 'SIGUSR2'}, {'at': 35, 'signal': 'SIGUSR2'}, {'at': 40, 'signal': 'SIGUSR1'}],
             max_plays=12)
-    assert {'pause': True} in r['log'] and {'pause': False} in r['log']
+    assert [e['pause'] for e in r['log'] if 'pause' in e] == [True, False]
     stop = [event for event in r['log'] if event.get('stop', '').endswith('a.mp4')]
     assert stop and 40 <= stop[0]['at'] < 42 and plays(r)[4] == 'b.mp4'
     states = [status['state'] for status in r['statuses'] if (status.get('file') or '').endswith('a.mp4')]
@@ -756,3 +756,57 @@ def test_status_says_whether_omxplayer_could_loop_it(tmp_path):
         assert {s['loop_omx_ok'] for s in r['statuses'] if s['file'] == '/media/internal/' + name} == {ok}, (name, codec)
     r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], write={'/boot/mp4m-player.txt': 'loop_player=vlc\n'}, max_plays=5)
     assert {s['loop_omx_ok'] for s in r['statuses'] if s['file'] == '/media/internal/clip-loop.mp4'} == {False}
+
+
+# ----- The button on pin 13: once next, twice previous, held back to the start ----- #
+BUTTON_FILES = ['/media/internal/a.mp4', '/media/internal/b.mp4', '/media/internal/c.mp4', '/media/usb0/d.mp4']
+BUTTON_MEDIA = {name: 100 for name in ('a.mp4', 'b.mp4', 'c.mp4', 'd.mp4')}
+
+
+def test_button_pressed_once_twice_or_held(tmp_path):
+    # a.mp4 plays from about 20 s. Pressed once: next, once it's clear no second press follows
+    r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .1]], max_plays=5)
+    assert plays(r)[3:5] == ['a.mp4', 'b.mp4'] and 30.4 <= first_play(r, 'b.mp4')['at'] <= 31
+    # twice within 0.4 s: previous (from the first, the last)
+    r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .1], [30.3, .1]], max_plays=5)
+    assert plays(r)[3:5] == ['a.mp4', 'd.mp4'] and 30.3 <= first_play(r, 'd.mp4')['at'] <= 31
+    # twice, but further apart: next twice
+    r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .1], [32, .1]], max_plays=6)
+    assert plays(r)[3:6] == ['a.mp4', 'b.mp4', 'c.mp4']
+    # held: back to the start of a.mp4, held at its first frame; pressed once: it plays on (no next)
+    r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, 1.5], [40, .1]], max_seconds=60)
+    assert plays(r)[3:] == ['a.mp4', 'a.mp4']
+    # (at 31 s on the Pi, where RPi.GPIO runs the button in its own thread; here it runs in the
+    # player's loop, which waits until the button is let go at 31.5 s)
+    restarts = [e['at'] for e in r['log'] if e.get('play', '').endswith('a.mp4')]
+    assert len(restarts) == 2 and 31 <= restarts[1] <= 31.6
+    states = [(s['state'], round(s['position'] or 0, 1)) for s in r['statuses'] if s['file'].endswith('a.mp4')]
+    assert ('paused', 0) in states and states[-1][0] == 'playing'
+    resumed = [e['at'] for e in r['log'] if e.get('set_pause') == 0 or e.get('pause') is False]
+    assert resumed and 40.4 <= resumed[-1] <= 41
+
+
+def test_button_pressed_once_while_paused_plays_on(tmp_path):
+    # paused from the web interface: one press plays on, as when held at the first frame
+    r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, signals=[{'at': 25, 'signal': 'SIGUSR2'}],
+            button=[[30, .1]], max_seconds=60)
+    assert plays(r)[3:] == ['a.mp4'] and [s['state'] for s in r['statuses']][-1] == 'playing'
+
+
+def test_button_ignores_blips(tmp_path):
+    # shorter than a press (switch bounce, interference, static): nothing happens
+    r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .01], [35, .02]], max_seconds=60)
+    assert plays(r)[3:] == ['a.mp4']
+    # the bounce of a press isn't taken for a second press
+    r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .1], [30.12, .01], [30.15, .01]], max_plays=5)
+    assert plays(r)[3:5] == ['a.mp4', 'b.mp4']
+
+
+def test_button_held_on_an_omxplayer_loop(tmp_path):
+    # as the rewind button: the first frame in VLC, then omxplayer loops again on a press
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'],
+            button=[[40, 1.5], [60, .1]], max_seconds=100)
+    starts = [round(e['at']) for e in omx_starts(r)]
+    assert starts[0] == 20 and 60 <= starts[1] <= 62 and len(starts) == 2
+    held = [s for s in r['statuses'] if s['state'] == 'paused'][0]
+    assert held['file'].endswith('clip-loop.mp4') and held['position'] == 0 and held['engine'] == 'vlc'

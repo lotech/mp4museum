@@ -28,8 +28,21 @@ def fire_signals(place=None):
                 with open(paths['/tmp/mp4museum-play.json'], 'w') as f:
                     json.dump(request, f)
             os.kill(os.getpid(), getattr(signal, event.get('signal', 'SIGUSR1')))
+    # scenario button: [[seconds, how long it is held down], ...] on pin 13; the player's callback
+    # runs here, as RPi.GPIO's thread would run it (not inside itself: its waits sleep too)
+    if not button['busy'] and 13 in button['callbacks']:
+        for press in scenario.get('button', []):
+            if clock['now'] - 1000 >= press[0] and press[0] not in button['fired']:
+                button['fired'].add(press[0])
+                log.append({'button': press, 'at': round(clock['now'] - 1000, 2)})
+                button['busy'] = True
+                try:
+                    button['callbacks'][13](13)
+                finally:
+                    button['busy'] = False
 
 active_omx = []
+button = {'callbacks': {}, 'fired': set(), 'busy': False}
 
 def fake_sleep(seconds):
     clock['now'] += seconds
@@ -89,7 +102,7 @@ class Player:
         elif self.paused_at is not None:
             self.paused_total += clock['now'] - self.paused_at
             self.paused_at = None
-        log.append({'pause': self.state == _S.Paused})
+        log.append({'pause': self.state == _S.Paused, 'at': round(clock['now'] - 1000, 2)})
     def set_time(self, ms):
         log.append({'set_time': ms, 'at': round(clock['now'] - 1000, 2)})
         self.started, self.paused_total = clock['now'] - ms / 1000, 0
@@ -123,8 +136,17 @@ sys.modules['vlc'] = vlc
 
 # --- fake GPIO ---
 gpio = types.ModuleType('RPi.GPIO')
-for name in ('setmode', 'setup', 'add_event_detect', 'input'):
+for name in ('setmode', 'setup'):
     setattr(gpio, name, lambda *a, **k: 0)
+def fake_add_event_detect(pin, edge, callback=None, bouncetime=None):
+    button['callbacks'][pin] = callback
+gpio.add_event_detect = fake_add_event_detect
+def fake_input(pin):
+    # pressed (1) while a scenario button press lasts; edges also come after the press, as the
+    # first edge is all the callback is told about
+    now = clock['now'] - 1000
+    return int(pin == 13 and any(at <= now < at + length for at, length in scenario.get('button', [])))
+gpio.input = fake_input
 gpio.BOARD = gpio.IN = gpio.PUD_DOWN = gpio.RISING = 0
 rpi = types.ModuleType('RPi'); rpi.GPIO = gpio
 sys.modules['RPi'] = rpi; sys.modules['RPi.GPIO'] = gpio

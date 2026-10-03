@@ -11,8 +11,9 @@ affiliated with or supported by the original project.
 ## What MP4MUSEUM is
 
 A media player for exhibitions on the Raspberry Pi. It boots straight into playing the
-videos and images on a USB stick (or SD card) in a loop and needs no network. Buttons on the
-GPIO pins pause or skip, and files with `loop.` in their name repeat.
+videos and images on a USB stick (or SD card) in a loop and needs no network. A button on the
+GPIO pins skips to the next file (pressed twice: the previous one; held: back to the start),
+and files with `loop.` in their name repeat.
 
 ## What this fork adds
 

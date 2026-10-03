@@ -11,7 +11,8 @@
 # video from /boot; VLC kept open between files; omxplayer for loop videos
 # when it is installed; position for the web interface, which can also choose
 # the file to play; exit code 0 only when stopped on purpose (.bashrc restarts it);
-# how often the boot video plays and the player's address on the logo screen (settings)
+# how often the boot video plays and the player's address on the logo screen (settings);
+# previous file; the button on pin 13 pressed once, twice or held
 
 import signal, sys
 # stopped on purpose (Ctrl-C on the console, SIGTERM, SIGHUP): exit code 0, so .bashrc doesn't
@@ -132,14 +133,52 @@ def buttonPause(channel):
     if (inputfilter > 50):
         pause_toggle()
 
+# the button on pin 13 (next in the original): pressed once, next file (or play, when paused or
+# held at the first frame); twice, the previous file; held down, back to the start of the file,
+# held there until it is pressed again
+BUTTON_TWICE = .4       # pressed again within this long of letting go: twice
+BUTTON_HELD = 1         # down this long: held
+BUTTON_STEADY = .03     # a press or a release counts once it has lasted this long, so switch
+                        # bounce and interference / static discharges aren't taken for presses
+button_done = 0
+
+def pin_stays(pin, level, seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        if GPIO.input(pin) != level:
+            return False
+        time.sleep(.005)
+    return True
+
+def wait_for(pin, level, seconds):
+    """Wait up to seconds for the pin to be steadily at level (1: pressed); True if it was."""
+    end = time.time() + seconds
+    while time.time() < end:
+        if GPIO.input(pin) == level and pin_stays(pin, level, BUTTON_STEADY):
+            return True
+        time.sleep(.005)
+    return False
+
 def buttonNext(channel):
-    inputfilter = 0
-    for x in range(0,200):
-        if GPIO.input(13):
-            inputfilter = inputfilter + 1
-        time.sleep(.001)
-    if (inputfilter > 50):
-        next_file()
+    global button_done
+    # the edges of a press already handled here (the second of two, or switch bounce) come after
+    if time.time() - button_done < .15:
+        return
+    try:
+        if not wait_for(13, 1, .1):
+            return
+        if not wait_for(13, 0, BUTTON_HELD - BUTTON_STEADY):
+            rewind()
+            wait_for(13, 0, 60)
+        elif wait_for(13, 1, BUTTON_TWICE):
+            previous_file()
+            wait_for(13, 0, 60)
+        elif is_paused():
+            pause_toggle()
+        else:
+            next_file()
+    finally:
+        button_done = time.time()
 
 # omxplayer, when it is playing a loop file (see omx_loop)
 omx = None
@@ -195,26 +234,44 @@ requested_file = None
 # previous pressed this many times since the loop last chose a file (two quick presses: two back)
 previous_requested = 0
 def next_file():
-    global skip_requested, requested_file, rewind_requested, previous_requested
+    global requested_file, previous_requested
     request = play_request()
     if request and request.get('command') == 'rewind':
         rewind()
         return
     if request and request.get('command') == 'previous':
-        if not playlist_started:
-            # the boot video and logo: there's nothing before them
-            return
-        previous_requested += 1
-        requested_file = None
-    elif request and isinstance(request.get('file'), str):
+        previous_file()
+        return
+    if request and isinstance(request.get('file'), str):
         requested_file = request['file']
         previous_requested = 0
+    skip()
+
+def previous_file():
+    global requested_file, previous_requested
+    if not playlist_started:
+        # the boot video and logo: there's nothing before them
+        return
+    previous_requested += 1
+    requested_file = None
+    skip()
+
+def skip():
+    global skip_requested, rewind_requested
     skip_requested = True
     # next overtakes a rewind that is still waiting
     rewind_requested = False
     take_play_request()
     if not omx:
         player.stop()
+
+def is_paused():
+    if rewind_requested:
+        # held at the first frame (on its way), unless play has been pressed already
+        return not play_requested
+    if omx:
+        return omx_paused
+    return player.get_state() == vlc.State.Paused
 
 def pause_toggle():
     global omx_paused, omx_last_key, play_requested
@@ -759,7 +816,7 @@ if logo_address and logo_address.text is not None:
 
 # add event listener which reacts to GPIO signal
 GPIO.add_event_detect(11, GPIO.RISING, callback = buttonPause, bouncetime = 234)
-GPIO.add_event_detect(13, GPIO.RISING, callback = buttonNext, bouncetime = 1234)
+GPIO.add_event_detect(13, GPIO.RISING, callback = buttonNext, bouncetime = 50)
 
 # check for sync mode instructions
 sync_mode()
