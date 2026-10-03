@@ -524,3 +524,16 @@ def test_custom_boot_video_that_stops_the_player_is_replaced_by_the_original(tmp
     r = run(tmp_path, files=['/media/internal/a.mp4'], write=custom,
             crashed={'file': '/boot/mp4museum-boot.mp4', 'times': 1}, max_plays=4)
     assert not first_play(r, 'boot.mp4')['play'].startswith('/home/pi/')
+
+
+def test_boot_video_forgiven_only_after_both_plays(tmp_path):
+    # it can stop the player on its second play: the first finishing doesn't clear the count
+    custom = {'/boot/mp4museum-boot.mp4': 'a video'}
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write=custom, crashed={'file': '/boot/mp4museum-boot.mp4', 'times': 1},
+            signals=[{'at': 8, 'signal': 'SIGTERM'}], max_plays=10)     # stopped during the second play
+    assert [e['play'].split('/')[-1] for e in r['log'] if 'play' in e][:2] == ['custom-boot.mp4'] * 2
+    assert len(r['skipped']) == 1 and r['skipped'][0][2] == 1
+    # both played: forgiven
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write=custom, crashed={'file': '/boot/mp4museum-boot.mp4', 'times': 1},
+            max_plays=4)
+    assert r['skipped'] == []

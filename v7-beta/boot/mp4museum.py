@@ -557,9 +557,10 @@ if boot_video != BOOT_VIDEO and entry and entry[1] >= SKIP_AFTER and entry[0] ==
 
 # start player twice to make sure it is working
 # seems weird but works
-for _ in range(2):
-    if vlc_play(boot_video) == 'ended':
-        forgive(boot_video)
+boot_played = [vlc_play(boot_video) for _ in range(2)]
+# forgiven only when both played: it could stop the player on the second
+if boot_played == ["ended", "ended"]:
+    forgive(boot_video)
 
 # please do not remove my logo screen
 skip_requested = False
