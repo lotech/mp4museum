@@ -475,4 +475,5 @@ def test_page_checks_one_at_a_time(client, monkeypatch):
         t.start()
     for t in threads:
         t.join()
-    assert len(calls) == 1 and len(answers) == 4
+    # and they all get its answer
+    assert len(calls) == 1 and [a['update'] and a['update']['commit'] for a in answers] == ['bbb1111'] * 4

@@ -534,15 +534,18 @@ def set_hostname():
 AUTO_CHECK_INTERVAL = 6 * 3600
 AUTO_CHECK_RETRY = 3600
 _auto_check = {'time': None, 'ok': False, 'latest': None}
-# one check at a time: pages opened together get the last answer instead of all asking GitHub
+# one check at a time: pages opened together wait for its answer instead of all asking GitHub
 _auto_check_lock = threading.Lock()
+# longer than a check takes (updater.TIMEOUT for each request to GitHub)
+AUTO_CHECK_WAIT = 90
 
 @app.route('/check_update', methods=['POST'])
 def check_update():
     if request.form.get('auto') != '1':
         return check_for_update(auto=False)
-    if not _auto_check_lock.acquire(blocking=False):
-        return update_answer(_auto_check['latest'])
+    if not _auto_check_lock.acquire(timeout=AUTO_CHECK_WAIT):
+        # still checking: the page shows nothing now, and asks again next time it is opened
+        return {'update': None}
     try:
         if _auto_check['time'] is not None:
             age = time.monotonic() - _auto_check['time']
