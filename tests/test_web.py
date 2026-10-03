@@ -493,41 +493,31 @@ def test_previous_file(pi, client, monkeypatch):
     sent = []
     monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
     fetch = {'X-Requested-With': 'fetch'}
-    for name in ('a.mp4', 'b-huge.png', 'c.mp4', 'README', 'd.jpg'):
-        (pi.media / name).write_bytes(png(4000, 3000) if name.endswith('png') else b'x')
 
-    def playing(name, state='playing', **status):
+    def status(state='playing', **fields):
         with open(system.PLAYER_STATUS_FILE, 'w') as f:
-            json.dump(dict({'state': state, 'file': str(pi.media / name), 'since': time.time(), 'pid': 4242,
-                            'play_file': True}, **status), f)
+            json.dump(dict({'state': state, 'file': '/media/internal/c.mp4', 'since': time.time(), 'pid': 4242,
+                            'play_file': True, 'rewind': True, 'previous': True}, **fields), f)
 
-    def previous():
-        r = client.post('/player/previous', headers=fetch)
-        return r.status_code, (json.load(open(system.PLAY_REQUEST_FILE))['file'].split('/')[-1]
-                               if r.status_code == 200 else r.get_json()['error'])
-
-    # the file before, among those the player plays: not b-huge.png (too large for a Pi 3, skipped)
-    # or README (no extension); from the first, the last (the playlist repeats)
-    playing('c.mp4')
-    assert previous() == (200, 'a.mp4') and sent == [(4242, signal.SIGUSR1)]
-    playing('d.jpg', 'paused')
-    assert previous() == (200, 'c.mp4')
-    playing('a.mp4')
-    assert previous() == (200, 'd.jpg')
-    # nothing to go back from
+    # the player works out which file (it knows its order and what it skips): the web interface
+    # sends the command
+    status()
+    assert client.get('/player/status').get_json()['previous'] is True
+    r = client.post('/player/previous', headers=fetch)
+    assert r.status_code == 200 and sent == [(4242, signal.SIGUSR1)]
+    request = json.load(open(system.PLAY_REQUEST_FILE))
+    assert request['command'] == 'previous' and request['id'] and 'file' not in request
+    assert b'Playing the previous file' in client.post('/player/previous', follow_redirects=True).data
+    # not during start-up, nor with nothing playing; an older player would take it for Next
     sent.clear()
-    with open(system.PLAYER_STATUS_FILE, 'w') as f:
-        json.dump({'state': 'playing', 'file': '/home/pi/mp4m-v7beta.jpg', 'since': time.time(), 'pid': 4242,
-                   'play_file': True}, f)
-    assert previous() == (409, "There's no previous file yet: the player is starting up.")
-    playing('a.mp4', 'idle')
-    assert previous() == (409, 'Nothing is playing.')
-    playing('a.mp4', 'sync')
-    assert previous() == (409, "Files can't be chosen in sync mode.")
-    # an older player script can't be asked for a file
-    write_status('playing', str(pi.media / 'c.mp4'))
-    status, error = previous()
-    assert status == 409 and 'older version' in error and sent == []
+    for fields, error in (({'previous': False}, "There's no previous file during start-up."),
+                          ({'state': 'idle'}, 'Nothing is playing.'),
+                          ({'state': 'sync'}, "This doesn't work in sync mode."),
+                          ({'previous': None}, 'older version')):
+        status(**fields)
+        r = client.post('/player/previous', headers=fetch)
+        assert r.status_code == 409 and error in r.get_json()['error']
+    assert sent == []
     os.remove(system.PLAYER_STATUS_FILE)
     assert b'The player is not running' in client.post('/player/previous', follow_redirects=True).data
     html = client.get('/').data.decode()
@@ -1007,3 +997,11 @@ def test_start_up_settings(pi, client):
     with open(system.SCRIPT_FILE, 'w') as f:
         f.write('# edited\nimport vlc\n')
     assert 'edited before these' in client.get('/').data.decode()
+    # an edited player from when the boot video played twice by default: shown as it is
+    open(system.PLAYER_SETTINGS_FILE, 'w').write('image_duration=7\n')
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write("settings = {'boot_video_plays': 2, 'show_address': True}\n")
+    assert system.get_boot_video_plays() == 2
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write("settings = {'boot_video_plays': 1, 'show_address': True}\n")
+    assert system.get_boot_video_plays() == 1

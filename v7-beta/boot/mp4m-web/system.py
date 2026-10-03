@@ -624,7 +624,12 @@ BOOT_VIDEO_PLAYS = (1, 2, 0)
 
 def get_boot_video_plays():
     value = read_player_settings().get('boot_video_plays', '')
-    return int(value) if value.isdecimal() and int(value) in BOOT_VIDEO_PLAYS else 1
+    if value.isdecimal() and int(value) in BOOT_VIDEO_PLAYS:
+        return int(value)
+    # not set: the player script's own default (one edited here and kept by updates may be from
+    # when it was twice)
+    match = re.search(r"'boot_video_plays':\s*(\d)", read_script_file())
+    return int(match.group(1)) if match and int(match.group(1)) in BOOT_VIDEO_PLAYS else 1
 
 def get_show_address():
     """Whether the player shows its name and IP address on the logo screen (default yes)."""
@@ -798,9 +803,10 @@ def request_play(path):
     """Ask the player to play this file now, then carry on from there. False if it isn't running."""
     return send_player_request({'file': path})
 
-def request_rewind():
-    """Ask the player to go back to the first frame and hold it until play. False if it isn't running."""
-    return send_player_request({'command': 'rewind'})
+def request_command(command):
+    """Ask the player to do 'rewind' (back to the first frame, held until play) or 'previous'
+    (the file before). False if it isn't running."""
+    return send_player_request({'command': command})
 
 def send_player_request(request_data):
     """Write a request for the player (it reads it when it gets SIGUSR1), then send the signal."""

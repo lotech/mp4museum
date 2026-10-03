@@ -40,7 +40,8 @@ HOSTNAME_FILE = '/boot/hostname.txt'
 # what is playing, for the web interface
 STATUS_FILE = '/tmp/mp4museum-status.json'
 # from the web interface, followed by SIGUSR1: {"id": ..., "file": ...} plays that file;
-# {"id": ..., "command": "rewind"} goes back to the first frame and holds it until play is pressed
+# {"id": ..., "command": "rewind"} goes back to the first frame and holds it until play is pressed;
+# {"id": ..., "command": "previous"} plays the file before (the player knows which it skips)
 PLAY_REQUEST_FILE = '/tmp/mp4museum-play.json'
 # files that were playing when the player stopped by itself: [[path, [size, mtime]], ...]
 SKIPPED_FILE = '/tmp/mp4museum-skipped.json'
@@ -104,7 +105,7 @@ def write_status(state, source=None, position=None, length=None, temp='.tmp', en
             # the Pi sets its time from the network (it has no clock of its own)
             json.dump({'state': state, 'file': source, 'since': time.time(), 'mono': time.monotonic(),
                        'pid': os.getpid(), 'position': position, 'length': length, 'play_file': True,
-                       'rewind': playlist_started, 'engine': engine, 'loop_player': loop_engine,
+                       'rewind': playlist_started, 'previous': playlist_started, 'engine': engine, 'loop_player': loop_engine,
                        'loop_omx_ok': loop_omx_ok}, f)
         os.replace(STATUS_FILE + temp, STATUS_FILE)
     except OSError:
@@ -191,14 +192,23 @@ def rewind():
 # the signal the web interface sends after it, so the file chosen there plays next
 skip_requested = False
 requested_file = None
+# previous pressed this many times since the loop last chose a file (two quick presses: two back)
+previous_requested = 0
 def next_file():
-    global skip_requested, requested_file, rewind_requested
+    global skip_requested, requested_file, rewind_requested, previous_requested
     request = play_request()
     if request and request.get('command') == 'rewind':
         rewind()
         return
-    if request and isinstance(request.get('file'), str):
+    if request and request.get('command') == 'previous':
+        if not playlist_started:
+            # the boot video and logo: there's nothing before them
+            return
+        previous_requested += 1
+        requested_file = None
+    elif request and isinstance(request.get('file'), str):
         requested_file = request['file']
+        previous_requested = 0
     skip_requested = True
     # next overtakes a rewind that is still waiting
     rewind_requested = False
@@ -704,6 +714,18 @@ class LogoAddress:
                     # VLC can't show it here: not tried again (it says why in the log once)
                     self.failed = True
 
+# whether the loop below passes over a file without playing it (it says why there)
+def would_skip(file, try_skipped):
+    if file in skipped and not try_skipped:
+        version, count = skipped[file]
+        if count >= SKIP_AFTER and version == file_version(file):
+            return True
+    if image_limit and file.lower().endswith(IMAGE_TYPES):
+        size = image_size(file)
+        if size and max(size) > image_limit:
+            return True
+    return False
+
 # *** run player ****
 
 boot_video = CUSTOM_BOOT_VIDEO if os.path.isfile(CUSTOM_BOOT_VIDEO) else BOOT_VIDEO
@@ -763,8 +785,20 @@ try:
             # from here on skips this file. (No signal in between, or it would be lost.)
             signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
             requested, requested_file = requested_file, None
+            back, previous_requested = previous_requested, 0
             skip_requested = False
             signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
+            if back and files:
+                # previous: back from the file that was playing (files[index - 1]; the last one
+                # at the start of a round), over the files this round skips, around the end
+                position = (index - 1) % len(files)
+                for _ in range(len(files)):
+                    position = (position - 1) % len(files)
+                    if not would_skip(files[position], try_skipped):
+                        back -= 1
+                        if not back:
+                            break
+                index = position
             if requested and requested not in files:
                 files = sorted(glob.glob(MEDIA_FILES))
             if requested in files:

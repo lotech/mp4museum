@@ -49,7 +49,8 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   `input-repeat` froze on the Pi). Talks to the web interface through
   `/tmp/mp4museum-status.json` (status it writes, with position, length and `engine`: vlc or omxplayer), `SIGUSR1` (next),
   `SIGUSR2` (pause), `/tmp/mp4museum-play.json` (a file chosen in the web interface, or
-  `"command": "rewind"`, read when SIGUSR1 arrives) and `/boot/mp4m-player.txt` (settings: `image_duration`,
+  `"command": "rewind"` or `"previous"`, read when SIGUSR1 arrives; the status says which
+  commands it can do, `rewind`/`previous`: true) and `/boot/mp4m-player.txt` (settings: `image_duration`,
   `loop_player`, `boot_video_plays`, `show_address`). Edited players from before may not
   write `play_file` in their status; the web interface then doesn't offer choosing a file.
   Keep the author's logo screen ("please do not remove my logo screen") and his `(c)` header.

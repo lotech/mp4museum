@@ -220,12 +220,12 @@ def player_view(status):
     browser doesn't depend on the Pi's clock (which may be wrong without a network)."""
     view = {'running': bool(status), 'state': None, 'text': describe_player_status(status), 'file': None,
             'name': None, 'folder': None, 'kind': None, 'loop': False, 'position': None, 'length': None,
-            'play_file': False, 'rewind': False, 'engine': None}
+            'play_file': False, 'rewind': False, 'previous': False, 'engine': None}
     if not status:
         return view
     path = status.get('file') or None
     view.update(state=status.get('state'), file=path, play_file=status.get('play_file') is True,
-                rewind=status.get('rewind') is True,
+                rewind=status.get('rewind') is True, previous=status.get('previous') is True,
                 engine=(status.get('engine') if status.get('engine') in ('vlc', 'omxplayer', 'omxplayer-sync')
                         and status.get('state') in ('playing', 'paused', 'sync') else None),
                 name=os.path.basename(path) if path else None,
@@ -292,33 +292,8 @@ def player_pause():
 @app.route('/player/play', methods=['POST'])
 def player_play():
     path = request.form.get('file', '')
-    entry = next((e for e in system.get_playlist() if e['path'] == path and e['plays']), None)
-    return play_entry(entry, system.get_player_status())
-
-@app.route('/player/previous', methods=['POST'])
-def player_previous():
-    # the file before the one playing, among those the player plays (not the skipped ones),
-    # the last one when it is the first, as the playlist repeats
     status = system.get_player_status()
-    playable = [e for e in system.get_playlist() if e['plays'] and not e['large'] and not e['skipped']]
-    index = next((i for i, e in enumerate(playable) if e['path'] == (status or {}).get('file')), None)
-    if status and status.get('state') in ('playing', 'paused') and index is not None:
-        return play_entry(playable[index - 1], status)
-    if not status:
-        error = "The player is not running."
-    elif status.get('state') == 'sync':
-        error = "Files can't be chosen in sync mode."
-    elif status.get('state') not in ('playing', 'paused'):
-        error = "Nothing is playing."
-    else:
-        error = "There's no previous file yet: the player is starting up."
-    if is_fetch():
-        return dict(player_view(status), error=error), 409
-    flash(error, "error")
-    return redirect(url_for('index'))
-
-def play_entry(entry, status):
-    """Ask the player to play a playlist entry (None: not in the playlist)."""
+    entry = next((e for e in system.get_playlist() if e['path'] == path and e['plays']), None)
     if not entry:
         error = "That file isn't in the playlist."
     elif not status:
@@ -331,7 +306,7 @@ def play_entry(entry, status):
         error = None
     if not error:
         try:
-            if system.request_play(entry['path']):
+            if system.request_play(path):
                 time.sleep(0.5)
             else:
                 error = "The player is not running."
@@ -347,22 +322,36 @@ def play_entry(entry, status):
         flash(f"Playing {entry['name']}.", "success")
     return redirect(url_for('index'))
 
+@app.route('/player/previous', methods=['POST'])
+def player_previous():
+    # the player works out which file that is: it knows its files, their order and which it skips
+    return player_command('previous', "Playing the previous file.",
+                          "There's no previous file during start-up.",
+                          "This player script can't go back to the previous file (it is from an older version).")
+
 @app.route('/player/rewind', methods=['POST'])
 def player_rewind():
+    return player_command('rewind', "Back at the first frame. Press play to start.",
+                          "The start-up video can't go back to the start.",
+                          "This player script can't go back to the start (it is from an older version).")
+
+def player_command(command, done, during_start_up, older):
+    """Send the player a command it says it can do (its status has command: True; False during
+    start-up; older players don't have it, and would take the signal for Next)."""
     status = system.get_player_status()
     if not status:
         error = "The player is not running."
     elif status.get('state') not in ('playing', 'paused'):
         error = "Nothing is playing." if status.get('state') != 'sync' else "This doesn't work in sync mode."
-    elif status.get('rewind') is False:
-        error = "The start-up video can't go back to the start."
-    elif status.get('rewind') is not True:
-        error = "This player script can't go back to the start (it is from an older version)."
+    elif status.get(command) is False:
+        error = during_start_up
+    elif status.get(command) is not True:
+        error = older
     else:
         error = None
     if not error:
         try:
-            if system.request_rewind():
+            if system.request_command(command):
                 time.sleep(0.5)
             else:
                 error = "The player is not running."
@@ -375,7 +364,7 @@ def player_rewind():
     elif is_fetch():
         return player_view(system.get_player_status())
     else:
-        flash("Back at the first frame. Press play to start.", "success")
+        flash(done, "success")
     return redirect(url_for('index'))
 
 @app.route('/set_image_duration', methods=['POST'])
@@ -855,6 +844,10 @@ UPDATED_PAGE = """<!doctype html>
       {% for line in lines %}<p>{{ line }}</p>{% endfor %}
       {% if restarting %}
       <p id="status" class="hint">The web interface is restarting with the new version, then it offers to reboot...</p>
+      <form method="post" action="{{ url_for('reboot_system') }}" id="rebootAnyway" hidden>
+        <p class="hint">The new version hasn't answered yet.</p>
+        <button type="submit" class="button primary">Reboot now</button>
+      </form>
       <p><a href="{{ url_for('index') }}" class="button button-link">Later</a></p>
       {% else %}
       <p class="hint">Reboot to use the new version.</p>
@@ -881,6 +874,8 @@ UPDATED_PAGE = """<!doctype html>
           .catch(() => setTimeout(waitForNewVersion, 2000));
       }
       setTimeout(waitForNewVersion, 3000);
+      // still no answer after a minute: offer to reboot from here
+      setTimeout(() => { document.getElementById('rebootAnyway').hidden = false; }, 60000);
     </script>
     {% endif %}
   </body>

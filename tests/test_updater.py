@@ -273,7 +273,9 @@ def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     assert b'waitForNewVersion' in r.data
     # it goes on to the reboot page by itself: no Reboot button here leading to it (two pages
     # asking to reboot, one after the other)
-    assert b'/confirm_reboot' in r.data and b'>Reboot' not in r.data and b'Later' in r.data
+    assert b'/confirm_reboot' in r.data and b'href="/confirm_reboot"' not in r.data and b'Later' in r.data
+    # unless the new version doesn't answer within a minute: then it can reboot from here
+    assert b'id="rebootAnyway" hidden' in r.data and b'60000' in r.data
 
     # if the restart can't be scheduled, the page doesn't pretend it is restarting
     monkeypatch.setattr(system, 'run_command',
