@@ -293,6 +293,63 @@ def get_video_settings(config_text):
             settings.add(f"{key}={value}")
     return settings
 
+# ----- Graphics memory ----- #
+# Memory for the graphics chip (video decoding, the screen), set with gpu_mem in config.txt.
+# The v7 image has 128 MB.
+GPU_MEM_CHOICES = (128, 256, 512)
+MEMINFO_FILE = '/proc/meminfo'
+
+def _applies_to_all(config_text):
+    """(line, applies to every Pi) for each line: before any [section], or under [all]."""
+    everywhere = True
+    for line in config_text.splitlines(True):
+        stripped = line.strip()
+        if stripped.startswith('['):
+            everywhere = stripped.lower() == '[all]'
+            yield line, False
+        else:
+            yield line, everywhere
+
+def get_gpu_mem(config_text):
+    """The gpu_mem set for every Pi in config.txt (MB), or None."""
+    value = None
+    for line, everywhere in _applies_to_all(config_text):
+        match = re.match(r'\s*gpu_mem\s*=\s*(\d+)\s*$', line)
+        if everywhere and match:
+            value = int(match.group(1))
+    return value
+
+def set_gpu_mem_in_config(config_text, megabytes):
+    """config.txt with gpu_mem for every Pi set to megabytes; nothing else changes."""
+    lines, done = [], False
+    for line, everywhere in _applies_to_all(config_text):
+        if everywhere and re.match(r'\s*gpu_mem\s*=', line):
+            if done:
+                continue
+            line, done = f"gpu_mem={megabytes}\n", True
+        lines.append(line)
+    if not done:
+        # after the comments at the top, before any [section]
+        at = next((i for i, line in enumerate(lines) if line.strip() and not line.lstrip().startswith('#')), len(lines))
+        lines.insert(at, f"gpu_mem={megabytes}\n")
+    return ''.join(lines)
+
+def memory_megabytes():
+    """The memory Linux has (without what the graphics chip has), in MB, or None."""
+    try:
+        with open(MEMINFO_FILE, 'r') as f:
+            for line in f:
+                if line.startswith('MemTotal:'):
+                    return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+def recommended_gpu_mem():
+    """256 MB on a Pi with 1 GB (a Pi 3), 512 MB with 2 GB or more (a Pi 4)."""
+    memory = memory_megabytes()
+    return 512 if memory and memory > 1536 else 256
+
 def get_current_video_mode(config_text):
     """Return (mode key, description) for the video mode set in config.txt."""
     settings = get_video_settings(config_text)

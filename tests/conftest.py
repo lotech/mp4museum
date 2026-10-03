@@ -59,8 +59,10 @@ def pi(tmp_path, monkeypatch):
 
     # a Pi 3, the player this is mostly used on (it can't show large images)
     (tmp_path / 'model').write_text('Raspberry Pi 3 Model B Rev 1.2\0')
+    (tmp_path / 'meminfo').write_text('MemTotal:         882624 kB\nMemFree:          500000 kB\n')
     for name, value in {
         'MODEL_FILE': str(tmp_path / 'model'),
+        'MEMINFO_FILE': str(tmp_path / 'meminfo'),
         'MEDIA_PATH': str(p.media),
         'BOOT_PATH': str(p.boot),
         'ALSA_FILE': p.path('alsa.txt'),

@@ -821,3 +821,36 @@ def test_engine_badge_only_while_something_plays(client, monkeypatch):
     with open(system.PLAYER_STATUS_FILE, 'w') as f:
         json.dump({'state': 'idle', 'file': None, 'since': time.time(), 'pid': 4242, 'engine': 'vlc'}, f)
     assert client.get('/player/status').get_json()['engine'] is None
+
+
+# ----- Graphics memory ----- #
+def test_graphics_memory(pi, client, tmp_path):
+    original = open(system.CONFIG_FILE).read()
+    assert system.get_gpu_mem(original) == 128
+    html = client.get('/').data.decode()
+    assert 'Now: <strong>128 MB</strong>' in html and '256 MB (recommended)' in html   # a Pi 3: 1 GB
+    r = client.post('/set_gpu_mem', data={'gpu_mem': '256'})
+    assert r.status_code == 302 and '/confirm_reboot' in r.location
+    changed = open(system.CONFIG_FILE).read()
+    assert changed == original.replace('gpu_mem=128', 'gpu_mem=256') and system.get_gpu_mem(changed) == 256
+    for bad in ('1024', '64', 'lots', ''):
+        r = client.post('/set_gpu_mem', data={'gpu_mem': bad}, follow_redirects=True)
+        assert b'Please choose' in r.data
+    assert system.get_gpu_mem(open(system.CONFIG_FILE).read()) == 256
+    # a Pi 4 with 4 GB
+    (tmp_path / 'meminfo').write_text('MemTotal:        3884000 kB\n')
+    assert system.recommended_gpu_mem() == 512
+
+
+def test_graphics_memory_only_changes_the_line_for_every_pi():
+    config = '# comment\n\ndisable_splash=1\n[pi4]\ngpu_mem=76\ndtoverlay=x\n[all]\ngpu_mem=64\ngpu_mem_1024=300\n'
+    assert system.get_gpu_mem(config) == 64
+    changed = system.set_gpu_mem_in_config(config, 512)
+    # the Pi 4 section and gpu_mem_1024 are left alone
+    assert changed == config.replace('[all]\ngpu_mem=64', '[all]\ngpu_mem=512')
+    # not set: added at the top, where it applies to every Pi
+    config = '# comment\n\ndisable_splash=1\n[pi4]\ndtoverlay=x\n'
+    changed = system.set_gpu_mem_in_config(config, 256)
+    assert changed == '# comment\n\ngpu_mem=256\ndisable_splash=1\n[pi4]\ndtoverlay=x\n' and system.get_gpu_mem(changed) == 256
+    # two lines for every Pi: one is left
+    assert system.set_gpu_mem_in_config('gpu_mem=64\ngpu_mem=128\n', 256) == 'gpu_mem=256\n'

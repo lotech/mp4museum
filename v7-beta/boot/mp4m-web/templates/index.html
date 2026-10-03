@@ -241,6 +241,7 @@
 {# ----- Video ----- #}
 <div id="video" class="tab-content">
   <div class="grid-2">
+    <div class="stack">
     <section class="card">
       <h3>{{ icon('monitor') }}Video mode</h3>
       <p class="current">Now: <strong>{{ current_mode }}</strong></p>
@@ -261,6 +262,25 @@
       <p class="hint">Needs a reboot. Only the video lines in /boot/config.txt are changed, your other settings are kept.
         NTSC and PAL use the composite (3.5mm AV) output, which is only active when no HDMI display is connected.</p>
     </section>
+
+    <section class="card">
+      <h3>{{ icon('cpu') }}Graphics memory</h3>
+      <p class="current">Now: <strong>{{ gpu_mem ~ ' MB' if gpu_mem else 'not set (the firmware default)' }}</strong></p>
+      <form method="post" action="{{ url_for('set_gpu_mem') }}" class="setting">
+        <label for="gpu_mem">Change to</label>
+        <div class="input-row">
+          <select name="gpu_mem" id="gpu_mem" required>
+            {% for megabytes in gpu_mem_choices %}
+            <option value="{{ megabytes }}" {% if megabytes == (gpu_mem or gpu_mem_recommended) %}selected{% endif %}>{{ megabytes }} MB{% if megabytes == gpu_mem_recommended %} (recommended){% endif %}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="button">Apply</button>
+        </div>
+      </form>
+      <p class="hint">Needs a reboot. Memory for decoding video and drawing the screen.{% if memory_mb %}
+        Linux has {{ memory_mb }} MB besides it.{% endif %} Only the gpu_mem line in /boot/config.txt is changed.</p>
+    </section>
+    </div>
 
     <section class="card">
       <h3>{{ icon('info') }}Display</h3>

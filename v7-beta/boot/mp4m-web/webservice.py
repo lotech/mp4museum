@@ -169,6 +169,10 @@ def index():
                            current_mode=current_mode,
                            current_mode_key=current_mode_key,
                            video_modes=system.VIDEO_MODES,
+                           gpu_mem=system.get_gpu_mem(system.read_config_text()),
+                           gpu_mem_choices=system.GPU_MEM_CHOICES,
+                           gpu_mem_recommended=system.recommended_gpu_mem(),
+                           memory_mb=system.memory_megabytes(),
                            network_status=system.get_network_status(),
                            display_info=system.get_display_info(),
                            current_sound_card=system.get_current_sound_card(),
@@ -589,6 +593,26 @@ def set_video_mode():
         return redirect(url_for('confirm_reboot'))
     except Exception as e:
         flash(f"Error setting video mode: {str(e)}", "error")
+        return redirect(url_for('index'))
+
+
+@app.route('/set_gpu_mem', methods=['POST'])
+def set_gpu_mem():
+    value = request.form.get('gpu_mem', '')
+    if not value.isdecimal() or int(value) not in system.GPU_MEM_CHOICES:
+        flash("Please choose 128, 256 or 512 MB.", "error")
+        return redirect(url_for('index'))
+    try:
+        config_text = system.read_config_text()
+        if not config_text:
+            flash(f"Could not read {system.CONFIG_FILE}.", "error")
+            return redirect(url_for('index'))
+        with system.writable(system.BOOT_PATH):
+            system.write_file(system.CONFIG_FILE, system.set_gpu_mem_in_config(config_text, int(value)))
+        flash(f"Graphics memory set to {int(value)} MB.", "success")
+        return redirect(url_for('confirm_reboot'))
+    except Exception as e:
+        flash(f"Error setting the graphics memory: {e}", "error")
         return redirect(url_for('index'))
 
 
