@@ -1,0 +1,5 @@
+# For running the tests on a computer (not needed on the Pi).
+# Same Flask and Werkzeug versions as the MP4MUSEUM v7 image.
+flask==2.2.5
+werkzeug==2.2.3
+pytest

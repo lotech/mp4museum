@@ -46,7 +46,8 @@ a network is optional.
 ## Development
 
 - [x] `CLAUDE.md` with the constraints and conventions for working on the code
-- [ ] Commit the test suite (web interface, updater, player harness) to the repository, with a script to run it
+- [x] Commit the test suite to the repository (`tests/`, run with `python -m pytest tests`)
+- [ ] Run the tests on GitHub for every pull request (GitHub Actions)
 
 ## Ideas
 

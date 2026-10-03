@@ -74,9 +74,22 @@ original.
 - Run a code review before opening a PR. Codex also reviews PRs on GitHub; fix its findings
   (verify each one) and reply on the thread.
 - User-facing text (web interface, README, messages) is plain, short English.
-- Test the web interface against simulated partitions: point `system.MEDIA_PATH`,
-  `BOOT_PATH` and the file constants at temp folders and stub `system.run_command` (mount,
-  reboot) and `system.apply_hostname`. Test the player with fake `vlc` and `RPi.GPIO`
-  modules and a virtual clock. Tests that change repository files must restore them from a
-  saved copy, not with `git checkout` (that throws away uncommitted work).
 - Nothing replaces trying it on a Pi: say what hasn't been tested on hardware.
+
+## Tests
+
+```bash
+pip install -r tests/requirements.txt     # Flask/Werkzeug pinned to the image's versions
+python -m pytest tests
+```
+
+- `tests/conftest.py`: the `pi` fixture gives each test a simulated Pi (temporary `/boot`
+  and media folders; `mount`, `reboot` and hostname changes stubbed and recorded in
+  `pi.commands`); `client` is a logged-in browser; `github` is a fake GitHub serving a
+  temporary copy of this repository to the updater.
+- `test_web.py`, `test_storage.py`, `test_updater.py`: the web interface, read-only
+  partitions and file writes, software updates and `mp4m-update`.
+- `test_player.py` runs the real player through `player_harness.py`: fake `vlc` and
+  `RPi.GPIO` modules and a virtual clock, so minutes of playback take milliseconds.
+- Tests must never change files in the repository (the `github` fixture works on a copy).
+- Add a test with every fix, and check it fails without the fix.
