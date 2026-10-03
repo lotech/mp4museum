@@ -587,3 +587,15 @@ def test_play_pressed_for_a_file_that_fails_is_forgotten(tmp_path):
     assert 'c.mp4' in plays(r)
     held = [s for s in r['statuses'] if s['state'] == 'paused']
     assert held and held[-1]['file'].endswith('c.mp4')
+
+
+def test_status_says_which_program_loops_it(tmp_path):
+    # while an omxplayer loop's first frame is held, VLC shows it but the loop is still omxplayer's
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/b.mp4'], installed=['omxplayer'],
+            signals=[{'at': 40, 'command': 'rewind'}], max_seconds=80)
+    held = [s for s in r['statuses'] if s['state'] == 'paused'][0]
+    assert held['engine'] == 'vlc' and held['loop_player'] == 'omxplayer'
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/b.mp4'],
+            write={'/boot/mp4m-player.txt': 'loop_player=vlc\n'}, max_plays=6)
+    assert {s['loop_player'] for s in r['statuses'] if (s['file'] or '').endswith('clip-loop.mp4')} == {'vlc'}
+    assert {s['loop_player'] for s in r['statuses'] if (s['file'] or '').endswith('b.mp4')} == {None}

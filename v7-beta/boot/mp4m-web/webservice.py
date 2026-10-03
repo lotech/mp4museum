@@ -366,13 +366,15 @@ def set_loop_player():
     except Exception as e:
         flash(f"Failed to save the setting: {e}", "error")
         return redirect(url_for('index'))
-    # a loop video playing now starts again if another program will show it (VLC is used
-    # if omxplayer isn't installed)
+    # a loop video playing now starts again if another program will loop it (VLC is used if
+    # omxplayer isn't installed). loop_player: the program looping it (while an omxplayer loop's
+    # first frame is held, VLC shows it); older players only say which program shows it
     status = system.get_player_status() or {}
     playing = status.get('file') or ''
     will_use = 'omxplayer' if choice == 'omxplayer' and system.omxplayer_installed() else 'vlc'
     if (status.get('state') in ('playing', 'paused') and 'loop.' in playing and status.get('play_file') is True
-            and status.get('engine') in ('vlc', 'omxplayer') and status.get('engine') != will_use
+            and (status.get('loop_player') or status.get('engine')) in ('vlc', 'omxplayer')
+            and (status.get('loop_player') or status.get('engine')) != will_use
             and any(entry['path'] == playing for entry in system.get_playlist())):
         try:
             if system.request_play(playing):
