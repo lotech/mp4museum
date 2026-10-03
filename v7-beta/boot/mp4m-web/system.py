@@ -130,6 +130,8 @@ def is_valid_filename(filename):
     # Plain file names only: no paths, hidden files or characters exFAT can't store
     return (bool(filename)
             and not filename.startswith('.')
+            # exFAT drops a trailing dot: the file would lose its extension
+            and not filename.endswith('.')
             and not any(c in INVALID_FILENAME_CHARS or ord(c) < 32 or ord(c) == 127 for c in filename)
             # exFAT allows 255 UTF-16 characters
             and len(filename.encode('utf-16-le')) <= 510)

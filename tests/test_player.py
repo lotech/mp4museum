@@ -567,3 +567,23 @@ def test_rewind_a_loop_in_vlc(tmp_path):
     assert starts[:4] == [20, 40, 90, 120], starts
     held = [s for s in r['statuses'] if s['state'] == 'paused']
     assert held[0]['engine'] == 'vlc' and held[0]['position'] < .1
+
+
+def test_rewind_again_while_held(tmp_path):
+    # the rewind button stays on while the first frame is held: pressing it again mustn't stop play from working
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'],
+            signals=[{'at': 40, 'command': 'rewind'}, {'at': 50, 'command': 'rewind'},
+                     {'at': 60, 'signal': 'SIGUSR2'}], max_seconds=100)
+    starts = [round(e['at']) for e in omx_starts(r)]
+    assert len(starts) == 2 and 60 <= starts[1] <= 61, starts
+
+
+def test_play_pressed_for_a_file_that_fails_is_forgotten(tmp_path):
+    # rewind between files, play pressed, the file doesn't open: the next rewind still holds
+    files = ['/media/internal/a.mp4', '/media/internal/b.mp4', '/media/internal/c.mp4']
+    r = run(tmp_path, files=files, media={'b.mp4': 'stuck', 'c.mp4': 100}, max_seconds=150,
+            signals=[{'at': 25, 'command': 'rewind', 'when': 'settings'}, {'at': 30, 'signal': 'SIGUSR2'},
+                     {'at': 90, 'command': 'rewind'}])
+    assert 'c.mp4' in plays(r)
+    held = [s for s in r['statuses'] if s['state'] == 'paused']
+    assert held and held[-1]['file'].endswith('c.mp4')

@@ -727,8 +727,84 @@ def test_changing_the_loop_player_starts_the_loop_again(pi, client, monkeypatch)
         sent.clear()
         with open(system.PLAYER_STATUS_FILE, 'w') as f:
             json.dump({'state': 'playing', 'file': str(pi.media / playing), 'since': time.time(), 'pid': 4242,
-                       'play_file': True}, f)
+                       'play_file': True, 'engine': 'omxplayer'}, f)
         r = client.post('/set_loop_player', data={'loop_player': 'vlc'}, follow_redirects=True)
         assert (b'has started again' in r.data) == restarted and bool(sent) == restarted
         if restarted:
             assert json.load(open(system.PLAY_REQUEST_FILE))['file'] == str(pi.media / playing)
+
+
+def test_rename_case_only_on_a_case_insensitive_partition(pi, client, monkeypatch):
+    # exFAT ignores case: renaming Clip.mp4 to clip.mp4 in one go changes nothing there
+    (pi.media / 'Clip.mp4').write_bytes(b'video')
+    real_exists, real_samefile = os.path.exists, os.path.samefile
+    lower = str(pi.media / 'clip.mp4')
+    monkeypatch.setattr(webservice.os.path, 'exists', lambda p: True if p == lower else real_exists(p))
+    monkeypatch.setattr(webservice.os.path, 'samefile', lambda a, b: True if lower in (a, b) else real_samefile(a, b))
+    renames = []
+    real_rename = os.rename
+    monkeypatch.setattr(webservice.os, 'rename', lambda a, b: (renames.append((os.path.basename(a), os.path.basename(b))), real_rename(a, b)))
+    r = client.post('/rename', data={'filename': 'Clip.mp4', 'new_name': 'clip.mp4'}, follow_redirects=True)
+    assert b'Renamed' in r.data and len(renames) == 2 and renames[0][1].startswith('.') and renames[1][1] == 'clip.mp4'
+    assert sorted(os.listdir(pi.media)) == ['clip.mp4']
+
+
+def test_rename_refuses_names_ending_in_a_dot(pi, client):
+    # exFAT drops a trailing dot, so the file would lose its extension
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    for bad in ('a.mp4.', 'b.'):
+        r = client.post('/rename', data={'filename': 'a.mp4', 'new_name': bad}, follow_redirects=True)
+        assert b'Renamed' not in r.data
+    assert not system.is_valid_filename('clip.') and system.is_valid_filename('clip.mp4')
+
+
+def test_renames_to_the_same_name_one_at_a_time(pi, client, monkeypatch):
+    (pi.media / 'a.mp4').write_bytes(b'a')
+    (pi.media / 'b.mp4').write_bytes(b'b')
+    real_rename = os.rename
+    def slow_rename(a, b):
+        time.sleep(.2)
+        real_rename(a, b)
+    monkeypatch.setattr(webservice.os, 'rename', slow_rename)
+    def rename(name):
+        c = webservice.app.test_client()
+        c.post('/login', data={'password': 'mp4museum'})
+        c.post('/rename', data={'filename': name, 'new_name': 'same.mp4'})
+    threads = [threading.Thread(target=rename, args=(n,)) for n in ('a.mp4', 'b.mp4')]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # one of them was renamed, the other is still there: nothing was overwritten
+    assert sorted(os.listdir(pi.media)) in (['b.mp4', 'same.mp4'], ['a.mp4', 'same.mp4'])
+
+
+def test_loop_restarted_only_when_the_program_changes(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append(sig))
+    (pi.media / 'a-loop.mp4').write_bytes(b'x')
+    def playing(engine):
+        with open(system.PLAYER_STATUS_FILE, 'w') as f:
+            json.dump({'state': 'playing', 'file': str(pi.media / 'a-loop.mp4'), 'since': time.time(), 'pid': 4242,
+                       'play_file': True, 'engine': engine}, f)
+    monkeypatch.setattr(system.shutil, 'which', lambda name: '/usr/bin/' + name)
+    for engine, choice, restarted in (('vlc', 'vlc', False), ('omxplayer', 'omxplayer', False),
+                                      ('omxplayer', 'vlc', True), ('vlc', 'omxplayer', True)):
+        sent.clear()
+        playing(engine)
+        r = client.post('/set_loop_player', data={'loop_player': choice}, follow_redirects=True)
+        assert (b'has started again' in r.data) == restarted and bool(sent) == restarted, (engine, choice)
+    # omxplayer chosen but not installed: VLC still plays it
+    monkeypatch.setattr(system.shutil, 'which', lambda name: None)
+    sent.clear()
+    playing('vlc')
+    assert b'has started again' not in client.post('/set_loop_player', data={'loop_player': 'omxplayer'},
+                                                   follow_redirects=True).data and not sent
+
+
+def test_engine_badge_only_while_something_plays(client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'idle', 'file': None, 'since': time.time(), 'pid': 4242, 'engine': 'vlc'}, f)
+    assert client.get('/player/status').get_json()['engine'] is None

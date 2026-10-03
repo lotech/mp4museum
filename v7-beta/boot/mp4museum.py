@@ -226,9 +226,11 @@ def pause_at_first_picture(started):
         time.sleep(.01)
     showing = player.get_state() == vlc.State.Playing
     rewind_requested = False
+    # a play press waiting for this picture is used up either way
+    play_pressed = take_play_request()
     if not showing:
         return None
-    if take_play_request():
+    if play_pressed:
         return 'playing'
     player.set_pause(1)
     return 'held'
@@ -539,22 +541,27 @@ def hold_first_frame(source):
     """Show a video's first frame in VLC, paused, until play or next is pressed (for omxplayer,
     which can't hold a frame). Returns the media, with VLC still showing that frame: omx_loop
     starts omxplayer in front of it, so there is no black screen in between."""
-    media = vlc_instance.media_new(source)
-    player.set_media(media)
-    player.play()
-    shown = pause_at_first_picture(time.time())
-    if shown == 'held':
-        write_status('paused', source, 0)
-        # VLC pauses a moment later
-        paused_by = time.time() + 2
-        while player.get_state() == vlc.State.Playing and time.time() < paused_by and not skip_requested:
-            time.sleep(.01)
-        while player.get_state() == vlc.State.Paused and not skip_requested:
-            time.sleep(.05)
-    if shown and not skip_requested:
-        # play: VLC holds this picture while omxplayer starts
-        player.set_pause(1)
-    return media
+    while True:
+        media = vlc_instance.media_new(source)
+        player.set_media(media)
+        player.play()
+        shown = pause_at_first_picture(time.time())
+        if shown == 'held':
+            write_status('paused', source, 0)
+            # VLC pauses a moment later
+            paused_by = time.time() + 2
+            while player.get_state() == vlc.State.Playing and time.time() < paused_by and not skip_requested:
+                time.sleep(.01)
+            while player.get_state() == vlc.State.Paused and not skip_requested and not rewind_requested:
+                time.sleep(.05)
+        if rewind_requested and not skip_requested:
+            # rewind pressed again while held: start it again
+            media.release()
+            continue
+        if shown and not skip_requested:
+            # play: VLC holds this picture while omxplayer starts
+            player.set_pause(1)
+        return media
 
 # find a file, and if found, return its path (for sync)
 def search_file(file_name):

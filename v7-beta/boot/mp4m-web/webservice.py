@@ -14,6 +14,7 @@ import socket
 import time
 import tempfile
 import threading
+import uuid
 from datetime import timedelta
 
 from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, g
@@ -215,7 +216,8 @@ def player_view(status):
     path = status.get('file') or None
     view.update(state=status.get('state'), file=path, play_file=status.get('play_file') is True,
                 rewind=status.get('rewind') is True,
-                engine=status.get('engine') if status.get('engine') in ('vlc', 'omxplayer', 'omxplayer-sync') else None,
+                engine=(status.get('engine') if status.get('engine') in ('vlc', 'omxplayer', 'omxplayer-sync')
+                        and status.get('state') in ('playing', 'paused', 'sync') else None),
                 name=os.path.basename(path) if path else None,
                 folder=os.path.basename(os.path.dirname(path)) if path else None,
                 kind=system.media_kind(path) if path else None, loop='loop.' in (path or ''))
@@ -364,15 +366,18 @@ def set_loop_player():
     except Exception as e:
         flash(f"Failed to save the setting: {e}", "error")
         return redirect(url_for('index'))
-    # a loop video playing now starts again with the player chosen
+    # a loop video playing now starts again if another program will show it (VLC is used
+    # if omxplayer isn't installed)
     status = system.get_player_status() or {}
     playing = status.get('file') or ''
+    will_use = 'omxplayer' if choice == 'omxplayer' and system.omxplayer_installed() else 'vlc'
     if (status.get('state') in ('playing', 'paused') and 'loop.' in playing and status.get('play_file') is True
+            and status.get('engine') in ('vlc', 'omxplayer') and status.get('engine') != will_use
             and any(entry['path'] == playing for entry in system.get_playlist())):
         try:
-            system.request_play(playing)
-            flash(f"Loop videos are now played with {name}; {os.path.basename(playing)} has started again.", "success")
-            return redirect(url_for('index'))
+            if system.request_play(playing):
+                flash(f"Loop videos are now played with {name}; {os.path.basename(playing)} has started again.", "success")
+                return redirect(url_for('index'))
         except OSError:
             pass
     flash(f"Loop videos are now played with {name}.", "success")
@@ -465,6 +470,8 @@ def delete_file():
     return redirect(url_for('index'))
 
 
+_rename_lock = threading.Lock()
+
 @app.route('/rename', methods=['POST'])
 def rename_file():
     filename = request.form.get('filename', '')
@@ -480,19 +487,32 @@ def rename_file():
         return redirect(url_for('index'))
     old_path = os.path.join(system.MEDIA_PATH, filename)
     new_path = os.path.join(system.MEDIA_PATH, new_name)
-    if not os.path.isfile(old_path):
-        flash("File not found.", "error")
-        return redirect(url_for('index'))
-    # the media partition (exFAT) ignores case: a name differing only in case is the same file
-    if os.path.exists(new_path) and not os.path.samefile(old_path, new_path):
-        flash(f"There is already a file called '{new_name}'.", "error")
-        return redirect(url_for('index'))
-    try:
-        with system.writable(system.MEDIA_PATH):
-            os.rename(old_path, new_path)
-    except Exception as e:
-        flash(f"Failed to rename the file: {e}", "error")
-        return redirect(url_for('index'))
+    # one at a time, so two renames to the same name can't overwrite a file
+    with _rename_lock:
+        if not os.path.isfile(old_path):
+            flash("File not found.", "error")
+            return redirect(url_for('index'))
+        # the media partition (exFAT) ignores case: a name differing only in case is the same file,
+        # and renaming it straight to that name changes nothing, so it goes through another name
+        case_only = os.path.exists(new_path) and os.path.samefile(old_path, new_path)
+        if os.path.exists(new_path) and not case_only:
+            flash(f"There is already a file called '{new_name}'.", "error")
+            return redirect(url_for('index'))
+        try:
+            with system.writable(system.MEDIA_PATH):
+                if case_only:
+                    between = os.path.join(system.MEDIA_PATH, '.rename-' + uuid.uuid4().hex)
+                    os.rename(old_path, between)
+                    try:
+                        os.rename(between, new_path)
+                    except OSError:
+                        os.rename(between, old_path)
+                        raise
+                else:
+                    os.rename(old_path, new_path)
+        except Exception as e:
+            flash(f"Failed to rename the file: {e}", "error")
+            return redirect(url_for('index'))
     flash(f"Renamed '{filename}' to '{new_name}'.", "success")
     if '.' not in new_name:
         flash(f"'{new_name}' has no extension, so the player won't play it.", "warning")
