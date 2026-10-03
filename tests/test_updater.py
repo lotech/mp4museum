@@ -283,6 +283,8 @@ def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     assert 'response.status === 401' in page and 'AbortSignal.timeout(5000)' in page
     # a failed reboot command: said, and offered again (not waited on)
     assert '} else if (!response.ok) {' in page
+    # tried again after a failure: that attempt is waited for
+    assert page.index('stopWaiting = false;') < page.index("fetch('/reboot', {method: 'POST'")
 
     # if the restart can't be scheduled, the page doesn't pretend it is restarting: the reboot
     # is offered straight away

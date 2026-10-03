@@ -913,6 +913,8 @@ UPDATED_PAGE = """<!doctype html>
         if (later) later.hidden = true;
       }
       function rebootNow() {
+        // (again after a failed attempt: this one is waited for)
+        stopWaiting = false;
         document.getElementById('rebootButtons').hidden = true;
         statusLine.innerHTML = '<span class="spinner"></span>Rebooting... This page goes back to the web interface when the player has started again.';
         fetch('{{ url_for('reboot_system') }}', {method: 'POST', headers: {'X-Requested-With': 'fetch'}})
