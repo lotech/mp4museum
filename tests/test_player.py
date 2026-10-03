@@ -450,3 +450,54 @@ def test_rewind_a_loop_in_omxplayer(tmp_path):
     assert plays(r)[3:] == ['clip-loop.mp4']          # the first frame, in VLC
     held = [s for s in r['statuses'] if s['state'] == 'paused'][0]
     assert held['file'].endswith('clip-loop.mp4') and held['position'] == 0
+
+
+def test_rewind_then_next_leaves_nothing_behind(tmp_path):
+    # a rewind that was overtaken by next must not freeze the next loop on its first frame
+    files = ['/media/internal/a-loop.mp4', '/media/internal/b.mp4']
+    for first, second in (('rewind', 'next'), ('next', 'rewind')):
+        events = {'rewind': {'command': 'rewind'}, 'next': {'signal': 'SIGUSR1'}}
+        r = run(tmp_path, files=files, installed=['omxplayer'], omx_hangs=(first == 'next'), max_seconds=120,
+                signals=[dict(events[first], at=40), dict(events[second], at=41)])
+        starts = [round(e['at']) for e in omx_starts(r)]
+        assert len(starts) == 2, (first, starts)
+        # the loop's second omxplayer keeps playing until the run ends
+        assert [at for signum, at in killpgs(r) if at > starts[1]] == [120], (first, killpgs(r))
+
+
+def test_rewind_between_files_holds_the_next_one(tmp_path):
+    # pressed while the player is between files: the next file waits at its first frame
+    r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/b.mp4'], max_seconds=120,
+            signals=[{'at': 25, 'command': 'rewind', 'when': 'settings'}])
+    held = [s for s in r['statuses'] if s['state'] == 'paused']
+    assert held and held[0]['file'].endswith('b.mp4') and held[0]['position'] == 0
+    assert plays(r)[3:] == ['a.mp4', 'b.mp4']
+
+
+def test_skipped_file_that_plays_is_forgiven(tmp_path):
+    # a single video that stopped the player twice by chance: tried again, it plays on without gaps
+    r = run(tmp_path, files=['/media/internal/v.mp4'], write=crashed_on('/media/internal/v.mp4', times_before=1),
+            max_plays=8)
+    assert plays(r)[3:8] == ['v.mp4'] * 5 and r['stdout'].count('trying them again') == 1
+    assert [s['state'] for s in r['statuses']].count('idle') == 1 and r['skipped'] == []
+    # stopped once, then played to the end: the count is cleared
+    r = run(tmp_path, files=['/media/internal/v.mp4'], write=crashed_on('/media/internal/v.mp4'), max_plays=5)
+    assert r['skipped'] == []
+
+
+def test_skipping_large_images_is_logged_once(tmp_path):
+    files = ['/media/internal/a.png', '/media/internal/b.png']
+    contents = {f: png_header(4000, 3000) for f in files}
+    r = run(tmp_path, files=files, contents=contents, write={'/proc/device-tree/model': 'Raspberry Pi 3 Model B\0'},
+            max_seconds=300)
+    assert r['stdout'].count('a.png: 4000 x 3000') == 1 and r['stdout'].count('b.png: 4000 x 3000') == 1
+
+
+def test_large_webp_skipped_too(tmp_path):
+    import struct
+    vp8x = b'RIFF' + struct.pack('<I', 30) + b'WEBPVP8X' + struct.pack('<I', 10) + bytes(4) + \
+        (3999).to_bytes(3, 'little') + (2999).to_bytes(3, 'little')
+    r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/b.webp'],
+            contents={'/media/internal/b.webp': vp8x.hex()},
+            write={'/proc/device-tree/model': 'Raspberry Pi 3 Model B\0'}, max_plays=5)
+    assert 'b.webp: 4000 x 3000' in r['stdout'] and 'b.webp' not in plays(r)

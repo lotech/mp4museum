@@ -145,20 +145,24 @@ rewind_requested = False
 rewound = False
 def rewind():
     global rewind_requested, rewound
-    if omx:
-        # omxplayer can't hold a frame: omx_loop shows it in VLC
-        rewind_requested = True
-    elif player.get_state() in (vlc.State.Playing, vlc.State.Paused):
+    if skip_requested:
+        # next was pressed first: the file is on its way out
+        return
+    if not omx and player.get_state() in (vlc.State.Playing, vlc.State.Paused):
         player.set_time(0)
         player.set_pause(1)
         rewound = True
+    else:
+        # omxplayer can't hold a frame: omx_loop shows it in VLC. Between files: the next file
+        # waits at its first frame (vlc_play, omx_loop)
+        rewind_requested = True
 
 # stop the current file; also ends a loop file (omx_loop stops omxplayer). Read here, with
 # the signal the web interface sends after it, so the file chosen there plays next
 skip_requested = False
 requested_file = None
 def next_file():
-    global skip_requested, requested_file
+    global skip_requested, requested_file, rewind_requested
     request = play_request()
     if request and request.get('command') == 'rewind':
         rewind()
@@ -166,6 +170,8 @@ def next_file():
     if request and isinstance(request.get('file'), str):
         requested_file = request['file']
     skip_requested = True
+    # next overtakes a rewind that is still waiting
+    rewind_requested = False
     if not omx:
         player.stop()
 
@@ -209,7 +215,7 @@ def vlc_play(source, options=(), limit=None):
     time.sleep(1)
     current_state = player.get_state()
     has_played = False
-    global rewound
+    global rewound, rewind_requested
     rewound = False
     unpaused, checked = 1, time.time()
     while current_state in (vlc.State.Opening, vlc.State.Buffering, vlc.State.Playing, vlc.State.Paused):
@@ -229,6 +235,12 @@ def vlc_play(source, options=(), limit=None):
         elif not has_played and time.time() - started > OPEN_TIMEOUT:
             print("skipping %s: it didn't start playing" % source, flush=True)
             break
+        if rewind_requested and current_state in (vlc.State.Playing, vlc.State.Paused):
+            # rewind pressed between files: this one waits at its first frame
+            rewind_requested = False
+            player.set_time(0)
+            player.set_pause(1)
+            rewound = True
         state = 'paused' if current_state == vlc.State.Paused else 'playing'
         length = player.get_length()
         if rewound:
@@ -309,6 +321,11 @@ def omx_loop(source):
     # VLC lets go of the screen; omxplayer blanks the background behind the video (-b)
     player.stop()
     while not skip_requested:
+        if rewind_requested:
+            rewind_requested = False
+            hold_first_frame(source)
+            if skip_requested:
+                break
         omx_paused = False
         started = time.time()
         try:
@@ -332,9 +349,7 @@ def omx_loop(source):
         if skip_requested:
             break
         if rewind_requested:
-            rewind_requested = False
-            hold_first_frame(source)
-            # then omxplayer plays it from the start
+            # the first frame (at the top), then omxplayer plays it from the start
             continue
         # with --loop it only stops by itself if something went wrong
         print("omxplayer stopped playing %s (exit code %s)" % (source, process.returncode), flush=True)
@@ -369,6 +384,19 @@ def save_skipped():
         os.replace(SKIPPED_FILE + '.tmp', SKIPPED_FILE)
     except OSError:
         pass
+
+def forgive(path):
+    """It played to the end: whatever stopped the player before, it wasn't (only) this file."""
+    if path in skipped:
+        del skipped[path]
+        save_skipped()
+
+# messages printed every time round would fill the log, which is in memory
+reported = set()
+def report_once(key, message):
+    if key not in reported:
+        reported.add(key)
+        print(message, flush=True)
 
 def is_player(pid):
     """True if pid is a running player (this script)."""
@@ -419,10 +447,10 @@ def find_image_limit():
 image_limit = find_image_limit()
 
 def image_size(path):
-    """(width, height) of a PNG, JPEG, GIF or BMP from its header, or None."""
+    """(width, height) of a PNG, JPEG, GIF, BMP or WebP from its header, or None."""
     try:
         with open(path, 'rb') as f:
-            head = f.read(26)
+            head = f.read(32)
             if head[:8] == b'\x89PNG\r\n\x1a\n':
                 return struct.unpack('>II', head[16:24])
             if head[:6] in (b'GIF87a', b'GIF89a'):
@@ -430,6 +458,15 @@ def image_size(path):
             if head[:2] == b'BM':
                 width, height = struct.unpack('<ii', head[18:26])
                 return abs(width), abs(height)
+            if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+                if head[12:16] == b'VP8X':
+                    return int.from_bytes(head[24:27], 'little') + 1, int.from_bytes(head[27:30], 'little') + 1
+                if head[12:16] == b'VP8 ':
+                    width, height = struct.unpack('<HH', head[26:30])
+                    return width & 0x3fff, height & 0x3fff
+                if head[12:16] == b'VP8L':
+                    bits = int.from_bytes(head[21:25], 'little')
+                    return (bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1
             if head[:2] == b'\xff\xd8':
                 f.seek(2)
                 for _ in range(10000):
@@ -459,6 +496,10 @@ def hold_first_frame(source):
            and time.time() - started < OPEN_TIMEOUT and not skip_requested):
         time.sleep(.01)
     player.set_pause(1)
+    # VLC pauses a moment later
+    paused_by = time.time() + 2
+    while player.get_state() == vlc.State.Playing and time.time() < paused_by and not skip_requested:
+        time.sleep(.01)
     player.set_time(0)
     write_status('paused', source, 0)
     while player.get_state() == vlc.State.Paused and not skip_requested:
@@ -553,8 +594,9 @@ try:
             if image_limit and file.lower().endswith(IMAGE_TYPES):
                 size = image_size(file)
                 if size and max(size) > image_limit:
-                    print("skipping %s: %d x %d pixels, more than this Pi can show (%d); resize it"
-                          % (file, size[0], size[1], image_limit), flush=True)
+                    report_once(('large', file, tuple(size)),
+                                "skipping %s: %d x %d pixels, more than this Pi can show (%d); resize it"
+                                % (file, size[0], size[1], image_limit))
                     continue
             played = True
             # read for every file, so a new image duration applies straight away
@@ -565,19 +607,21 @@ try:
                 if (settings['loop_player'] == 'omxplayer' and file.lower().endswith(OMX_LOOP_TYPES)
                         and shutil.which("omxplayer") and omx_can_play(file)):
                     if omx_loop(file) != 'failed':
+                        forgive(file)
                         continue
                     print("falling back to VLC for %s" % file, flush=True)
                 # VLC starts it again in the same window each time it ends
                 while not skip_requested and vlc_play(file, options) == 'ended':
-                    pass
+                    forgive(file)
             elif file.lower().endswith(IMAGE_TYPES):
-                vlc_play(file, options, limit=settings['image_duration'] + IMAGE_GRACE)
-            else:
-                vlc_play(file, options)
+                if vlc_play(file, options, limit=settings['image_duration'] + IMAGE_GRACE) == 'ended':
+                    forgive(file)
+            elif vlc_play(file, options) == 'ended':
+                forgive(file)
         if files and not played:
             # nothing could be played: better to try the skipped files again than show nothing
             if any(count >= SKIP_AFTER for version, count in skipped.values()):
-                print("every file is skipped: trying them again", flush=True)
+                report_once(('retry', tuple(sorted(skipped))), "every file is skipped: trying them again")
                 retry_next_round = True
             player.stop()
             write_status('idle')

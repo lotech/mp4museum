@@ -57,7 +57,10 @@ def pi(tmp_path, monkeypatch):
     shutil.copy(REPO / 'v7-beta' / 'boot' / 'config.txt', p.boot)
     shutil.copy(REPO / 'v7-beta' / 'boot' / 'mp4museum.py', p.boot)
 
+    # a Pi 3, the player this is mostly used on (it can't show large images)
+    (tmp_path / 'model').write_text('Raspberry Pi 3 Model B Rev 1.2\0')
     for name, value in {
+        'MODEL_FILE': str(tmp_path / 'model'),
         'MEDIA_PATH': str(p.media),
         'BOOT_PATH': str(p.boot),
         'ALSA_FILE': p.path('alsa.txt'),

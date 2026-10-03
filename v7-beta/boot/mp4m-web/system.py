@@ -456,8 +456,21 @@ def media_kind(name):
     return 'other'
 
 # A Pi 3 or older can't show images more than this many pixels wide or high: they come out
-# scrambled (seen with 3300 x 2550), so its player skips them. Same limit as in mp4museum.py.
+# scrambled (seen with 3300 x 2550), so its player skips them. Same limit and model check as in
+# mp4museum.py; not known for a Pi 4 or 5.
 LARGE_IMAGE_SIDE = 2048
+MODEL_FILE = '/proc/device-tree/model'
+
+def image_limit():
+    """LARGE_IMAGE_SIDE on a Pi 3 or older, else None."""
+    try:
+        with open(MODEL_FILE, 'r', errors='replace') as f:
+            model = f.read()
+    except OSError:
+        return None
+    if any(newer in model for newer in ('Pi 4', 'Pi 5', 'Pi 400', 'Pi 500', 'Compute Module 4', 'Compute Module 5')):
+        return None
+    return LARGE_IMAGE_SIDE if 'Raspberry Pi' in model else None
 
 def image_size(path):
     """(width, height) of a PNG, JPEG, GIF, BMP or WebP image from its header, or None."""
@@ -502,9 +515,10 @@ def image_size(path):
         pass
     return None
 
-def is_large_image(size):
-    """True if (width, height) is more than a Pi 3 can show."""
-    return bool(size) and max(size) > LARGE_IMAGE_SIDE
+def is_large_image(size, limit=None):
+    """True if (width, height) is more than this Pi can show (so its player skips it)."""
+    limit = limit or image_limit()
+    return bool(size and limit) and max(size) > limit
 
 def read_player_log(lines=40):
     """The end of what the player printed, or '' if there is nothing."""
@@ -532,6 +546,7 @@ def get_playlist():
     """Every file the player plays, in its order (/media/*/*.*: the media partition and USB
     sticks), and the media partition's other files, which it doesn't play (no extension)."""
     skipped = get_skipped_files()
+    limit = image_limit()
     media_root = os.path.dirname(MEDIA_PATH)
     paths = set(glob.glob(os.path.join(media_root, '*', '*.*')))
     try:
@@ -553,7 +568,7 @@ def get_playlist():
         entries.append({'path': path, 'name': name, 'folder': os.path.basename(os.path.dirname(path)),
                         'internal': os.path.dirname(path) == MEDIA_PATH, 'kind': kind,
                         'plays': '.' in name, 'loop': 'loop.' in path, 'size': size,
-                        'pixels': pixels, 'large': is_large_image(pixels),
+                        'pixels': pixels, 'large': is_large_image(pixels, limit),
                         # the player compares the same way: a replaced file is played again
                         'skipped': path in skipped and skipped[path] == version})
     return entries

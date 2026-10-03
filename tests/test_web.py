@@ -676,3 +676,14 @@ def test_rewind(client, monkeypatch):
     write_status('idle')
     assert client.post('/player/rewind', headers=fetch).get_json()['error'] == 'Nothing is playing.'
     assert 'id="rewindButton"' in client.get('/').data.decode()
+
+
+def test_large_images_only_marked_where_the_player_skips_them(pi, client, tmp_path):
+    (pi.media / 'big.png').write_bytes(png(4000, 3000))
+    assert system.get_playlist()[0]['large'] is True
+    for model in ('Raspberry Pi 4 Model B Rev 1.4\0', 'Raspberry Pi 5 Model B Rev 1.0\0'):
+        (tmp_path / 'model').write_text(model)
+        assert system.get_playlist()[0]['large'] is False
+        r = client.post('/upload', data={'file': (io.BytesIO(png(4000, 3000)), 'b2.png')},
+                        headers={'X-Requested-With': 'fetch'}).get_json()
+        assert len(r['messages']) == 1

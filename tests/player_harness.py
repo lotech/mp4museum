@@ -229,4 +229,8 @@ try:
     exec(compile(source, 'mp4museum.py', 'exec'), {'__name__': '__main__', 'open': watching_open})
 except SystemExit as e:
     log.append({'exit': str(e)})
-print(json.dumps({'log': log, 'statuses': statuses}))
+try:
+    skipped = json.load(open(paths['/tmp/mp4museum-skipped.json']))
+except (OSError, ValueError):
+    skipped = None
+print(json.dumps({'log': log, 'statuses': statuses, 'skipped': skipped}))
