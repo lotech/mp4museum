@@ -1,0 +1,381 @@
+/* MP4MUSEUM web interface
+   based on the MP4MUSEUM v7 beta web service by julius schmiedel - http://mp4museum.org
+   modified 2026 in https://github.com/lotech/mp4museum; licensed under the GNU GPL v3, see LICENSE */
+
+:root {
+  --bg-primary: #121212;
+  --bg-secondary: #1e1e1e;
+  --text-primary: #ffffff;
+  --text-secondary: #a0a0a0;
+  --accent-color: #808080;
+  --border-color: #333333;
+  --error-bg: #2a2a2a;
+  --error-border: #ff3333;
+  --error-text: #ff3333;
+  --success-bg: #2a2a2a;
+  --success-border: #404040;
+  --hover-color: #2a2a2a;
+  --active-color: #404040;
+  --info-bg: #2a2a2a;
+  --info-border: #404040;
+  --info-text: #a0a0a0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  padding: 20px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.container {
+  max-width: 1200px;
+  width: 95%;
+  margin: 0 auto;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .container {
+    width: 100%;
+    border-radius: 0;
+  }
+}
+
+h1, h2, h3 {
+  color: var(--text-primary);
+  margin-top: 0;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 20px;
+}
+
+.tab {
+  padding: 12px 24px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-size: 16px;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  transition: all 0.3s ease;
+}
+
+.tab:hover {
+  opacity: 1;
+  background-color: var(--hover-color);
+}
+
+.tab.active {
+  opacity: 1;
+  color: var(--text-primary);
+  border-bottom: 2px solid var(--accent-color);
+  background-color: var(--active-color);
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+.flash {
+  padding: 12px;
+  margin-bottom: 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.error {
+  background-color: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+}
+
+.success {
+  background-color: var(--success-bg);
+  border-color: var(--success-border);
+}
+
+.button {
+  background-color: var(--accent-color);
+  color: var(--text-primary);
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+.button:hover {
+  background-color: var(--hover-color);
+  transform: translateY(-1px);
+}
+
+pre {
+  background-color: var(--bg-primary);
+  padding: 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  overflow-x: auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.form-group {
+  margin-bottom: 24px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.form-group input[type="text"],
+.form-group select {
+  padding: 12px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.form-group select {
+  width: 300px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a0a0a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+}
+
+.file-list {
+  list-style: none;
+  padding: 0;
+}
+
+.file-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.file-list li:last-child {
+  border-bottom: none;
+}
+
+.file-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.file-actions a {
+  color: var(--accent-color);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.file-actions a:hover {
+  text-decoration: underline;
+}
+
+.upload-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.sound-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.video-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.info-box {
+  background-color: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--info-text);
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.reboot-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-primary);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  z-index: 1000;
+}
+
+.reboot-screen.active {
+  display: flex;
+}
+
+.reboot-message {
+  text-align: center;
+  color: var(--text-primary);
+}
+
+.reboot-message h2 {
+  margin-bottom: 20px;
+}
+
+.reboot-message p {
+  color: var(--text-secondary);
+  margin: 10px 0;
+}
+
+.file-actions form {
+  display: inline;
+  margin: 0;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-color);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.form-group input[type="password"] {
+  padding: 12px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.stacked-form input[type="text"],
+.stacked-form input[type="password"] {
+  display: block;
+  width: 300px;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+}
+
+.login {
+  max-width: 420px;
+  margin-top: 10vh;
+}
+
+.login input[type="password"] {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+}
+
+.hint {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.footer {
+  max-width: 1200px;
+  width: 95%;
+  margin: 20px auto 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.footer a, .hint a {
+  color: var(--text-secondary);
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.field-error {
+  color: var(--error-text);
+  font-size: 12px;
+  margin-top: 4px;
+  display: none;
+}
+
+.script-editor {
+  display: block;
+  width: 100%;
+  min-width: 300px;
+  box-sizing: border-box;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  padding: 12px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  resize: vertical;
+}
+
+.script-actions {
+  margin-top: 12px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.button-link {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}

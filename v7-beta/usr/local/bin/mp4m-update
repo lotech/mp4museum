@@ -1,0 +1,27 @@
+#!/bin/sh
+# Update the MP4MUSEUM software from GitHub: sudo mp4m-update (--help for options)
+# Part of https://github.com/lotech/mp4museum. Licensed under the GNU GPL v3.
+#
+# mp4m-update --recover only puts back the web interface if a power cut interrupted
+# an update while it was swapping folders (run by the mp4m-webservice service at start).
+APP=/boot/mp4m-web
+
+if [ ! -f "$APP/webservice.py" ]; then
+    # The new folder is complete once it has its manifest; otherwise use the old one
+    for candidate in "$APP.new" "$APP.old"; do
+        if [ -f "$candidate/webservice.py" ] && { [ "$candidate" = "$APP.old" ] || [ -f "$candidate/installed.json" ]; }; then
+            boot_was_ro=$(awk '$2 == "/boot" { print $4 }' /proc/mounts | tr ',' '\n' | grep -cx ro)
+            mount -o remount,rw /boot
+            rm -rf "$APP"
+            mv "$candidate" "$APP"
+            [ "$boot_was_ro" -gt 0 ] && mount -o remount,ro /boot
+            echo "Recovered the web interface from $candidate" >&2
+            break
+        fi
+    done
+fi
+
+if [ "$1" = "--recover" ]; then
+    exit 0
+fi
+exec python3 -B "$APP/updater.py" "$@"

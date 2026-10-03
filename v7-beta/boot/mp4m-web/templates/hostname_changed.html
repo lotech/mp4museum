@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}MP4Museum - Network name changed{% endblock %}
+{% block container_class %}login{% endblock %}
+
+{# The old address stops working, so the stylesheet can't be loaded from it #}
+{% block head %}<style>{{ inline_css|safe }}</style>{% endblock %}
+
+{% block content %}
+<h2>Network name changed</h2>
+<p>This player is now at <a href="{{ new_url }}">{{ new_url }}</a></p>
+<p class="hint">You will need to log in again there. It can take a few seconds before the new name works.</p>
+{% endblock %}

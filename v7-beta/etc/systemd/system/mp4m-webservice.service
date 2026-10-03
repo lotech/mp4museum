@@ -1,0 +1,21 @@
+[Unit]
+Description=MP4MUSEUM web interface
+# Wait for the media partition, so files are never listed or deleted on the empty mount point
+After=network.target avahi-daemon.service media-internal.mount
+# The web interface lives on the boot partition so it can be updated without turning off the overlay
+RequiresMountsFor=/boot
+
+[Service]
+# Put the web interface back if a power cut interrupted an update
+ExecStartPre=/usr/local/bin/mp4m-update --recover
+ExecStart=/usr/bin/python3 /boot/mp4m-web/webservice.py
+# Not /boot/mp4m-web: an update replaces that folder, and a deleted working directory
+# would stop /boot from being made read-only again
+WorkingDirectory=/
+# /boot is read-only, so don't try to write .pyc files there
+Environment=PYTHONDONTWRITEBYTECODE=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

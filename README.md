@@ -26,6 +26,10 @@ This fork copies the v7 beta files off a running install and develops them furth
 - **Login** with a password (default `mp4museum`), changeable in the web interface.
 - **A network name per player** (`mp4museum-xxxx.local`), so several players can share a network.
 - **Player** no longer uses a full CPU core while there is nothing to play.
+- **Easier to maintain and install:** the web interface is split into modules and templates,
+  runs as a system service, and has an install script.
+- **Updates from GitHub:** a Software Update button in the web interface, or
+  `sudo mp4m-update` over SSH, installs the latest version and offers to reboot.
 - **A new boot video.** The MP4MUSEUM logo screen is kept.
 
 The player is meant to run offline; a network is only needed for the web interface.
@@ -70,5 +74,5 @@ unchanged from the original repository.
   change is in the git log.
 - The v7 beta files in `v7-beta/` were copied from the publicly released v7 beta image.
   The v7 player script is based on the GPL version 6 player. The v7 web interface
-  (`v7-beta/home/pi/mp4m-webservice.py`) was not published with a license of its own; it is
+  (now `v7-beta/boot/mp4m-web/`) was not published with a license of its own; it is
   included here as part of the GPL-licensed MP4MUSEUM project.

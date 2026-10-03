@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}MP4Museum - Reboot{% endblock %}
+
+{% block content %}
+<h2>Reboot Required</h2>
+<p>Reboot the player for the change to take effect.</p>
+<p>
+  <button class="button" onclick="reboot(false)">Reboot Now</button>
+  <a href="{{ url_for('index') }}" class="button button-link">Later</a>
+</p>
+{% endblock %}
