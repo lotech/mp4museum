@@ -96,8 +96,6 @@ signal.signal(signal.SIGUSR2, lambda signum, frame: player.pause())
 # play media with vlc and wait until it has finished
 # returns 'ended', 'skipped' (next was pressed) or 'failed' (it didn't play)
 def vlc_play(source, options=()):
-    global skip_requested
-    skip_requested = False
     media = vlc_instance.media_new(source, *options)
     player.set_media(media)
     player.play()
@@ -119,6 +117,9 @@ def vlc_play(source, options=()):
             write_status(state, source)
         time.sleep(.01)
         current_state = player.get_state()
+    # a very short file can be over before the first check
+    if current_state == vlc.State.Ended:
+        has_played = True
     player.stop()
     media.release()
     if skip_requested:
@@ -172,10 +173,12 @@ while(1):
         # read for every file, so a new image duration applies straight away
         settings = read_settings()
         options = [':image-duration=%d' % settings['image_duration']]
+        # a next press from here on skips this file
+        skip_requested = False
         if "loop." in file:
             # play it again and again until next is pressed
             # (VLC's own input-repeat could freeze on the last frame on the Pi)
-            while vlc_play(file, options) == 'ended':
+            while not skip_requested and vlc_play(file, options) == 'ended':
                 pass
         else:
             vlc_play(file, options)

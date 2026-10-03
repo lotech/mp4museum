@@ -298,22 +298,29 @@ def matches_installed(source_root):
             and os.path.isfile(system.SCRIPT_FILE)
             and file_sha256(system.SCRIPT_FILE) == file_sha256(os.path.join(source_root, PLAYER_SOURCE)))
 
-# Commits already compared with a local copy and found different (no need to download them again)
-_differs_from_local_copy = set()
+# Commits already compared with the installed files and found different, with what was
+# installed at the time (no need to download them again unless that changed)
+_differs_from_local_copy = {}
+
+def _installed_fingerprint():
+    player = file_sha256(system.SCRIPT_FILE) if os.path.isfile(system.SCRIPT_FILE) else ''
+    tree = _tree_hashes(APP_DIR) if os.path.isdir(APP_DIR) else {}
+    return hashlib.sha256(json.dumps([tree, player], sort_keys=True).encode()).hexdigest()
 
 def identify_local_copy(latest, config=None, record=True):
     """install.sh can't tell which commit it installed ("local copy"). If the installed files
     are exactly this commit, record it (unless record=False), so the update check doesn't offer
     the same version. Returns True if they match."""
     config = config or read_config()
-    if latest['commit'] in _differs_from_local_copy:
+    fingerprint = _installed_fingerprint()
+    if _differs_from_local_copy.get(latest['commit']) == fingerprint:
         return False
     archive = download(config['repo'], latest['commit'])
     with tempfile.TemporaryDirectory(prefix='mp4m-update-') as temp:
         source_root = extract(archive, temp)
         # Compare first: reading doesn't need /boot writable
         if not matches_installed(source_root):
-            _differs_from_local_copy.add(latest['commit'])
+            _differs_from_local_copy[latest['commit']] = fingerprint
             return False
         if not record:
             return True
