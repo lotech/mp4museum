@@ -845,16 +845,36 @@ def test_graphics_memory(pi, client, tmp_path):
         assert b'Please choose' in r.data
     assert system.get_gpu_mem(open(system.CONFIG_FILE).read()) == 256
     # a Pi 4 with 4 GB
+    (tmp_path / 'cpuinfo').write_text('Revision\t: c03114\n')
     (tmp_path / 'meminfo').write_text('MemTotal:        3884000 kB\n')
-    assert system.recommended_gpu_mem() == 512
+    assert system.recommended_gpu_mem() == 512 and system.gpu_mem_choices() == (128, 256, 512)
+    # 512 MB (a Pi Zero W): at most 384 MB, so 512 isn't offered or taken
+    (tmp_path / 'cpuinfo').write_text('Revision\t: 9000c1\n')
+    html = client.get('/').data.decode()
+    assert 'value="512"' not in html and '128 MB (recommended)' in html
+    r = client.post('/set_gpu_mem', data={'gpu_mem': '512'}, follow_redirects=True)
+    assert b'Please choose 128 or 256 MB' in r.data and system.get_gpu_mem(open(system.CONFIG_FILE).read()) == 256
+    # an old board without the memory in its revision code: from Linux's memory and gpu_mem
+    (tmp_path / 'cpuinfo').write_text('Revision\t: 000e\n')
+    (tmp_path / 'meminfo').write_text('MemTotal:         190000 kB\n')
+    open(system.CONFIG_FILE, 'w').write('gpu_mem=64\n')
+    assert system.board_memory_megabytes() == 256 and system.gpu_mem_choices() == (128,)
+    open(system.CONFIG_FILE, 'w').write('gpu_mem=256\n')
+    (tmp_path / 'meminfo').write_text('MemTotal:         190000 kB\n')
+    assert system.board_memory_megabytes() == 512
 
 
 def test_graphics_memory_only_changes_the_line_for_every_pi():
-    config = '# comment\n\ndisable_splash=1\n[pi4]\ngpu_mem=76\ndtoverlay=x\n[all]\ngpu_mem=64\ngpu_mem_1024=300\n'
+    config = ('# comment\n\ndisable_splash=1\n[pi4]\ngpu_mem=76\ngpu_mem_1024=200\ndtoverlay=x\n'
+              '[all]\ngpu_mem=64\ngpu_mem_1024=300\ngpu_mem_512 = 100\n')
     assert system.get_gpu_mem(config) == 64
+    # gpu_mem_1024 wins over gpu_mem on boards with 1 GB or more, gpu_mem_512 with 512 MB
+    assert system.get_gpu_mem(config, 1024) == 300 and system.get_gpu_mem(config, 4096) == 300
+    assert system.get_gpu_mem(config, 512) == 100 and system.get_gpu_mem(config, 256) == 64
     changed = system.set_gpu_mem_in_config(config, 512)
-    # the Pi 4 section and gpu_mem_1024 are left alone
-    assert changed == config.replace('[all]\ngpu_mem=64', '[all]\ngpu_mem=512')
+    # the lines for every Pi that would win over it are taken out; the Pi 4 section is left alone
+    assert changed == config.replace('[all]\ngpu_mem=64\ngpu_mem_1024=300\ngpu_mem_512 = 100\n', '[all]\ngpu_mem=512\n')
+    assert system.get_gpu_mem(changed, 1024) == 512
     # not set: added at the top, where it applies to every Pi
     config = '# comment\n\ndisable_splash=1\n[pi4]\ndtoverlay=x\n'
     changed = system.set_gpu_mem_in_config(config, 256)

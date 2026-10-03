@@ -311,19 +311,31 @@ def _applies_to_all(config_text):
         else:
             yield line, everywhere
 
-def get_gpu_mem(config_text):
-    """The gpu_mem set for every Pi in config.txt (MB), or None."""
-    value = None
+# gpu_mem_256, gpu_mem_512, gpu_mem_1024: for boards with that much memory (1024: or more);
+# they win over gpu_mem
+GPU_MEM_OVERRIDE_RE = re.compile(r'\s*gpu_mem_(256|512|1024)\s*=\s*(\d*)\s*$')
+
+def get_gpu_mem(config_text, board=None):
+    """The gpu_mem set for every Pi in config.txt (MB), or None. board: the board's memory in
+    MB, to take a gpu_mem_256/512/1024 line for it into account."""
+    value = override = None
     for line, everywhere in _applies_to_all(config_text):
         match = re.match(r'\s*gpu_mem\s*=\s*(\d+)\s*$', line)
         if everywhere and match:
             value = int(match.group(1))
-    return value
+        match = GPU_MEM_OVERRIDE_RE.match(line)
+        if everywhere and match and match.group(2) and board and (
+                int(match.group(1)) == board or (match.group(1) == '1024' and board >= 1024)):
+            override = int(match.group(2))
+    return override if override is not None else value
 
 def set_gpu_mem_in_config(config_text, megabytes):
-    """config.txt with gpu_mem for every Pi set to megabytes; nothing else changes."""
+    """config.txt with gpu_mem for every Pi set to megabytes, and gpu_mem_256/512/1024 lines for
+    every Pi taken out (they would win over it); nothing else changes."""
     lines, done = [], False
     for line, everywhere in _applies_to_all(config_text):
+        if everywhere and GPU_MEM_OVERRIDE_RE.match(line):
+            continue
         if everywhere and re.match(r'\s*gpu_mem\s*=', line):
             if done:
                 continue
@@ -346,10 +358,37 @@ def memory_megabytes():
         pass
     return None
 
-def recommended_gpu_mem():
-    """256 MB on a Pi with 1 GB (a Pi 3), 512 MB with 2 GB or more (a Pi 4)."""
-    memory = memory_megabytes()
-    return 512 if memory and memory > 1536 else 256
+def board_memory_megabytes():
+    """All the memory on the board in MB, or None. From the revision code; on old boards
+    without one, Linux's memory plus the graphics memory, rounded up to a board size."""
+    memory = installed_memory_megabytes()
+    if memory:
+        return memory
+    linux = memory_megabytes()
+    if not linux:
+        return None
+    estimate = linux + (get_gpu_mem(read_config_text() or '') or 64)
+    memory = 256
+    while memory < estimate:
+        memory *= 2
+    return memory
+
+def gpu_mem_choices(board=None):
+    """The graphics memory choices safe on this board: the Raspberry Pi documentation says at
+    most 128 MB on a 256 MB board and 384 MB on a 512 MB board, or Linux may not start."""
+    board = board or board_memory_megabytes()
+    if board and board <= 256:
+        return GPU_MEM_CHOICES[:1]
+    if board and board <= 512:
+        return GPU_MEM_CHOICES[:2]
+    return GPU_MEM_CHOICES
+
+def recommended_gpu_mem(board=None):
+    """512 MB with 2 GB or more (a Pi 4), 256 MB with 1 GB (a Pi 3), else 128 MB."""
+    board = board or board_memory_megabytes()
+    if not board:
+        return 256
+    return 512 if board >= 2048 else 256 if board >= 1024 else 128
 
 def get_current_video_mode(config_text):
     """Return (mode key, description) for the video mode set in config.txt."""

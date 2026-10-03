@@ -155,6 +155,7 @@ def index():
     sound_status, sound_out = system.run_command(["aplay", "-l"])
     current_mode_key, current_mode = system.get_current_video_mode(system.read_config_text())
     free_space = system.get_free_space() if is_available else 0
+    board = system.board_memory_megabytes()
 
     return render_template('index.html',
                            playlist=system.get_playlist(),
@@ -169,9 +170,9 @@ def index():
                            current_mode=current_mode,
                            current_mode_key=current_mode_key,
                            video_modes=system.VIDEO_MODES,
-                           gpu_mem=system.get_gpu_mem(system.read_config_text()),
-                           gpu_mem_choices=system.GPU_MEM_CHOICES,
-                           gpu_mem_recommended=system.recommended_gpu_mem(),
+                           gpu_mem=system.get_gpu_mem(system.read_config_text(), board),
+                           gpu_mem_choices=system.gpu_mem_choices(board),
+                           gpu_mem_recommended=system.recommended_gpu_mem(board),
                            memory_mb=system.memory_megabytes(),
                            network_status=system.get_network_status(),
                            device_info=system.get_device_info(),
@@ -602,8 +603,10 @@ def set_video_mode():
 @app.route('/set_gpu_mem', methods=['POST'])
 def set_gpu_mem():
     value = request.form.get('gpu_mem', '')
-    if not value.isdecimal() or int(value) not in system.GPU_MEM_CHOICES:
-        flash("Please choose 128, 256 or 512 MB.", "error")
+    choices = system.gpu_mem_choices()
+    if not value.isdecimal() or int(value) not in choices:
+        # too much leaves Linux too little to start
+        flash(f"Please choose {' or '.join(str(c) for c in choices)} MB.", "error")
         return redirect(url_for('index'))
     try:
         config_text = system.read_config_text()
