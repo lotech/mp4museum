@@ -116,3 +116,86 @@ def test_sync_mode(tmp_path):
 
     r = run(tmp_path, files=['/media/usb0/sync.mp4', '/media/usb0/sync-player.txt'], installed=['omxplayer-sync'], max_plays=6)
     assert [event['run'] for event in r['log'] if 'run' in event] == [['omxplayer-sync', '-u', '-l', '/media/usb0/sync.mp4']]
+
+
+def stop_calls(result):
+    return [event for event in result['log'] if 'stop_call' in event]
+
+
+def test_vlc_stays_open_between_files_and_loop_passes(tmp_path):
+    # stopping closes VLC's video output (black frames), so files that end by themselves aren't stopped
+    r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/clip-loop.mp4'],
+            media={'clip-loop.mp4': 3}, max_plays=12)
+    assert plays(r)[3:4] == ['a.mp4'] and plays(r)[4:9] == ['clip-loop.mp4'] * 5
+    assert stop_calls(r) == []
+
+
+def test_vlc_stopped_when_skipped_and_when_idle(tmp_path):
+    r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/b.mp4'], media={'a.mp4': 100},
+            signals=[{'at': 30, 'signal': 'SIGUSR1'}], max_plays=6)
+    assert [e['stop_call'] for e in stop_calls(r)][:1] == ['/media/internal/a.mp4']
+    r = run(tmp_path, files=[], max_seconds=30)
+    assert stop_calls(r)     # no last frame left on screen while there's nothing to play
+
+
+OMX_SETTING = {'/boot/mp4m-player.txt': 'loop_player=omxplayer\n'}
+
+
+def omx_starts(result):
+    return [event for event in result['log'] if 'omxplayer' in event]
+
+
+def test_loop_with_vlc_unless_omxplayer_is_chosen(tmp_path):
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'],
+            media={'clip-loop.mp4': 3}, max_plays=6)
+    assert omx_starts(r) == [] and plays(r)[3:5] == ['clip-loop.mp4'] * 2
+
+
+def test_loop_with_omxplayer(tmp_path):
+    r = run(tmp_path, files=['/media/internal/00VJSurvivalKit_06-loop.mp4', '/media/internal/zz.mp4'],
+            installed=['omxplayer'], write=dict(OMX_SETTING, **{'/boot/alsa.txt': '1'}),
+            signals=[{'at': 40, 'signal': 'SIGUSR2'}, {'at': 45, 'signal': 'SIGUSR2'}, {'at': 60, 'signal': 'SIGUSR1'}],
+            max_plays=6)
+    # started once, until next was pressed (then again when the playlist comes round)
+    assert [start['at'] < 60 for start in omx_starts(r)][:2] == [True, False]
+    assert omx_starts(r)[0]['omxplayer'] == ['omxplayer', '--loop', '--no-osd', '-b', '-o', 'alsa:plughw:1,0',
+                                             '/media/internal/00VJSurvivalKit_06-loop.mp4']
+    # VLC lets go of the screen first
+    assert stop_calls(r)
+    # pause, resume and next go to omxplayer as its keys
+    assert [event['key'] for event in r['log'] if 'key' in event] == ['p', 'p', 'q']
+    states = [status['state'] for status in r['statuses']
+              if (status.get('file') or '').endswith('-loop.mp4') and status['since'] < 1060]
+    assert states == ['playing', 'paused', 'playing']
+    # then the playlist carries on in VLC
+    assert '-loop.mp4' not in ' '.join(plays(r)) and 60 <= first_play(r, 'zz.mp4')['at'] <= 62
+
+
+def test_omxplayer_restarted_if_it_stops_by_itself(tmp_path):
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/zz.mp4'], installed=['omxplayer'],
+            write=OMX_SETTING, omx_exits_after=30, signals=[{'at': 100, 'signal': 'SIGUSR1'}], max_plays=6)
+    assert len(omx_starts(r)) >= 3 and 100 <= first_play(r, 'zz.mp4')['at'] <= 102
+
+
+def test_omxplayer_that_ignores_quit_is_stopped(tmp_path):
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/zz.mp4'], installed=['omxplayer'],
+            write=OMX_SETTING, omx_ignores_q=True, signals=[{'at': 40, 'signal': 'SIGUSR1'}], max_plays=6)
+    assert [event['killpg'] for event in r['log'] if 'killpg' in event] == [2]       # SIGINT: clean shutdown
+    assert 'zz.mp4' in plays(r)
+
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/zz.mp4'], installed=['omxplayer'],
+            write=OMX_SETTING, omx_hangs=True, signals=[{'at': 40, 'signal': 'SIGUSR1'}], max_plays=6)
+    assert [event['killpg'] for event in r['log'] if 'killpg' in event] == [2, 15, 9]   # until it's gone
+    assert 'zz.mp4' in plays(r)
+
+
+def test_loop_falls_back_to_vlc_when_omxplayer_fails(tmp_path):
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4', '/media/internal/zz.mp4'], installed=['omxplayer'],
+            write=OMX_SETTING, omx_fails=True, media={'clip-loop.mp4': 4}, max_plays=8)
+    assert omx_starts(r) and plays(r)[3:6] == ['clip-loop.mp4'] * 3
+
+
+def test_loop_images_stay_in_vlc(tmp_path):
+    r = run(tmp_path, files=['/media/internal/still-loop.jpg'], installed=['omxplayer'],
+            write={'/boot/mp4m-player.txt': 'loop_player=omxplayer\nimage_duration=3\n'}, max_plays=6)
+    assert omx_starts(r) == [] and plays(r)[3:5] == ['still-loop.jpg'] * 2

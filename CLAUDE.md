@@ -37,9 +37,13 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
 ## Code layout (`v7-beta/`)
 
 - `boot/mp4museum.py`: the player. One VLC instance; plays `/media/*/*.*` in order; GPIO
-  pin 11 pause, pin 13 next; `loop.` files are restarted by the player (VLC's `input-repeat`
-  froze on the Pi). Talks to the web interface through `/tmp/mp4museum-status.json` (status
-  it writes), `SIGUSR1` (next), `SIGUSR2` (pause) and `/boot/mp4m-player.txt` (settings).
+  pin 11 pause, pin 13 next. VLC is not stopped when a file ends by itself (`stop()` closes
+  the video output: black frames), only on skip, failure, idle or before handing the screen to
+  omxplayer. `loop.` files are restarted by the player (VLC's `input-repeat` froze on the Pi),
+  or looped by `omxplayer --loop` with the setting `loop_player=omxplayer` (opt-in: omxplayer
+  is no longer developed and isn't on newer OS versions). Talks to the web interface through
+  `/tmp/mp4museum-status.json` (status it writes), `SIGUSR1` (next), `SIGUSR2` (pause) and
+  `/boot/mp4m-player.txt` (settings).
   Keep the author's logo screen ("please do not remove my logo screen") and his `(c)` header.
   Users can edit this file in the web interface, so the updater only replaces it if unedited.
 - `boot/mp4m-web/`: the web interface, on `/boot` so it can be updated with the overlay on.
@@ -71,6 +75,8 @@ original.
 ## Working conventions
 
 - Pull requests go to **`lotech/mp4museum` only**, never to the original repository.
+- Don't add files to `.github/workflows/`: GitHub Actions minutes are shared with other
+  projects. The test workflow is kept, disabled, in `ci/tests.yml`.
 - Run a code review before opening a PR. Codex also reviews PRs on GitHub; fix its findings
   (verify each one) and reply on the thread.
 - User-facing text (web interface, README, messages) is plain, short English.

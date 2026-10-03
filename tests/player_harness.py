@@ -15,10 +15,22 @@ scenario = json.load(open(sys.argv[1]))
 log = []
 clock = {'now': 1000.0}
 
+def fire_signals():
+    # scripted events: send signals at given times
+    for event in scenario.get('signals', []):
+        if not event.get('done') and clock['now'] - 1000 >= event['at']:
+            event['done'] = True
+            os.kill(os.getpid(), getattr(signal, event['signal']))
+
+active_omx = []
+
 def fake_sleep(seconds):
     clock['now'] += seconds
     if clock['now'] - 1000 > scenario.get('max_seconds', 600):
         raise SystemExit('time limit')
+    # while omxplayer plays, VLC isn't polled, so signals are sent from here
+    if active_omx:
+        fire_signals()
 time.sleep = fake_sleep
 time.time = lambda: clock['now']
 
@@ -37,7 +49,7 @@ class Player:
     def play(self):
         m = self.media
         log.append({'play': m.path, 'options': m.options, 'at': round(clock['now'] - 1000, 2)})
-        if len(log) > scenario.get('max_plays', 50):
+        if sum('play' in event for event in log) > scenario.get('max_plays', 50):
             raise SystemExit('play limit')
         self.started = clock['now']
         behaviour = scenario.get('media', {}).get(os.path.basename(m.path), 5)
@@ -50,15 +62,12 @@ class Player:
     def get_state(self):
         if self.state == _S.Playing and clock['now'] - self.started >= self.length and self.length:
             self.state = _S.Ended
-        # scripted events: send signals at given times
-        for event in scenario.get('signals', []):
-            if not event.get('done') and clock['now'] - 1000 >= event['at']:
-                event['done'] = True
-                os.kill(os.getpid(), getattr(signal, event['signal']))
+        fire_signals()
         return self.state
     def stop(self):
         if self.state in (_S.Playing, _S.Paused):
             log.append({'stop': self.media.path, 'at': round(clock['now'] - 1000, 2)})
+        log.append({'stop_call': self.media.path if self.media else None, 'state': int(self.state)})
         self.state = _S.Stopped
     def pause(self):
         self.state = _S.Paused if self.state == _S.Playing else _S.Playing
@@ -84,6 +93,56 @@ media_files = scenario.get('files', [])
 _glob.glob = lambda pattern: [f for f in media_files if _glob.fnmatch.fnmatch(f, pattern)]
 import fnmatch; _glob.fnmatch = fnmatch
 subprocess.run = lambda cmd, *a, **k: log.append({'run': cmd}) or (_ for _ in ()).throw(SystemExit('sync ran'))
+
+# --- fake omxplayer ---
+# scenario options: omx_fails (exits at once), omx_exits_after (seconds), omx_ignores_q,
+# omx_hangs (ignores q, SIGINT and SIGTERM)
+class FakeStdin:
+    def __init__(self, process): self.process = process
+    def write(self, data):
+        log.append({'key': data.decode(), 'at': round(clock['now'] - 1000, 2)})
+        if data == b'q' and not scenario.get('omx_ignores_q') and not scenario.get('omx_hangs'):
+            self.process.end(0)
+    def flush(self): pass
+class FakeOmxplayer:
+    def __init__(self, cmd, **kwargs):
+        log.append({'omxplayer': cmd, 'at': round(clock['now'] - 1000, 2)})
+        if len([e for e in log if 'omxplayer' in e]) > scenario.get('max_omx', 20):
+            raise SystemExit('omx limit')
+        self.pid = 90000 + len(log)
+        self.stdin = FakeStdin(self)
+        self.returncode = None
+        self.started = clock['now']
+        omx_processes[self.pid] = self
+        active_omx.append(self)
+        if scenario.get('omx_fails'):
+            self.end(1)
+    def end(self, code):
+        self.returncode = code
+        if self in active_omx:
+            active_omx.remove(self)
+    def poll(self):
+        after = scenario.get('omx_exits_after')
+        if self.returncode is None and after and clock['now'] - self.started >= after:
+            self.end(0)
+        return self.returncode
+    def wait(self, timeout=None):
+        if self.poll() is None:
+            fake_sleep(timeout or 0)
+            raise subprocess.TimeoutExpired('omxplayer', timeout)
+        return self.returncode
+omx_processes = {}
+def fake_killpg(pid, signum):
+    log.append({'killpg': int(signum)})
+    process = omx_processes[pid]
+    if signum == signal.SIGKILL or not scenario.get('omx_hangs'):
+        process.end(-int(signum))
+os.killpg = fake_killpg
+def fake_popen(cmd, **kwargs):
+    if cmd[0] == 'omxplayer':
+        return FakeOmxplayer(cmd, **kwargs)
+    raise SystemExit('unexpected Popen %r' % cmd)
+subprocess.Popen = fake_popen
 shutil.which = lambda name: '/usr/bin/' + name if name in scenario.get('installed', []) else None
 
 tmp = tempfile.mkdtemp()

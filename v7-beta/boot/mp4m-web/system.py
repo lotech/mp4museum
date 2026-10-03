@@ -389,11 +389,25 @@ def get_image_duration():
     value = read_player_settings().get('image_duration', '')
     return max(1, int(value)) if value.isdecimal() else DEFAULT_IMAGE_DURATION
 
-def save_image_duration(seconds):
+def save_player_setting(key, value):
+    """Set one key in mp4m-player.txt, keeping the others. The player reads it before every file."""
     settings = read_player_settings()
-    settings['image_duration'] = str(seconds)
+    settings[key] = str(value)
     with writable(BOOT_PATH):
         write_file(PLAYER_SETTINGS_FILE, ''.join(f"{key}={value}\n" for key, value in settings.items()))
+
+def save_image_duration(seconds):
+    save_player_setting('image_duration', seconds)
+
+LOOP_PLAYERS = ('vlc', 'omxplayer')
+
+def get_loop_player():
+    """What plays loop videos: 'vlc' (default) or 'omxplayer'."""
+    value = read_player_settings().get('loop_player', '')
+    return value if value in LOOP_PLAYERS else 'vlc'
+
+def omxplayer_installed():
+    return bool(shutil.which('omxplayer'))
 
 def _is_player_process(pid):
     """True if pid is the running player script (and not some other process that got its number)."""
