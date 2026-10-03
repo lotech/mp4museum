@@ -177,7 +177,10 @@ class _MountState:
     def __init__(self):
         self.lock = threading.Lock()
         self.users = 0
-        self.was_read_only = False
+        # Make the partition read-only again when the last writer is done
+        self.restore_read_only = False
+        # The last attempt to do that failed, so keep trying on later writes
+        self.restore_failed = False
 
 _mount_states = {}
 _mount_states_lock = threading.Lock()
@@ -193,8 +196,10 @@ def writable(mount_point):
         state = _mount_states.setdefault(mount_point, _MountState())
     with state.lock:
         if state.users == 0:
-            state.was_read_only = is_read_only(mount_point)
-            if state.was_read_only:
+            currently_read_only = is_read_only(mount_point)
+            # A partition left writable by a failed remount still has to go back to read-only
+            state.restore_read_only = currently_read_only or state.restore_failed
+            if currently_read_only:
                 status, output = run_command(['mount', '-o', 'remount,rw', mount_point])
                 if not status:
                     raise RuntimeError(f"Failed to make {mount_point} writable: {output}")
@@ -204,11 +209,20 @@ def writable(mount_point):
     finally:
         with state.lock:
             state.users -= 1
-            # Remounting read-only also writes everything to the SD card
-            if state.users == 0 and state.was_read_only:
-                status, output = run_command(['mount', '-o', 'remount,ro', mount_point])
-                if not status:
-                    print(f"Failed to make {mount_point} read-only again: {output}", flush=True)
+            if state.users == 0 and state.restore_read_only:
+                state.restore_failed = not make_read_only(mount_point)
+
+def make_read_only(mount_point, attempts=3):
+    """Remount a partition read-only, retrying briefly if it is busy."""
+    for attempt in range(attempts):
+        # Remounting read-only also writes everything to the SD card
+        status, output = run_command(['mount', '-o', 'remount,ro', mount_point])
+        if status:
+            return True
+        if attempt < attempts - 1:
+            time.sleep(0.5)
+    print(f"Failed to make {mount_point} read-only again: {output}", flush=True)
+    return False
 
 def write_file(path, content):
     """Replace a file in one step, so a power cut leaves either the old or the new version."""
@@ -364,6 +378,30 @@ def get_free_space():
         return max(0, shutil.disk_usage(MEDIA_PATH).free - UPLOAD_RESERVE)
     except OSError:
         return 0
+
+class NotEnoughSpace(Exception):
+    pass
+
+_upload_space_lock = threading.Lock()
+_reserved_upload_space = 0
+
+@contextmanager
+def upload_space(size):
+    """Reserve room for an upload while it runs.
+
+    Uploads can run at the same time, and each one must not count space that
+    another one is about to fill.
+    """
+    global _reserved_upload_space
+    with _upload_space_lock:
+        if size > get_free_space() - _reserved_upload_space:
+            raise NotEnoughSpace()
+        _reserved_upload_space += size
+    try:
+        yield
+    finally:
+        with _upload_space_lock:
+            _reserved_upload_space -= size
 
 def format_size(size):
     for unit in ('bytes', 'KB', 'MB', 'GB'):
@@ -1308,12 +1346,9 @@ def upload_file():
     if not media_available():
         flash(f"The media partition {MEDIA_PATH} is not mounted.", "error")
         return redirect(url_for('index'))
-    # Check before receiving the file, it is written straight to the media partition
-    if (request.content_length or 0) > get_free_space():
-        flash("Not enough free space for this file.", "error")
-        return redirect(url_for('index'))
     try:
-        with writable(MEDIA_PATH):
+        # Checked before receiving the file, it is written straight to the media partition
+        with upload_space(request.content_length or 0), writable(MEDIA_PATH):
             remove_stale_uploads()
             try:
                 file = request.files.get('file')
@@ -1328,6 +1363,8 @@ def upload_file():
             finally:
                 # Close the temp files before the partition goes back to read-only
                 discard_upload_temp_files()
+    except NotEnoughSpace:
+        flash("Not enough free space for this file.", "error")
     except Exception as e:
         flash(f"File upload failed: {e}", "error")
     return redirect(url_for('index'))

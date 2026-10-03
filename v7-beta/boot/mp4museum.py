@@ -73,5 +73,9 @@ GPIO.add_event_detect(13, GPIO.RISING, callback = buttonNext, bouncetime = 1234)
 
 # the loop
 while(1):
-    for file in sorted(glob.glob(r'/media/*/*.*')):
+    files = sorted(glob.glob(r'/media/*/*.*'))
+    # nothing to play yet (no USB stick, empty media partition): check again shortly
+    if not files:
+        time.sleep(2)
+    for file in files:
         vlc_play(file)
