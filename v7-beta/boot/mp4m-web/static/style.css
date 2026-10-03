@@ -338,7 +338,7 @@ a {
 .playback-card { grid-area: playback; }
 .playlist-card { grid-area: playlist; }
 
-.network-card {
+.wide-card {
   margin-top: 20px;
 }
 

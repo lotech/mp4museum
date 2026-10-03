@@ -351,46 +351,46 @@
           (this page checks by itself every few hours when it can). Updates the web interface, and the player script unless
           it has been edited here. Over SSH: <code>sudo mp4m-update</code></p>
       </section>
+
+      <section class="card">
+        <h3>{{ icon('key-round') }}Password</h3>
+        {% if using_default_password %}
+        <p class="current">The password is still the default (mp4museum).</p>
+        {% endif %}
+        <form method="post" action="{{ url_for('set_password') }}" class="password-form">
+          <label for="current_password">Current password</label>
+          <input type="password" name="current_password" id="current_password" required autocomplete="current-password">
+          <label for="new_password">New password</label>
+          <input type="password" name="new_password" id="new_password" required autocomplete="new-password">
+          <label for="confirm_password">New password again</label>
+          <input type="password" name="confirm_password" id="confirm_password" required autocomplete="new-password">
+          <div><button type="submit" class="button">Change password</button></div>
+        </form>
+        <p class="hint">Forgot it? Delete mp4m-password.txt from the SD card's boot partition to reset it to the default.</p>
+      </section>
     </div>
 
     <div class="stack">
-    <section class="card">
-      <h3>{{ icon('circuit-board') }}Device</h3>
-      <dl class="device-info">
-        {% for label, value in device_info %}
-        <dt>{{ label }}</dt><dd>{{ value }}</dd>
-        {% endfor %}
-      </dl>
-    </section>
+      <section class="card">
+        <h3>{{ icon('circuit-board') }}Device</h3>
+        <dl class="device-info">
+          {% for label, value in device_info %}
+          <dt>{{ label }}</dt><dd>{{ value }}</dd>
+          {% endfor %}
+        </dl>
+      </section>
 
-    <section class="card">
-      <h3>{{ icon('key-round') }}Password</h3>
-      {% if using_default_password %}
-      <p class="current">The password is still the default (mp4museum).</p>
-      {% endif %}
-      <form method="post" action="{{ url_for('set_password') }}" class="password-form">
-        <label for="current_password">Current password</label>
-        <input type="password" name="current_password" id="current_password" required autocomplete="current-password">
-        <label for="new_password">New password</label>
-        <input type="password" name="new_password" id="new_password" required autocomplete="new-password">
-        <label for="confirm_password">New password again</label>
-        <input type="password" name="confirm_password" id="confirm_password" required autocomplete="new-password">
-        <div><button type="submit" class="button">Change password</button></div>
-      </form>
-      <p class="hint">Forgot it? Delete mp4m-password.txt from the SD card's boot partition to reset it to the default.</p>
-    </section>
+      <section class="card">
+        <h3>{{ icon('network') }}Network</h3>
+        <pre>{{ network_status }}</pre>
+      </section>
     </div>
-
   </div>
-  <section class="card network-card">
+
+  <section class="card wide-card">
     <h3>{{ icon('terminal') }}Player log</h3>
     <pre class="log">{{ player_log or 'Nothing yet.' }}</pre>
     <p class="hint">The end of what the player printed (/tmp/mp4museum.log): errors, skipped files, and when it was started again after stopping.</p>
-  </section>
-
-  <section class="card network-card">
-    <h3>{{ icon('network') }}Network</h3>
-    <pre>{{ network_status }}</pre>
   </section>
 </div>
 {% endblock %}

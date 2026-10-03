@@ -540,14 +540,19 @@ def get_device_info():
     gpu = _vcgencmd('get_mem', 'gpu')
     if gpu and gpu.endswith('M') and gpu[:-1].isdigit():
         info.append(("Graphics memory", f"{gpu[:-1]} MB"))
-    temperature = _vcgencmd('measure_temp')
-    if temperature:
-        info.append(("Temperature", temperature.replace("'C", " °C")))
     throttled = _vcgencmd('get_throttled')
     try:
         throttled = int(throttled, 16) if throttled else None
     except ValueError:
         throttled = None
+    temperature = _vcgencmd('measure_temp')
+    if temperature:
+        temperature = temperature.replace("'C", " °C")
+        # bit 0: power too low now; 2: slowed down now; 3: temperature limit reached now. Slowed
+        # down without low power: too hot
+        if throttled is not None and throttled & 0xc and not throttled & 0x1:
+            temperature += " (too hot: the Pi is slowing itself down)"
+        info.append(("Temperature", temperature))
     if throttled is not None:
         if throttled & 0x1:
             info.append(("Power", "Too low now: use a stronger power supply"))

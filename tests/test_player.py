@@ -41,8 +41,11 @@ def test_start_up_and_playlist_order(tmp_path):
     assert p[3:6] == ['a.mp4', 'c.jpg', 'b.mp4'] and p[6:9] == ['a.mp4', 'c.jpg', 'b.mp4']
     instances = [event['instance'] for event in r['log'] if 'instance' in event]
     assert len(instances) == 1 and instances[0].endswith('hw:0')
-    assert first_play(r, 'mp4m-v7beta.jpg')['options'] == [':image-duration=10']
-    assert ':image-duration=10' in first_play(r, 'c.jpg')['options']
+    # the logo and images: the still converted once (converting it 10 times a second kept a
+    # Pi 3's CPU busy)
+    image = [':image-chroma=I420']
+    assert first_play(r, 'mp4m-v7beta.jpg')['options'] == [':image-duration=10'] + image
+    assert first_play(r, 'c.jpg')['options'] == [':image-duration=10'] + image
 
 
 def test_boot_video_original_or_custom(tmp_path):
@@ -56,12 +59,12 @@ def test_settings(tmp_path):
     r = run(tmp_path, files=['/media/internal/still.png'],
             write={'/boot/mp4m-player.txt': 'image_duration=25\n', '/boot/alsa.txt': '12\n'}, max_plays=4)
     assert [event['instance'] for event in r['log'] if 'instance' in event][0].endswith('hw:12')
-    assert first_play(r, 'still.png')['options'] == [':image-duration=25']
+    assert first_play(r, 'still.png')['options'][0] == ':image-duration=25'
 
     r = run(tmp_path, files=['/media/internal/a.png'],
             write={'/boot/mp4m-player.txt': 'image_duration=²\n', '/boot/alsa.txt': 'auto'}, max_plays=4)
     assert [event['instance'] for event in r['log'] if 'instance' in event][0].endswith('hw:0')
-    assert first_play(r, 'a.png')['options'] == [':image-duration=10']
+    assert first_play(r, 'a.png')['options'][0] == ':image-duration=10'
 
 
 def test_stuck_file_is_skipped(tmp_path):
