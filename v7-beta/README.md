@@ -76,8 +76,10 @@ It stops when you close the SSH session; reboot to go back to the installed vers
 
 ## Installing permanently
 
-1. Run `sudo raspi-config`, open **Overlay File System** (under Performance Options or
-   Advanced Options) and turn it off. Reboot.
+1. Run `sudo raspi-config` and open **Overlay File System** (under Performance Options or
+   Advanced Options). Answer **No** to "Would you like the overlay file system to be enabled?".
+   It then says the boot partition is read-only and can't be changed while the overlay is on;
+   that's fine, leave it read-only (`install.sh` makes it writable when it needs to). Reboot.
 2. Download the code as above, then run the install script:
    ```bash
    cd ~/mp4m-src/v7-beta
@@ -86,8 +88,9 @@ It stops when you close the SSH session; reboot to go back to the installed vers
    It installs the web interface to `/boot/mp4m-web` and the player to `/boot/mp4museum.py`
    (an edited player is kept; the new one is saved as `mp4museum.py.new`), the boot video,
    logo and `.bashrc` to `/home/pi`, the `mp4m-webservice` service and the `mp4m-update` command.
-3. Run `sudo raspi-config` again, turn the overlay file system back on, and answer **yes** to
-   write-protecting the boot partition. Reboot.
+3. Run `sudo raspi-config` again, open **Overlay File System** and answer **Yes**. If it asks
+   "Would you like the boot partition to be write-protected?", answer **Yes**; if it says the boot
+   partition is already read-only, nothing more is needed. Reboot.
 
 Check the web interface with `systemctl status mp4m-webservice`, and its log with
 `journalctl -u mp4m-webservice`.

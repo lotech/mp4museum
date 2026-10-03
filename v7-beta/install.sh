@@ -19,7 +19,8 @@ fi
 
 if grep -q 'boot=overlay' /proc/cmdline; then
     echo "The overlay file system is on, so anything installed now would be lost at the next reboot."
-    echo "Turn it off first: sudo raspi-config -> Overlay File System -> No, then reboot and run this again."
+    echo "Turn it off first: sudo raspi-config -> Overlay File System -> No (leave the boot partition"
+    echo "read-only if it says so), then reboot and run this again."
     exit 1
 fi
 
@@ -51,5 +52,6 @@ systemctl enable mp4m-webservice.service
 echo
 echo "Done. Later updates: sudo mp4m-update, or System -> Software Update in the web interface."
 echo "Now turn the overlay file system back on:"
-echo "  sudo raspi-config -> Overlay File System -> Yes, and write-protect the boot partition"
+echo "  sudo raspi-config -> Overlay File System -> Yes, and Yes to write-protecting the boot"
+echo "  partition if it asks (if it says the boot partition is already read-only, that's fine)"
 echo "then reboot."
