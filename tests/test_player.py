@@ -299,17 +299,19 @@ def test_ctrl_c_stops_the_player_with_exit_code_0(tmp_path):
     assert r['log'][-1] == {'exit': '0'} and killpgs(r)[:1] == [(2, 40)]
 
 
-def bashrc_autostart(tmp_path, exit_codes, output=0):
+def bashrc_autostart(tmp_path, exit_codes, output=0, last_line=None):
     """Run the autostart part of .bashrc with a fake python3 that exits with these codes in turn
     (printing output bytes each time). Returns how often it ran, the log and the waits between."""
+    tmp_path.mkdir(exist_ok=True)
     bashrc = (Path(__file__).parents[1] / 'v7-beta' / 'home' / 'pi' / '.bashrc').read_text()
     start = bashrc.index('# mp4museum autostart')
     block = bashrc[start:bashrc.index('setterm -cursor on', start)].replace('/tmp/mp4museum.log', str(tmp_path / 'log'))
     bin_dir = tmp_path / 'bin'
     bin_dir.mkdir(exist_ok=True)
     (tmp_path / 'codes').write_text(' '.join(map(str, exit_codes)))
-    fakes = {'python3': 'set -- $(cat "%s"); echo "run $*" >> "%s"; echo "${@:2}" > "%s"; head -c %d /dev/zero | tr "\\0" x; exit $1'
-                        % (tmp_path / 'codes', tmp_path / 'runs', tmp_path / 'codes', output),
+    fakes = {'python3': 'set -- $(cat "%s"); echo "run $*" >> "%s"; echo "${@:2}" > "%s"; head -c %d /dev/zero | tr "\\0" x; %s exit $1'
+                        % (tmp_path / 'codes', tmp_path / 'runs', tmp_path / 'codes', output,
+                           'echo; echo "%s";' % last_line if last_line else ''),
              'setterm': 'exit 0', 'clear': 'exit 0', 'sleep': 'echo $1 >> "%s"' % (tmp_path / 'sleeps')}
     for name, body in fakes.items():
         (bin_dir / name).write_text('#!/bin/bash\n' + body + '\n')
@@ -537,3 +539,12 @@ def test_boot_video_forgiven_only_after_both_plays(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4'], write=custom, crashed={'file': '/boot/mp4museum-boot.mp4', 'times': 1},
             max_plays=4)
     assert r['skipped'] == []
+
+
+def test_bashrc_ctrl_c_with_a_player_script_from_before(tmp_path):
+    # an edited player kept by install.sh, without the quit handlers: Python 3.7 exits with 1 and a
+    # KeyboardInterrupt traceback on Ctrl-C (3.8 and later with 130). Either way it's a stop on purpose.
+    runs, log, sleeps = bashrc_autostart(tmp_path, [1, 0], output=0, last_line='KeyboardInterrupt')
+    assert runs == 1 and 'starting it again' not in log
+    runs, log, sleeps = bashrc_autostart(tmp_path / 'b', [130, 0])
+    assert runs == 1
