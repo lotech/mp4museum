@@ -1,11 +1,15 @@
+{# MP4MUSEUM web interface, based on the v7 beta web service by Julius Schmiedel (http://mp4museum.org).
+   Modified 2026 in https://github.com/lotech/mp4museum (see git history). Licensed under the GNU GPL v3, see LICENSE. -#}
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}MP4Museum - Reboot{% endblock %}
+{% block container_class %}narrow-page{% endblock %}
 
 {% block content %}
-<h2>Reboot Required</h2>
+<h2>Reboot needed</h2>
 <p>Reboot the player for the change to take effect.</p>
-<p>
-  <button class="button" onclick="reboot(false)">Reboot Now</button>
-  <a href="{{ url_for('index') }}" class="button button-link">Later</a>
-</p>
+<div class="button-row">
+  <button class="button primary" onclick="reboot(false)">{{ icon('power') }}<span>Reboot Now</span></button>
+  <a href="{{ url_for('index') }}" class="button ghost">Later</a>
+</div>
 {% endblock %}

@@ -37,13 +37,23 @@ a network is optional.
 - [x] Sound cards 10 and above (player reads all of `alsa.txt`, web interface allows 0–99)
 - [x] Update check recognises an install from `install.sh` that already matches the latest version
 - [x] Loop files froze on the last frame (VLC's input-repeat); the player now restarts them itself
-- [x] Black frames between loop passes and between files: VLC is no longer stopped when a file ends, so the next one starts in the same window
-- [x] Option to loop videos with `omxplayer --loop` instead (web interface, Media)
-- [ ] Test on the Pi: does VLC hold the last frame at the loop and between files? Does a video's last frame stay up during an audio-only file after it (if so, stop VLC before audio files)? Compare with omxplayer (seamless?, pause/next, audio device, back to VLC afterwards)
-- [ ] If neither loops well enough: try a VLC playlist with the file twice, or a gapless player such as mpv (not on the image)
+- [x] VLC is no longer stopped when a file ends (stopping closes its window); on the Pi it still showed a black frame at each loop, hence omxplayer for loops
+- [x] Loop videos with `omxplayer --loop` (tested on the Pi: holds the last frame with a short pause; VLC still showed a black frame at each loop). Default when omxplayer is installed; VLC can be chosen in the web interface (Media)
+- [ ] Test on the Pi: is there still a black frame between ordinary files in VLC? Does a video's last frame stay up during an audio-only file after it (if so, stop VLC before audio files)? omxplayer: audio device, pause from the GPIO button
+- [ ] Seamless loops: omxplayer pauses briefly at each loop, and isn't on newer OS versions. Try mpv (`--loop-file=inf`; not on the image, would need installing), or VLC seeking back to the start just before the end (may freeze like `input-repeat`, and cut the last fraction of a second)
 - [ ] Test on the Pi 3B: boot video shows, images use the set duration, loop files, pause/next from the web and GPIO, sync mode (needs omxplayer-sync on the image?)
 
-## 4. Installation
+## 4. Web interface design
+
+- [x] Messages float over the page instead of pushing it down; Reboot and Log out in the header
+- [x] Player card: what is playing, how far it has got, Pause/Resume and Next
+- [x] Playlist beside the player: every file the player plays (media partition and USB sticks), start any file from it, upload with a progress bar, download, delete
+- [x] Update bar when a new version is available (checked by the page at most every few hours, quietly when offline)
+- [x] Sound, Video and System tabs in side-by-side cards; sound cards listed with a Use button; Lucide icons
+- [ ] Test on the Pi: choosing a file (VLC and omxplayer loops), the position for videos and images, uploading several files, the update bar
+- [ ] Test on the Pi: `omxplayer -i` reports the codec as expected (loops of H.264 files go to omxplayer, HEVC ones to VLC)
+
+## 5. Installation
 
 - [ ] Install script to set up v7 on a fresh Raspberry Pi OS, instead of depending on the image (`install.sh` only covers the v7 image so far)
 
@@ -61,6 +71,6 @@ a network is optional.
 - [ ] Show the network name on screen (e.g. on the logo screen), since every player now has its own name
 - [ ] Announce the web interface over Bonjour/mDNS (`_http._tcp`) so players show up in network browsers
 - [ ] Offline setup: create a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (there is no Wi-Fi setting yet)
-- [ ] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
+- [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
 - [ ] "Restore default config.txt" button (the old "Auto" video preset used to do this)
 - [x] "Save and Reboot" asks for confirmation twice

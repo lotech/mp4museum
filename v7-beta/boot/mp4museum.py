@@ -8,10 +8,11 @@
 # everything; image duration setting; now playing, pause and next for the web
 # interface; sync mode back from v6; sound cards 10 and above; skips files
 # that don't start playing; loop files restarted by the player; custom boot
-# video from /boot; VLC kept open between files (no black frames); optional
-# omxplayer for loop videos
+# video from /boot; VLC kept open between files; omxplayer for loop videos
+# when it is installed; position for the web interface, which can also choose
+# the file to play
 
-import time, vlc, os, glob, json, signal, shutil, sys
+import time, vlc, os, glob, json, signal, shutil, sys, re
 import RPi.GPIO as GPIO
 import subprocess
 
@@ -21,10 +22,12 @@ BOOT_VIDEO = '/home/pi/mp4museum-boot.mp4'
 CUSTOM_BOOT_VIDEO = '/boot/mp4museum-boot.mp4'
 LOGO = '/home/pi/mp4m-v7beta.jpg'
 ALSA_FILE = '/boot/alsa.txt'
-# image_duration=<seconds> and loop_player=vlc|omxplayer, set in the web interface
+# image_duration=<seconds> and loop_player=omxplayer|vlc, set in the web interface
 SETTINGS_FILE = '/boot/mp4m-player.txt'
 # what is playing, for the web interface
 STATUS_FILE = '/tmp/mp4museum-status.json'
+# a file chosen in the web interface: {"id": ..., "file": ...}, followed by SIGUSR1
+PLAY_REQUEST_FILE = '/tmp/mp4museum-play.json'
 DEFAULT_IMAGE_DURATION = 10
 # a file that hasn't started playing after this long is skipped (broken file, stalled USB stick)
 OPEN_TIMEOUT = 20
@@ -38,7 +41,7 @@ if os.path.isfile(ALSA_FILE):
         audiodevice = card
 
 def read_settings():
-    settings = {'image_duration': DEFAULT_IMAGE_DURATION, 'loop_player': 'vlc'}
+    settings = {'image_duration': DEFAULT_IMAGE_DURATION, 'loop_player': 'omxplayer'}
     try:
         with open(SETTINGS_FILE, 'r') as f:
             for line in f:
@@ -51,10 +54,14 @@ def read_settings():
         pass
     return settings
 
-def write_status(state, source=None):
+def write_status(state, source=None, position=None, length=None):
+    # position and length in seconds, when known; play_file: this player reads PLAY_REQUEST_FILE
     try:
         with open(STATUS_FILE + '.tmp', 'w') as f:
-            json.dump({'state': state, 'file': source, 'since': time.time(), 'pid': os.getpid()}, f)
+            # mono: the clock the web interface uses for how long since, which doesn't jump when
+            # the Pi sets its time from the network (it has no clock of its own)
+            json.dump({'state': state, 'file': source, 'since': time.time(), 'mono': time.monotonic(),
+                       'pid': os.getpid(), 'position': position, 'length': length, 'play_file': True}, f)
         os.replace(STATUS_FILE + '.tmp', STATUS_FILE)
     except OSError:
         pass
@@ -95,10 +102,35 @@ omx_paused = False
 omx_started = 0
 omx_last_key = 0
 
-# stop the current file; also ends a loop file (omx_loop stops omxplayer)
+def read_play_request():
+    try:
+        with open(PLAY_REQUEST_FILE, 'r') as f:
+            request = json.load(f)
+        return request['id'], request['file']
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, None
+
+# a request left from before the player started is not played
+handled_play_request = read_play_request()[0]
+
+def play_request():
+    """The file chosen in the web interface since the last time, or None."""
+    global handled_play_request
+    request_id, requested = read_play_request()
+    if request_id is None or request_id == handled_play_request:
+        return None
+    handled_play_request = request_id
+    return requested
+
+# stop the current file; also ends a loop file (omx_loop stops omxplayer). Read here, with
+# the signal the web interface sends after it, so the file chosen there plays next
 skip_requested = False
+requested_file = None
 def next_file():
-    global skip_requested
+    global skip_requested, requested_file
+    requested = play_request()
+    if requested:
+        requested_file = requested
     skip_requested = True
     if not omx:
         player.stop()
@@ -128,20 +160,25 @@ def vlc_play(source, options=()):
     player.play()
     started = time.time()
     shown_state = 'playing'
-    write_status(shown_state, source)
+    shown_length = 0
+    write_status(shown_state, source, 0)
     time.sleep(1)
     current_state = player.get_state()
     has_played = False
     while current_state in (vlc.State.Opening, vlc.State.Buffering, vlc.State.Playing, vlc.State.Paused):
+        if skip_requested:
+            # next was pressed while this file was being started
+            break
         if current_state in (vlc.State.Playing, vlc.State.Paused):
             has_played = True
         elif not has_played and time.time() - started > OPEN_TIMEOUT:
             print("skipping %s: it didn't start playing" % source, flush=True)
             break
         state = 'paused' if current_state == vlc.State.Paused else 'playing'
-        if state != shown_state:
-            shown_state = state
-            write_status(state, source)
+        length = player.get_length()
+        if state != shown_state or (length > 0 and length != shown_length):
+            shown_state, shown_length = state, length
+            write_status(state, source, max(0, player.get_time()) / 1000, length / 1000 if length > 0 else None)
         time.sleep(.01)
         current_state = player.get_state()
     # a very short file can be over before the first check
@@ -157,10 +194,21 @@ def vlc_play(source, options=()):
         return 'skipped'
     return 'ended' if has_played else 'failed'
 
-# loop video files with omxplayer (setting loop_player=omxplayer): it loops inside the
-# player. omxplayer is no longer developed (it doesn't work on newer Raspberry Pi OS), but
-# it is on the v7 image; VLC is used if it isn't installed or can't play the file
+# loop video files with omxplayer (unless the setting is loop_player=vlc): it loops inside
+# the player and holds the last frame, where VLC shows a black frame each time it starts the
+# file again on the Pi. omxplayer is no longer developed (it doesn't work on newer Raspberry
+# Pi OS), but it is on the v7 image; VLC is used if it isn't installed or can't play the file
 OMX_LOOP_TYPES = ('.mp4', '.m4v', '.mov', '.mkv', '.avi', '.ts', '.h264')
+
+def omx_can_play(source):
+    """True if the video is H.264 or MPEG-4, which omxplayer decodes on every Pi. With other
+    codecs (HEVC, or MPEG-2 without a licence key) it can keep running with a black picture."""
+    try:
+        info = subprocess.run(['omxplayer', '-i', source], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              stdin=subprocess.DEVNULL, timeout=15, universal_newlines=True, errors='replace').stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return re.search(r'Video: (h264|mpeg4)\b', info) is not None
 
 def omx_key(process, key):
     """Send omxplayer one of its keyboard controls (p pauses). True if it was sent.
@@ -262,6 +310,7 @@ vlc_play(boot_video)
 vlc_play(boot_video)
 
 # please do not remove my logo screen
+skip_requested = False
 vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,))
 
 # add event listener which reacts to GPIO signal
@@ -287,16 +336,29 @@ try:
             player.stop()
             write_status('idle')
             time.sleep(2)
-        for file in files:
+        index = 0
+        while index < len(files):
+            # a file chosen in the web interface plays next, then the files after it; a next press
+            # from here on skips this file. (No signal in between, or it would be lost.)
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
+            requested, requested_file = requested_file, None
+            skip_requested = False
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
+            if requested and requested not in files:
+                files = sorted(glob.glob(MEDIA_FILES))
+            if requested in files:
+                index = files.index(requested)
+            if index >= len(files):
+                break
+            file = files[index]
+            index += 1
             # read for every file, so a new image duration applies straight away
             settings = read_settings()
             options = [':image-duration=%d' % settings['image_duration']]
-            # a next press from here on skips this file
-            skip_requested = False
             if "loop." in file:
                 # play it again and again until next is pressed
                 if (settings['loop_player'] == 'omxplayer' and file.lower().endswith(OMX_LOOP_TYPES)
-                        and shutil.which("omxplayer")):
+                        and shutil.which("omxplayer") and omx_can_play(file)):
                     if omx_loop(file) != 'failed':
                         continue
                     print("falling back to VLC for %s" % file, flush=True)

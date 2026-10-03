@@ -5,16 +5,18 @@
 #
 # modified 2026 in https://github.com/lotech/mp4museum (see git history):
 # split into modules and templates, login, per-player network name, read-only
-# partitions restored after writes, video presets that keep config.txt
+# partitions restored after writes, video presets that keep config.txt, player
+# controls and playlist, background update check
 import os
 import re
 import signal
 import socket
 import time
 import tempfile
+import threading
 from datetime import timedelta
 
-from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session
+from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, g
 
 import system
 import updater
@@ -47,6 +49,7 @@ class MediaRequest(Request):
 
 app = Flask(__name__)
 app.request_class = MediaRequest
+app.jinja_env.filters['size'] = system.format_size
 # The version this process was started with; an update replaces the files but not the running code
 RUNNING_VERSION = updater.installed_version()
 app.secret_key = system.session_secret()
@@ -146,27 +149,21 @@ def set_password():
 # ----- Home page ----- #
 @app.route('/')
 def index():
-    files = []
     is_available = system.media_available()
-    try:
-        # Get all files and filter out hidden files and directories
-        files = sorted(f for f in os.listdir(system.MEDIA_PATH)
-                       if not f.startswith('.') and os.path.isfile(os.path.join(system.MEDIA_PATH, f)))
-    except Exception as e:
-        flash(f'Error reading directory: {str(e)}', 'error')
-
     # Get sound devices from aplay -l
     sound_status, sound_out = system.run_command(["aplay", "-l"])
     current_mode_key, current_mode = system.get_current_video_mode(system.read_config_text())
     free_space = system.get_free_space() if is_available else 0
 
     return render_template('index.html',
-                           files=files,
+                           playlist=system.get_playlist(),
+                           player=player_view(system.get_player_status()),
                            media_path=system.MEDIA_PATH,
                            is_available=is_available,
                            free_space=free_space,
                            free_space_text=system.format_size(free_space),
                            sound_devices_text=sound_out if sound_status else '',
+                           sound_cards=system.parse_sound_cards(sound_out) if sound_status else [],
                            current_mode=current_mode,
                            current_mode_key=current_mode_key,
                            video_modes=system.VIDEO_MODES,
@@ -180,7 +177,6 @@ def index():
                            installed=RUNNING_VERSION,
                            update_config=updater.read_config(),
                            update_available=session.get('update'),
-                           now_playing=describe_player_status(system.get_player_status()),
                            image_duration=system.get_image_duration(),
                            loop_player=system.get_loop_player(),
                            omxplayer_installed=system.omxplayer_installed())
@@ -205,11 +201,44 @@ def describe_player_status(status):
         return f"Sync mode: playing {name} with omxplayer-sync."
     return f"{'Paused' if state == 'paused' else 'Playing'} {name}{duration}"
 
+def player_view(status):
+    """What the web interface shows about the player. position is now, in seconds, so the
+    browser doesn't depend on the Pi's clock (which may be wrong without a network)."""
+    view = {'running': bool(status), 'state': None, 'text': describe_player_status(status), 'file': None,
+            'name': None, 'folder': None, 'kind': None, 'loop': False, 'position': None, 'length': None,
+            'play_file': False}
+    if not status:
+        return view
+    path = status.get('file') or None
+    view.update(state=status.get('state'), file=path, play_file=status.get('play_file') is True,
+                name=os.path.basename(path) if path else None,
+                folder=os.path.basename(os.path.dirname(path)) if path else None,
+                kind=system.media_kind(path) if path else None, loop='loop.' in (path or ''))
+    position, length, since = status.get('position'), status.get('length'), status.get('since')
+    # how long since the status was written; the player also writes the monotonic clock, which
+    # doesn't jump when the Pi sets its time from the network after starting
+    mono = status.get('mono')
+    if isinstance(mono, (int, float)):
+        passed = max(0, time.monotonic() - mono)
+    elif isinstance(since, (int, float)):
+        passed = max(0, time.time() - since)
+    else:
+        passed = None
+    if isinstance(position, (int, float)) and passed is not None:
+        if view['state'] == 'playing':
+            position += passed
+        if isinstance(length, (int, float)) and length > 0:
+            view['length'] = length
+            position = min(position, length)
+        view['position'] = round(position, 1)
+    elif passed is not None and view['state'] in ('playing', 'paused', 'sync'):
+        # an older player script, or omxplayer: how long it has been in this state
+        view['elapsed'] = round(passed)
+    return view
+
 @app.route('/player/status')
 def player_status():
-    status = system.get_player_status()
-    return {'running': bool(status), 'state': status.get('state') if status else None,
-            'text': describe_player_status(status)}
+    return player_view(system.get_player_status())
 
 def control_player(signum, done):
     status = system.get_player_status()
@@ -219,7 +248,7 @@ def control_player(signum, done):
     }.get(status.get('state') if status else None)
     if unavailable:
         if is_fetch():
-            return player_status()
+            return dict(player_status(), error=unavailable), 409
         flash(unavailable, "error")
         return redirect(url_for('index'))
     if system.signal_player(signum):
@@ -227,7 +256,9 @@ def control_player(signum, done):
         time.sleep(0.5)
         if not is_fetch():
             flash(done, "success")
-    elif not is_fetch():
+    elif is_fetch():
+        return dict(player_status(), error="The player is not running."), 409
+    else:
         flash("The player is not running.", "error")
     if is_fetch():
         return player_status()
@@ -240,6 +271,39 @@ def player_next():
 @app.route('/player/pause', methods=['POST'])
 def player_pause():
     return control_player(signal.SIGUSR2, "Paused or resumed playback.")
+
+@app.route('/player/play', methods=['POST'])
+def player_play():
+    path = request.form.get('file', '')
+    status = system.get_player_status()
+    entry = next((e for e in system.get_playlist() if e['path'] == path and e['plays']), None)
+    if not entry:
+        error = "That file isn't in the playlist."
+    elif not status:
+        error = "The player is not running."
+    elif status.get('state') == 'sync':
+        error = "Files can't be chosen in sync mode."
+    elif status.get('play_file') is not True:
+        error = "This player script can't choose a file (it is from an older version). Use Next instead."
+    else:
+        error = None
+    if not error:
+        try:
+            if system.request_play(path):
+                time.sleep(0.5)
+            else:
+                error = "The player is not running."
+        except OSError as e:
+            error = f"Couldn't ask the player to play it: {e}"
+    if error:
+        if is_fetch():
+            return dict(player_view(system.get_player_status()), error=error), 409
+        flash(error, "error")
+    elif is_fetch():
+        return player_view(system.get_player_status())
+    else:
+        flash(f"Playing {entry['name']}.", "success")
+    return redirect(url_for('index'))
 
 @app.route('/set_image_duration', methods=['POST'])
 def set_image_duration():
@@ -269,15 +333,31 @@ def set_loop_player():
 
 
 # ----- Media files ----- #
+def upload_message(message, category):
+    """For the page's JavaScript, which shows the messages itself (kept out of the session cookie,
+    which would grow with every file); a plain form gets them on the page as usual."""
+    if is_fetch():
+        g.setdefault('upload_messages', []).append([category, message])
+    else:
+        flash(message, category)
+
+def upload_result():
+    if is_fetch():
+        messages = g.get('upload_messages', [])
+        errors = [message for category, message in messages if category == 'error']
+        return ({'ok': not errors, 'error': errors[-1] if errors else None, 'messages': messages},
+                400 if errors else 200)
+    return redirect(url_for('index'))
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if not system.media_available():
-        flash(f"The media partition {system.MEDIA_PATH} is not mounted.", "error")
-        return redirect(url_for('index'))
+        upload_message(f"The media partition {system.MEDIA_PATH} is not mounted.", "error")
+        return upload_result()
     # Browsers always send the size; without it the space check can't work
     if not request.content_length:
-        flash("Upload refused: the browser didn't say how big the file is.", "error")
-        return redirect(url_for('index'))
+        upload_message("Upload refused: the browser didn't say how big the file is.", "error")
+        return upload_result()
     try:
         with system.writable(system.MEDIA_PATH):
             # Before the space check, so leftovers from a power cut can't block new uploads
@@ -287,21 +367,21 @@ def upload_file():
                 try:
                     file = request.files.get('file')
                     if not file or not file.filename:
-                        flash("No file selected.", "error")
+                        upload_message("No file selected.", "error")
                     elif not system.is_valid_filename(file.filename):
-                        flash("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
+                        upload_message("Invalid filename. Names can't start with a dot or contain / \\ : * ? \" < > |", "error")
                     else:
                         file.stream.flush()
                         os.replace(file.stream.name, os.path.join(system.MEDIA_PATH, file.filename))
-                        flash(f"File '{file.filename}' uploaded successfully.", "success")
+                        upload_message(f"File '{file.filename}' uploaded successfully.", "success")
                 finally:
                     # Close the temp files before the partition goes back to read-only
                     discard_upload_temp_files()
     except system.NotEnoughSpace:
-        flash("Not enough free space for this file.", "error")
+        upload_message("Not enough free space for this file.", "error")
     except Exception as e:
-        flash(f"File upload failed: {e}", "error")
-    return redirect(url_for('index'))
+        upload_message(f"File upload failed: {e}", "error")
+    return upload_result()
 
 @app.route('/download/<filename>')
 def download_file(filename):
@@ -449,14 +529,71 @@ def set_hostname():
 
 
 # ----- Software update ----- #
+# The page checks for updates by itself when it is opened, at most this often (seconds),
+# and quietly: a player without internet just doesn't show one
+AUTO_CHECK_INTERVAL = 6 * 3600
+AUTO_CHECK_RETRY = 3600
+_auto_check = {'time': None, 'ok': False, 'latest': None}
+# one check at a time: pages opened together wait for its answer instead of all asking GitHub
+_auto_check_lock = threading.Lock()
+# longer than a check takes (updater.TIMEOUT for each request to GitHub)
+AUTO_CHECK_WAIT = 90
+
 @app.route('/check_update', methods=['POST'])
 def check_update():
+    if request.form.get('auto') != '1':
+        return check_for_update(auto=False)
+    if not _auto_check_lock.acquire(timeout=AUTO_CHECK_WAIT):
+        # still checking: the page shows nothing now, and asks again next time it is opened
+        return {'update': None}
+    try:
+        if _auto_check['time'] is not None:
+            age = time.monotonic() - _auto_check['time']
+            if age < (AUTO_CHECK_INTERVAL if _auto_check['ok'] else AUTO_CHECK_RETRY):
+                return update_answer(_auto_check['latest'])
+        return check_for_update(auto=True)
+    finally:
+        _auto_check_lock.release()
+
+def check_for_update(auto):
     config = updater.read_config()
     try:
         latest = updater.latest_commit(config['repo'], config['branch'])
     except updater.UpdateError as e:
+        if auto:
+            _auto_check.update(time=time.monotonic(), ok=False, latest=None)
+            return update_answer(None)
+        if is_fetch():
+            return {'update': None, 'error': str(e)}, 502
         flash(str(e), "error")
         return redirect(url_for('index'))
+    found = find_update(config, latest)
+    _auto_check.update(time=time.monotonic(), ok=True, latest=found)
+    if is_fetch():
+        return update_answer(found)
+    if not found:
+        flash("The software is up to date.", "success")
+    else:
+        message = f"An update is available: {latest['commit'][:7]} ({latest['date'][:10]})."
+        installed_branch = RUNNING_VERSION.get('branch')
+        if installed_branch and installed_branch != config['branch']:
+            message += f" Installing it switches from branch {installed_branch} to {config['branch']}."
+        elif RUNNING_VERSION.get('date') and latest['date'] < RUNNING_VERSION['date']:
+            message += " It is older than the installed version."
+        flash(message, "success")
+    return redirect(url_for('index'))
+
+def update_answer(latest):
+    """JSON for the page's update bar."""
+    if latest and latest['commit'] != RUNNING_VERSION.get('commit'):
+        session['update'] = latest
+        return {'update': {'commit': latest['commit'][:7], 'date': latest['date'][:10],
+                           'message': latest.get('message', '')}}
+    session.pop('update', None)
+    return {'update': None}
+
+def find_update(config, latest):
+    """latest, if it isn't the installed version (and remembered for Install Update), else None."""
     global RUNNING_VERSION
     if latest['commit'] != RUNNING_VERSION.get('commit') and RUNNING_VERSION.get('commit') == 'local':
         # Installed with install.sh: find out whether it is this version already
@@ -468,17 +605,9 @@ def check_update():
             print(f"Couldn't compare the local copy with {latest['commit'][:7]}: {e}", flush=True)
     if latest['commit'] == RUNNING_VERSION.get('commit'):
         session.pop('update', None)
-        flash("The software is up to date.", "success")
-    else:
-        session['update'] = latest
-        message = f"An update is available: {latest['commit'][:7]} ({latest['date'][:10]})."
-        installed_branch = RUNNING_VERSION.get('branch')
-        if installed_branch and installed_branch != config['branch']:
-            message += f" Installing it switches from branch {installed_branch} to {config['branch']}."
-        elif RUNNING_VERSION.get('date') and latest['date'] < RUNNING_VERSION['date']:
-            message += " It is older than the installed version."
-        flash(message, "success")
-    return redirect(url_for('index'))
+        return None
+    session['update'] = latest
+    return latest
 
 @app.route('/install_update', methods=['POST'])
 def install_update():

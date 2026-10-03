@@ -15,12 +15,16 @@ scenario = json.load(open(sys.argv[1]))
 log = []
 clock = {'now': 1000.0}
 
-def fire_signals():
-    # scripted events: send signals at given times
+def fire_signals(place=None):
+    # scripted events: send signals at given times; {'play': path} chooses a file as the web interface does;
+    # {'when': 'settings'} waits until the player next reads its settings (just before it starts a file)
     for event in scenario.get('signals', []):
-        if not event.get('done') and clock['now'] - 1000 >= event['at']:
+        if not event.get('done') and clock['now'] - 1000 >= event['at'] and event.get('when') == place:
             event['done'] = True
-            os.kill(os.getpid(), getattr(signal, event['signal']))
+            if 'play' in event:
+                with open(paths['/tmp/mp4museum-play.json'], 'w') as f:
+                    json.dump({'id': 'request-%s' % event['at'], 'file': event['play']}, f)
+            os.kill(os.getpid(), getattr(signal, event.get('signal', 'SIGUSR1')))
 
 active_omx = []
 
@@ -33,6 +37,7 @@ def fake_sleep(seconds):
         fire_signals()
 time.sleep = fake_sleep
 time.time = lambda: clock['now']
+time.monotonic = lambda: clock['now'] - 500
 
 # --- fake vlc ---
 vlc = types.ModuleType('vlc')
@@ -52,6 +57,7 @@ class Player:
         if sum('play' in event for event in log) > scenario.get('max_plays', 50):
             raise SystemExit('play limit')
         self.started = clock['now']
+        self.paused_at, self.paused_total = None, 0
         behaviour = scenario.get('media', {}).get(os.path.basename(m.path), 5)
         self.state = {'error': _S.Error, 'stuck': _S.Opening}.get(behaviour, _S.Playing)
         self.length = behaviour if isinstance(behaviour, (int, float)) else 10 ** 9
@@ -71,7 +77,20 @@ class Player:
         self.state = _S.Stopped
     def pause(self):
         self.state = _S.Paused if self.state == _S.Playing else _S.Playing
+        if self.state == _S.Paused:
+            self.paused_at = clock['now']
+        elif self.paused_at is not None:
+            self.paused_total += clock['now'] - self.paused_at
+            self.paused_at = None
         log.append({'pause': self.state == _S.Paused})
+    def get_length(self):
+        # known once it is playing, as in VLC
+        playing = self.state in (_S.Playing, _S.Paused, _S.Ended)
+        return int(self.length * 1000) if playing and self.length < 10 ** 8 else 0
+    def get_time(self):
+        if self.media is None:
+            return -1
+        return int(((self.paused_at or clock['now']) - self.started - self.paused_total) * 1000)
 class Instance:
     def __init__(self, args):
         log.append({'instance': args})
@@ -92,7 +111,15 @@ sys.modules['RPi'] = rpi; sys.modules['RPi.GPIO'] = gpio
 media_files = scenario.get('files', [])
 _glob.glob = lambda pattern: [f for f in media_files if _glob.fnmatch.fnmatch(f, pattern)]
 import fnmatch; _glob.fnmatch = fnmatch
-subprocess.run = lambda cmd, *a, **k: log.append({'run': cmd}) or (_ for _ in ()).throw(SystemExit('sync ran'))
+def fake_run(cmd, *args, **kwargs):
+    if cmd[:2] == ['omxplayer', '-i']:
+        # omxplayer -i: the file's streams; scenario option omx_codec (default h264)
+        log.append({'probe': cmd[2]})
+        codec = scenario.get('omx_codec', 'h264')
+        return subprocess.CompletedProcess(cmd, 1, stdout='Input #0, mov,mp4\n    Stream #0:0(und): Video: %s (High)\n' % codec)
+    log.append({'run': cmd})
+    raise SystemExit('sync ran')
+subprocess.run = fake_run
 
 # --- fake omxplayer ---
 # /usr/bin/omxplayer is a script that runs omxplayer.bin; both are modelled. Scenario options:
@@ -159,7 +186,8 @@ shutil.which = lambda name: '/usr/bin/' + name if name in scenario.get('installe
 tmp = tempfile.mkdtemp()
 paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
          '/boot/alsa.txt': os.path.join(tmp, 'alsa.txt'), '/boot/mp4m-player.txt': os.path.join(tmp, 'mp4m-player.txt'),
-         '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json')}
+         '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json'),
+         '/tmp/mp4museum-play.json': os.path.join(tmp, 'play.json')}
 for real, fake in paths.items():
     if real in scenario.get('write', {}):
         open(fake, 'w').write(scenario['write'][real])
@@ -173,8 +201,13 @@ def watching_replace(a, b):
     if b == paths['/tmp/mp4museum-status.json']:
         statuses.append(json.load(open(b)))
 os.replace = watching_replace
+_real_open = open
+def watching_open(path, *args, **kwargs):
+    if path == paths['/boot/mp4m-player.txt']:
+        fire_signals('settings')
+    return _real_open(path, *args, **kwargs)
 try:
-    exec(compile(source, 'mp4museum.py', 'exec'), {'__name__': '__main__'})
+    exec(compile(source, 'mp4museum.py', 'exec'), {'__name__': '__main__', 'open': watching_open})
 except SystemExit as e:
     log.append({'exit': str(e)})
 print(json.dumps({'log': log, 'statuses': statuses}))

@@ -54,8 +54,11 @@ def test_javascript_requests_get_401_when_logged_out(pi):
 def test_static_files_load_without_login(pi):
     c = webservice.app.test_client()
     r = c.get('/static/style.css')
-    assert r.status_code == 200 and b'--bg-primary' in r.data
+    assert r.status_code == 200 and b'--surface' in r.data
     assert c.get('/static/mp4museum.js').status_code == 200
+    # the icons, used on the login page too
+    r = c.get('/static/icons.svg')
+    assert r.status_code == 200 and r.mimetype == 'image/svg+xml' and b'<symbol id="play"' in r.data
     assert b'href="/static/style.css"' in c.get('/login').data
 
 
@@ -309,7 +312,7 @@ def test_network_section_lists_every_interface(pi, client, monkeypatch, tmp_path
     assert 'IPv4 192.168.1.120/24' in text and 'MAC address: b8:27:eb:4e:4f:d4' in text
     assert 'wlan0 (wireless): not connected' in text and 'No IP address' in text
     assert '127.0.0.1' not in text and '\nlo ' not in text
-    assert '<h3>Network</h3>' in client.get('/').data.decode()
+    assert 'Network</h3>' in client.get('/').data.decode()
 
 
 # ----- Player status and controls ----- #
@@ -333,7 +336,7 @@ def test_player_status_and_controls(client, monkeypatch):
 
     assert client.get('/player/status').get_json()['text'] == 'Playing intro.mp4 (internal) for 2 min'
     html = client.get('/').data.decode()
-    assert 'Playing intro.mp4 (internal) for 2 min' in html and 'Pause / Resume' in html
+    assert 'intro.mp4' in html and 'Pause or resume' in html
 
     client.post('/player/next')
     client.post('/player/pause')
@@ -392,17 +395,180 @@ def test_player_settings_saved_together(pi, monkeypatch):
 
 
 def test_loop_player(client, monkeypatch):
-    assert system.get_loop_player() == 'vlc'
+    assert system.get_loop_player() == 'omxplayer'
     open(system.PLAYER_SETTINGS_FILE, 'w').write('image_duration=7\n')
     monkeypatch.setattr(system.shutil, 'which', lambda name: None)
     r = client.get('/')
-    assert b'<option value="vlc" selected>' in r.data and b'not installed on this player' in r.data
-    r = client.post('/set_loop_player', data={'loop_player': 'omxplayer'}, follow_redirects=True)
-    assert b'played with omxplayer' in r.data and b'<option value="omxplayer" selected>' in r.data
-    assert open(system.PLAYER_SETTINGS_FILE).read() == 'image_duration=7\nloop_player=omxplayer\n'
+    assert b'<option value="omxplayer" selected>' in r.data and b"isn't installed here" in r.data
+    r = client.post('/set_loop_player', data={'loop_player': 'vlc'}, follow_redirects=True)
+    assert b'played with VLC' in r.data and b'<option value="vlc" selected>' in r.data
+    assert open(system.PLAYER_SETTINGS_FILE).read() == 'image_duration=7\nloop_player=vlc\n'
     r = client.post('/set_loop_player', data={'loop_player': 'mplayer'}, follow_redirects=True)
-    assert b'choose VLC or omxplayer' in r.data and system.get_loop_player() == 'omxplayer'
+    assert b'choose VLC or omxplayer' in r.data and system.get_loop_player() == 'vlc'
     monkeypatch.setattr(system.shutil, 'which', lambda name: '/usr/bin/' + name)
-    assert b'not installed on this player' not in client.get('/').data
-    open(system.PLAYER_SETTINGS_FILE, 'w').write('loop_player=OMX\n')
-    assert system.get_loop_player() == 'vlc'
+    assert b"isn't installed here" not in client.get('/').data
+    open(system.PLAYER_SETTINGS_FILE, 'w').write('loop_player=VLC\n')
+    assert system.get_loop_player() == 'omxplayer'
+
+
+# ----- Player card, playlist ----- #
+def test_status_for_the_player_card(client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    path = os.path.join(system.MEDIA_PATH, 'intro-loop.mp4')
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': path, 'since': time.time() - 10, 'pid': 4242,
+                   'position': 5, 'length': 60, 'play_file': True}, f)
+    r = client.get('/player/status').get_json()
+    assert r['name'] == 'intro-loop.mp4' and r['folder'] == 'internal' and r['kind'] == 'video' and r['loop']
+    # the position now, worked out on the Pi: the browser's clock may not match the Pi's
+    assert 14.5 <= r['position'] <= 16 and r['length'] == 60 and r['play_file'] is True
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'paused', 'file': path, 'since': time.time() - 10, 'pid': 4242,
+                   'position': 5, 'length': 60, 'play_file': True}, f)
+    assert client.get('/player/status').get_json()['position'] == 5
+    # an older player script: no position, how long it has played instead
+    write_status('playing', path, since=time.time() - 75)
+    r = client.get('/player/status').get_json()
+    assert r['position'] is None and 74 <= r['elapsed'] <= 76 and r['play_file'] is False
+
+
+def test_playlist_shows_what_the_player_plays(pi, client):
+    usb = pi.media.parent / 'usb0'
+    usb.mkdir()
+    for path in (pi.media / 'b.mp4', pi.media / 'a-loop.mov', pi.media / 'notes', pi.media / '.hidden.mp4',
+                 usb / 'z.jpg'):
+        path.write_bytes(b'x' * 2048)
+    names = [(e['name'], e['folder'], e['plays'], e['internal']) for e in system.get_playlist()]
+    assert names == [('a-loop.mov', 'internal', True, True), ('b.mp4', 'internal', True, True),
+                     ('notes', 'internal', False, True), ('z.jpg', 'usb0', True, False)]
+    html = client.get('/').data.decode()
+    assert 'z.jpg' in html and 'usb0' in html and 'not played: no extension' in html
+    # files on USB sticks can be played but not deleted or downloaded here
+    assert 'download/z.jpg' not in html and 'download/b.mp4' in html
+
+
+def test_play_chosen_file(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    monkeypatch.setattr(webservice.time, 'sleep', lambda s: None)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append((pid, sig)))
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    (pi.media / 'b.mp4').write_bytes(b'x')
+    path = str(pi.media / 'b.mp4')
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': str(pi.media / 'a.mp4'), 'since': time.time(), 'pid': 4242,
+                   'play_file': True}, f)
+
+    old_umask = os.umask(0o077)
+    try:
+        r = client.post('/player/play', data={'file': path}, headers={'X-Requested-With': 'fetch'})
+    finally:
+        os.umask(old_umask)
+    assert r.status_code == 200 and sent == [(4242, signal.SIGUSR1)]
+    request = json.load(open(system.PLAY_REQUEST_FILE))
+    assert request['file'] == path and request['id']
+    assert oct(os.stat(system.PLAY_REQUEST_FILE).st_mode & 0o777) == '0o644'   # the player runs as pi
+    assert [n for n in os.listdir(os.path.dirname(system.PLAY_REQUEST_FILE)) if n.startswith('.mp4museum-play')] == []
+    # a new id each time, so the player knows it is a new request
+    client.post('/player/play', data={'file': path})
+    assert json.load(open(system.PLAY_REQUEST_FILE))['id'] != request['id']
+
+    # only files in the playlist
+    sent.clear()
+    for bad in ('/etc/passwd', str(pi.media / 'missing.mp4'), str(pi.media / '../internal/b.mp4')):
+        r = client.post('/player/play', data={'file': bad}, headers={'X-Requested-With': 'fetch'})
+        assert r.status_code == 409 and 'playlist' in r.get_json()['error']
+    assert b"t in the playlist" in client.post('/player/play', data={'file': '/etc/passwd'}, follow_redirects=True).data
+    # an older player script can't, and nothing is sent
+    write_status('playing', str(pi.media / 'a.mp4'))
+    r = client.post('/player/play', data={'file': path}, headers={'X-Requested-With': 'fetch'})
+    assert r.status_code == 409 and 'older version' in r.get_json()['error'] and sent == []
+
+
+def test_player_buttons_tell_the_page_why_not(client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    write_status('idle')
+    r = client.post('/player/next', headers={'X-Requested-With': 'fetch'})
+    assert r.status_code == 409 and r.get_json()['error'] == 'Nothing is playing.'
+    os.remove(system.PLAYER_STATUS_FILE)
+    r = client.post('/player/pause', headers={'X-Requested-With': 'fetch'})
+    assert r.status_code == 409 and 'not running' in r.get_json()['error']
+
+
+def test_upload_from_the_page_gets_json(pi, client):
+    fetch = {'X-Requested-With': 'fetch'}
+    r = client.post('/upload', data={'file': (io.BytesIO(b'video'), 'clip.mp4')}, headers=fetch)
+    assert r.status_code == 200 and r.get_json()['ok'] is True
+    assert r.get_json()['messages'] == [['success', "File 'clip.mp4' uploaded successfully."]]
+    assert (pi.media / 'clip.mp4').read_bytes() == b'video'
+    r = client.post('/upload', data={'file': (io.BytesIO(b'x'), '.hidden')}, headers=fetch)
+    assert r.status_code == 400 and 'Invalid filename' in r.get_json()['error']
+    # the page shows the messages itself: they don't pile up in the login cookie, file after file
+    for n in range(30):
+        client.post('/upload', data={'file': (io.BytesIO(b'x'), 'clip-%d with a long name.mp4' % n)}, headers=fetch)
+    with client.session_transaction() as session:
+        assert not session.get('_flashes')
+    # a form without JavaScript still gets the message on the page
+    html = client.post('/upload', data={'file': (io.BytesIO(b'x'), 'form.mp4')}, follow_redirects=True).data.decode()
+    assert "form.mp4&#39; uploaded successfully" in html
+
+
+# ----- Sound ----- #
+def test_sound_cards_listed(client):
+    cards = system.parse_sound_cards(
+        'card 0: Headphones [bcm2835 Headphones], device 0: bcm2835 Headphones [bcm2835 Headphones]\n'
+        '  Subdevices: 8/8\n'
+        'card 1: vc4hdmi [vc4-hdmi], device 0: MAI PCM i2s-hifi-0 [MAI PCM i2s-hifi-0]\n'
+        'card 1: vc4hdmi [vc4-hdmi], device 1: other [other]\n'
+        'card 12: Device [USB Audio Device], device 0: USB Audio [USB Audio]\n')
+    assert [(c['number'], c['name'], len(c['devices'])) for c in cards] == [
+        ('0', 'bcm2835 Headphones', 1), ('1', 'vc4-hdmi', 2), ('12', 'USB Audio Device', 1)]
+    assert cards[0]['devices'] == ['device 0: bcm2835 Headphones']
+    client.post('/set_sound_device', data={'device': '1'})
+    assert 'Card <strong>1</strong>' in client.get('/').data.decode()
+
+
+def test_every_icon_is_in_the_sprite():
+    import re
+    app = os.path.dirname(system.__file__)
+    sprite = open(os.path.join(app, 'static', 'icons.svg')).read()
+    symbols = set(re.findall(r'<symbol id="([a-z0-9-]+)"', sprite))
+    used = set()
+    for folder, names in (('templates', os.listdir(os.path.join(app, 'templates'))), ('static', ['mp4museum.js'])):
+        for name in names:
+            text = open(os.path.join(app, folder, name)).read()
+            used |= set(re.findall(r"icon\('([a-z0-9-]+)'", text))
+    # chosen by file type, in the template and the JavaScript
+    used |= {'film', 'image', 'music', 'file', 'square-play'}
+    assert len(used) > 20 and used <= symbols, used - symbols
+
+
+def test_play_requests_at_the_same_time(pi, monkeypatch):
+    monkeypatch.setattr(system, 'signal_player', lambda signum: True)
+    errors = []
+    def ask(n):
+        for i in range(200):
+            try:
+                system.request_play('/media/internal/%d-%d.mp4' % (n, i))
+            except Exception as e:
+                errors.append(e)
+    threads = [threading.Thread(target=ask, args=(n,)) for n in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == [] and json.load(open(system.PLAY_REQUEST_FILE))['file'].endswith('-199.mp4')
+
+
+def test_position_survives_the_clock_being_set(client, monkeypatch):
+    # the Pi has no clock of its own: its time can jump by days when it gets a network
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': '/media/internal/a.mp4', 'since': time.time() - 3 * 86400,
+                   'mono': time.monotonic() - 10, 'pid': 4242, 'position': 5, 'length': 600, 'play_file': True}, f)
+    assert 14.5 <= client.get('/player/status').get_json()['position'] <= 16
+
+
+def test_page_starts_with_doctype(client):
+    assert client.get('/').data.startswith(b'<!doctype html>')
+    assert client.get('/login').data.startswith(b'<!doctype html>')

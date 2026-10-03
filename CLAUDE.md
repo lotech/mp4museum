@@ -39,16 +39,23 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
 - `boot/mp4museum.py`: the player. One VLC instance; plays `/media/*/*.*` in order; GPIO
   pin 11 pause, pin 13 next. VLC is not stopped when a file ends by itself (`stop()` closes
   the video output: black frames), only on skip, failure, idle or before handing the screen to
-  omxplayer. `loop.` files are restarted by the player (VLC's `input-repeat` froze on the Pi),
-  or looped by `omxplayer --loop` with the setting `loop_player=omxplayer` (opt-in: omxplayer
-  is no longer developed and isn't on newer OS versions). Talks to the web interface through
-  `/tmp/mp4museum-status.json` (status it writes), `SIGUSR1` (next), `SIGUSR2` (pause) and
-  `/boot/mp4m-player.txt` (settings).
+  omxplayer. `loop.` H.264/MPEG-4 videos (checked with `omxplayer -i`) are looped by `omxplayer --loop` when it is installed (it
+  holds the last frame; VLC still shows a black frame each time it starts a file again on
+  the Pi). omxplayer is no longer developed and isn't on newer OS versions, so with
+  `loop_player=vlc` or without omxplayer, the player restarts them in VLC (VLC's
+  `input-repeat` froze on the Pi). Talks to the web interface through
+  `/tmp/mp4museum-status.json` (status it writes, with position and length), `SIGUSR1` (next),
+  `SIGUSR2` (pause), `/tmp/mp4museum-play.json` (a file chosen in the web interface, read when
+  SIGUSR1 arrives) and `/boot/mp4m-player.txt` (settings). Edited players from before may not
+  write `play_file` in their status; the web interface then doesn't offer choosing a file.
   Keep the author's logo screen ("please do not remove my logo screen") and his `(c)` header.
   Users can edit this file in the web interface, so the updater only replaces it if unedited.
 - `boot/mp4m-web/`: the web interface, on `/boot` so it can be updated with the overlay on.
   `webservice.py` (Flask routes), `system.py` (everything that touches the Pi),
   `updater.py` (software updates, also the `mp4m-update` command), `templates/`, `static/`.
+  Icons are [Lucide](https://lucide.dev) symbols in `static/icons.svg`, used with the `icon()`
+  macro in `templates/_icons.html`; to add one, copy its `<symbol>` from the lucide-static
+  package (same version) into the sprite. `test_every_icon_is_in_the_sprite` checks them.
 - `install.sh` installs onto a v7 image (overlay off); `usr/local/bin/mp4m-update` and
   `etc/systemd/system/mp4m-webservice.service` are installed by it.
 

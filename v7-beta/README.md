@@ -41,16 +41,19 @@ in alphabetical order, over and over.
   a computer); delete it to go back to the original.
 
 - **Loops:** a file with `loop.` in its name (e.g. `intro-loop.mp4`) plays again and again
-  until Next is pressed; then the playlist carries on. VLC starts each pass in the same
-  window, so the last frame stays on screen while it restarts (the same between files).
-  In the web interface (Media) loop videos can be played with omxplayer instead, which
-  loops on its own and may be smoother. omxplayer is no longer developed and isn't on newer
-  Raspberry Pi OS versions; it is used only when it is installed.
+  until Next is pressed; then the playlist carries on. Loop videos are played with
+  omxplayer, which holds the last frame with a short pause at each loop. VLC, which plays
+  everything else, shows a black frame each time it starts a video again on the Pi. omxplayer
+  is no longer developed and isn't on newer Raspberry Pi OS versions, so VLC is used when it
+  isn't installed, or for videos it can't decode on every Pi (only H.264 and MPEG-4 go to
+  omxplayer; HEVC, for example, plays in VLC). VLC can also be chosen in the web interface (Media).
 - **Images** are shown for 10 seconds, or as set in the web interface (`/boot/mp4m-player.txt`,
   `image_duration=<seconds>`). A new setting applies from the next image.
 - A file that hasn't started playing after 20 seconds (broken file, stalled USB stick) is skipped.
 - **Buttons:** GPIO pin 11 pauses and resumes, pin 13 skips to the next file. The web interface
-  has the same buttons and shows what is playing (the player writes `/tmp/mp4museum-status.json`).
+  has the same buttons, shows what is playing and how far it has got (the player writes
+  `/tmp/mp4museum-status.json`), and can start any file in the playlist (it writes
+  `/tmp/mp4museum-play.json` and sends the player the same signal as Next).
 - **Sound:** the card number from `/boot/alsa.txt` (0 if not set), chosen in the web interface.
 - **Sync mode** (from version 6): with `sync.mp4` and `sync-leader.txt` or `sync-player.txt`
   on a USB stick or in `/boot`, the player runs `omxplayer-sync` to play `sync.mp4` in sync
@@ -60,6 +63,13 @@ in alphabetical order, over and over.
 ## Web interface
 
 Open `http://<network name>.local` in a browser on the same network.
+
+- **Media:** the player (what is playing, Pause/Resume, Next), playback settings, and the
+  playlist: every file the player plays, from the media partition and USB sticks, in order.
+  Start any file from there; upload files (several at once, with progress) or download and
+  delete them.
+- **Updates:** when the player has an internet connection, the page checks for a new version
+  by itself (at most every few hours) and shows a bar to install it.
 
 - **Password:** `mp4museum` by default, can be changed on the System tab. It is stored
   hashed in `/boot/mp4m-password.txt`; delete that file to reset to the default.
@@ -126,7 +136,8 @@ Check the web interface with `systemctl status mp4m-webservice`, and its log wit
 
 Once installed, a player can update itself from GitHub, as long as it has an internet connection:
 
-- **Web interface:** System → Software Update → Check for Updates, then Install Update.
+- **Web interface:** the bar at the top when an update is found, or System → Software Update
+  → Check for Updates, then Install Update.
   The web interface restarts with the new version and offers to reboot.
 - **Over SSH:** `sudo mp4m-update` checks, asks before installing, and offers to reboot.
   `sudo mp4m-update --check` only checks; `--help` lists the other options.
@@ -155,4 +166,5 @@ branch=master
 GNU General Public License v3, like the original MP4MUSEUM (see `LICENSE` in the repository root).
 The original files are © Julius Schmiedel; changed files say so at the top. The web interface
 was not published with a license of its own by its author and is included as part of the
-GPL-licensed MP4MUSEUM project.
+GPL-licensed MP4MUSEUM project. The icons are from [Lucide](https://lucide.dev) (ISC licence,
+included in `boot/mp4m-web/static/icons.svg`).

@@ -419,3 +419,61 @@ def test_cli_unexpected_error_is_explained(cli, github, monkeypatch):
     monkeypatch.setattr(updater, 'update', failing_update)
     code, out = cli(['--yes'])
     assert 'stopped part way: mount failed' in str(code)
+
+
+def test_page_checks_for_updates_by_itself(pi, client, github):
+    updater.update()
+    webservice.RUNNING_VERSION = installed()
+    fetch = {'X-Requested-With': 'fetch'}
+    assert client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json() == {'update': None}
+    github.release('bbb1111', '2026-10-04T00:00:00Z', 'Even newer')
+    github.api_calls = 0
+    # asked again within a few hours: GitHub isn't
+    assert client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json() == {'update': None}
+    assert github.api_calls == 0
+    webservice._auto_check['time'] -= webservice.AUTO_CHECK_INTERVAL
+    r = client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json()
+    assert r == {'update': {'commit': 'bbb1111', 'date': '2026-10-04', 'message': 'Even newer'}}
+    assert github.api_calls == 1
+    # the bar's Install button works with what the check found
+    assert b'Update available' in client.get('/').data
+    r = client.post('/install_update')
+    assert b'Update installed' in r.data and github.api_calls == 1
+
+
+def test_page_check_is_quiet_offline(client, monkeypatch):
+    calls = []
+    def offline(repo, ref):
+        calls.append(repo)
+        raise updater.UpdateError("Couldn't reach GitHub")
+    monkeypatch.setattr(updater, 'latest_commit', offline)
+    fetch = {'X-Requested-With': 'fetch'}
+    for _ in range(3):
+        assert client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json() == {'update': None}
+    assert len(calls) == 1          # not on every page
+    webservice._auto_check['time'] -= webservice.AUTO_CHECK_RETRY
+    client.post('/check_update', data={'auto': '1'}, headers=fetch)
+    assert len(calls) == 2          # but again after an hour
+    assert b'reach GitHub' not in client.get('/').data
+
+
+def test_page_checks_one_at_a_time(client, monkeypatch):
+    # pages opened together don't all ask GitHub
+    calls = []
+    def slow(repo, ref):
+        calls.append(repo)
+        time.sleep(0.3)
+        return {'commit': 'bbb1111', 'date': '2026-10-04T00:00:00Z', 'message': 'New'}
+    monkeypatch.setattr(updater, 'latest_commit', slow)
+    answers = []
+    def page():
+        c = webservice.app.test_client()
+        c.post('/login', data={'password': 'mp4museum'})
+        answers.append(c.post('/check_update', data={'auto': '1'}, headers={'X-Requested-With': 'fetch'}).get_json())
+    threads = [threading.Thread(target=page) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # and they all get its answer
+    assert len(calls) == 1 and [a['update'] and a['update']['commit'] for a in answers] == ['bbb1111'] * 4

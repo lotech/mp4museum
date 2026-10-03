@@ -1,6 +1,10 @@
+{# MP4MUSEUM web interface, based on the v7 beta web service by Julius Schmiedel (http://mp4museum.org).
+   Modified 2026 in https://github.com/lotech/mp4museum (see git history). Licensed under the GNU GPL v3, see LICENSE. -#}
+{% from "_icons.html" import icon -%}
 <!doctype html>
-<html>
+<html lang="en">
   <head>
+    <meta charset="utf-8">
     <title>{% block title %}MP4Museum{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     {% block head %}
@@ -8,16 +12,24 @@
     <script src="{{ url_for('static', filename='mp4museum.js') }}"></script>
     {% endblock %}
   </head>
-  <body data-reboot-url="{{ url_for('reboot_system') }}">
-    <div class="container {% block container_class %}{% endblock %}">
-      {% block header %}{% endblock %}
+  <body data-reboot-url="{{ url_for('reboot_system') }}" data-icons-url="{{ url_for('static', filename='icons.svg') }}">
+    {% block topbar %}{% endblock %}
 
+    {# Messages float over the page, so nothing moves when they appear #}
+    <div id="toasts" class="toasts" aria-live="polite">
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% for category, msg in messages %}
-          <div class="flash {{ category }}">{{ msg }}</div>
+          <div class="toast {{ category }}" role="status">
+            {{ icon('circle-alert' if category == 'error' else 'circle-check', 'toast-icon') }}
+            <span>{{ msg }}</span>
+            <button type="button" class="toast-close" title="Close" aria-label="Close">{{ icon('x') }}</button>
+          </div>
         {% endfor %}
       {% endwith %}
+    </div>
 
+    <div class="container {% block container_class %}{% endblock %}">
+      {% block header %}{% endblock %}
       {% block content %}{% endblock %}
     </div>
 
@@ -29,9 +41,9 @@
 
     <div id="rebootScreen" class="reboot-screen">
       <div class="reboot-message">
-        <h2>System is rebooting...</h2>
-        <p>Please wait while the system restarts.</p>
-        <p>You will be redirected automatically.</p>
+        {{ icon('power', 'reboot-icon') }}
+        <h2>The player is restarting</h2>
+        <p>This page reloads when it is back, in about a minute.</p>
       </div>
     </div>
   </body>
