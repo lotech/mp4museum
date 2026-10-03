@@ -217,6 +217,9 @@ def start(device, with_media, size=None):
         raise CloneError(f"{device} isn't the card that was chosen any more. Choose it again.")
     if is_running():
         raise CloneError("A card is being made already.")
+    if system.copies_running():
+        # it may be reading from this card, which is about to be erased
+        raise CloneError("A file is being copied to this player: make the card when it's done.")
     # too small: said now, not after it has started
     root_used, media_used = sizes()
     plan(card['size'], root_used, media_used, with_media, source_partitions()[1][0][1])

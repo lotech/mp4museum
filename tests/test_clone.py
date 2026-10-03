@@ -368,6 +368,14 @@ def test_start_refuses_a_second_copy(ready):
     assert len(ready) == 1
 
 
+def test_start_refuses_while_a_file_is_copied(ready, monkeypatch):
+    # it may be reading from the card that would be erased
+    monkeypatch.setattr(system, 'copies_running', lambda: ['/media/usb0/film.mp4'])
+    with pytest.raises(clone.CloneError, match='A file is being copied to this player'):
+        clone.start('/dev/sda', False)
+    assert ready == [] and not clone.is_running()
+
+
 def test_start_refuses_a_card_too_small(ready, pi):
     pi.disks[-1] = dict(READER, size=str(4 * 1024 ** 3))
     with pytest.raises(clone.CloneError, match='too small'):
