@@ -10,6 +10,7 @@ routes in webservice.py.
 import fcntl
 import hashlib
 import hmac
+import json
 import os
 import re
 import shutil
@@ -31,6 +32,10 @@ CONFIG_FILE = os.path.join(BOOT_PATH, "config.txt")
 SCRIPT_FILE = os.path.join(BOOT_PATH, "mp4museum.py")
 PASSWORD_FILE = os.path.join(BOOT_PATH, "mp4m-password.txt")
 HOSTNAME_FILE = os.path.join(BOOT_PATH, "hostname.txt")
+# Player settings and status, shared with /boot/mp4museum.py
+PLAYER_SETTINGS_FILE = os.path.join(BOOT_PATH, "mp4m-player.txt")
+PLAYER_STATUS_FILE = "/tmp/mp4museum-status.json"
+DEFAULT_IMAGE_DURATION = 10
 
 DEFAULT_PASSWORD = 'mp4museum'
 
@@ -312,33 +317,52 @@ def set_video_mode_in_config(config_text, mode):
         lines += ['', VIDEO_BLOCK_START, '[all]'] + settings + [VIDEO_BLOCK_END]
     return '\n'.join(lines) + '\n'
 
-def get_mac_address():
-    mac_info = []
-    for interface, label in (('eth0', 'Ethernet'), ('wlan0', 'Wireless')):
-        mac_info.append(f"{label} ({interface}): {read_mac(interface) or 'Not available'}")
-    return "\n".join(mac_info)
+NET_PATH = '/sys/class/net'
+
+def network_interfaces():
+    """Network interfaces other than loopback, whatever they are called (eth0, enx..., wlan0)."""
+    try:
+        return sorted(name for name in os.listdir(NET_PATH) if name != 'lo')
+    except OSError:
+        return []
+
+def _read_interface_file(interface, name):
+    try:
+        with open(os.path.join(NET_PATH, interface, name), 'r') as f:
+            return f.read().strip()
+    except OSError:
+        return ''
 
 def get_network_status():
-    try:
-        # Get network configuration
-        result = subprocess.run(['ip', 'addr', 'show'], capture_output=True, text=True)
-        network_lines = result.stdout.splitlines()
-        filtered_lines = []
-        found_eth = False
+    """Each network interface with its state, MAC address and IP addresses."""
+    addresses = {}
+    status, output = run_command(['ip', '-o', 'addr', 'show'])
+    if status:
+        for line in output.splitlines():
+            # e.g. "2: enxb827eb4e4fd4    inet 192.168.1.120/24 brd 192.168.1.255 scope global ..."
+            parts = line.split()
+            if len(parts) >= 4 and parts[2] in ('inet', 'inet6'):
+                interface = parts[1].split('@')[0]
+                label = 'IPv4' if parts[2] == 'inet' else 'IPv6'
+                addresses.setdefault(interface, []).append(f"{label} {parts[3]}")
 
-        for line in network_lines:
-            # Look for the first line containing ": eth"
-            if not found_eth and ": eth" in line:
-                found_eth = True
-
-            if found_eth:
-                filtered_lines.append(line)
-
-        # Combine MAC addresses and network info
-        combined_info = get_mac_address() + "\n\nNetwork Configuration:\n" + "\n".join(filtered_lines)
-        return combined_info
-    except:
-        return "Error getting network information"
+    lines = [f"Network name: {socket.gethostname()}.local"]
+    interfaces = network_interfaces()
+    if not interfaces:
+        lines.append("No network interfaces found.")
+    for interface in interfaces:
+        kind = 'wireless' if os.path.isdir(os.path.join(NET_PATH, interface, 'wireless')) else 'wired'
+        state = _read_interface_file(interface, 'operstate')
+        state = {'up': 'connected', 'down': 'not connected'}.get(state, state or 'unknown')
+        lines += ['', f"{interface} ({kind}): {state}"]
+        mac = read_mac(interface)
+        if mac:
+            lines.append(f"  MAC address: {mac}")
+        for address in addresses.get(interface, []):
+            lines.append(f"  {address}")
+        if not addresses.get(interface):
+            lines.append("  No IP address")
+    return "\n".join(lines)
 
 def get_display_info():
     try:
@@ -346,6 +370,61 @@ def get_display_info():
         return result.stdout
     except:
         return "Error getting display information"
+
+# ----- Player ----- #
+def read_player_settings():
+    """key=value lines from mp4m-player.txt."""
+    settings = {}
+    try:
+        with open(PLAYER_SETTINGS_FILE, 'r') as f:
+            for line in f:
+                key, sep, value = line.partition('=')
+                if sep and key.strip():
+                    settings[key.strip()] = value.strip()
+    except OSError:
+        pass
+    return settings
+
+def get_image_duration():
+    value = read_player_settings().get('image_duration', '')
+    return max(1, int(value)) if value.isdecimal() else DEFAULT_IMAGE_DURATION
+
+def save_image_duration(seconds):
+    settings = read_player_settings()
+    settings['image_duration'] = str(seconds)
+    with writable(BOOT_PATH):
+        write_file(PLAYER_SETTINGS_FILE, ''.join(f"{key}={value}\n" for key, value in settings.items()))
+
+def _is_player_process(pid):
+    """True if pid is the running player script (and not some other process that got its number)."""
+    try:
+        with open(f'/proc/{int(pid)}/cmdline', 'rb') as f:
+            arguments = f.read().split(b'\0')
+    except (OSError, ValueError, TypeError):
+        return False
+    return any(argument.endswith(b'mp4museum.py') for argument in arguments)
+
+def get_player_status():
+    """{'state': 'playing'|'paused'|'idle'|'sync', 'file', 'since', 'pid'}, or None if the player isn't running."""
+    try:
+        with open(PLAYER_STATUS_FILE, 'r') as f:
+            status = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(status, dict) or not _is_player_process(status.get('pid')):
+        return None
+    return status
+
+def signal_player(signum):
+    """Send the player a signal (SIGUSR1: next, SIGUSR2: pause/resume). False if it isn't running."""
+    status = get_player_status()
+    if not status:
+        return False
+    try:
+        os.kill(int(status['pid']), signum)
+        return True
+    except OSError:
+        return False
 
 def get_current_sound_card():
     """Get the current sound card configuration."""
@@ -445,7 +524,7 @@ def default_hostname():
 
     The serial is hashed so the name doesn't reveal it.
     """
-    unique_id = read_serial() or read_mac('eth0') or read_mac('wlan0')
+    unique_id = read_serial() or next((mac for mac in map(read_mac, network_interfaces()) if mac), '')
     if not unique_id:
         return "mp4museum"
     return "mp4museum-" + hashlib.sha256(unique_id.encode()).hexdigest()[:4]

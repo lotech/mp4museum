@@ -16,19 +16,42 @@ The player is meant to run offline. A network is optional and only needed for th
 
 | Path | Purpose |
 |---|---|
-| `boot/mp4museum.py` | Player (v6 player with sync mode removed; logo is now `mp4m-v7beta.jpg`) |
+| `boot/mp4museum.py` | Player: plays everything in `/media/*/` in order, GPIO pause (pin 11) and next (pin 13), sync mode with omxplayer-sync |
 | `boot/mp4m-web/` | Web interface (Flask, port 80, runs as root): `webservice.py` (routes), `system.py` (partitions, config.txt, network name, password), `updater.py` (software update), `templates/`, `static/`. On the boot partition so it can be updated without turning off the overlay |
 | `etc/systemd/system/mp4m-webservice.service` | Starts the web interface at boot |
 | `usr/local/bin/mp4m-update` | The `sudo mp4m-update` command |
 | `home/pi/.bashrc` | Autostart on tty1: runs `/boot/mp4museum.py` |
 | `home/pi/mp4m-v7beta.jpg` | Logo screen shown after boot |
-| `home/pi/mp4museum-boot.mp4` | Boot video |
+| `home/pi/mp4museum-boot.mp4` | Boot video (the original from the v7 image) |
 | `boot/config.txt` | Video/audio config (video lines set by the web UI video presets) |
 | `boot/cmdline.txt` | `boot=overlay` – root filesystem is read-only via overlayfs |
 | `etc/fstab` | `/boot` mounted ro; third partition (exFAT) mounted ro at `/media/internal` for media |
 | `etc/usbmount/usbmount.conf` | USB sticks auto-mounted read-only at `/media/usb0..7` |
 | `etc/systemd/system/getty@tty1.service.d/autologin.conf` | Auto-login of user `pi` on tty1 |
 | `etc/initramfs-tools/scripts/overlay` | Read-only root with tmpfs overlay (standard raspi-config overlay script) |
+
+## Player
+
+The player (`/boot/mp4museum.py`, started from `.bashrc`) plays the boot video, the
+MP4MUSEUM logo, then every file in `/media/*/` (the internal media partition and USB sticks)
+in alphabetical order, over and over.
+
+- **Boot video:** the original MP4MUSEUM one (`/home/pi/mp4museum-boot.mp4`). To use your own,
+  put it on the SD card's boot partition as `mp4museum-boot.mp4` (it shows up as a drive on
+  a computer); delete it to go back to the original.
+
+- **Loops:** a file with `loop.` in its name (e.g. `intro-loop.mp4`) plays again and again
+  until Next is pressed; then the playlist carries on.
+- **Images** are shown for 10 seconds, or as set in the web interface (`/boot/mp4m-player.txt`,
+  `image_duration=<seconds>`). A new setting applies from the next image.
+- A file that hasn't started playing after 20 seconds (broken file, stalled USB stick) is skipped.
+- **Buttons:** GPIO pin 11 pauses and resumes, pin 13 skips to the next file. The web interface
+  has the same buttons and shows what is playing (the player writes `/tmp/mp4museum-status.json`).
+- **Sound:** the card number from `/boot/alsa.txt` (0 if not set), chosen in the web interface.
+- **Sync mode** (from version 6): with `sync.mp4` and `sync-leader.txt` or `sync-player.txt`
+  on a USB stick or in `/boot`, the player runs `omxplayer-sync` to play `sync.mp4` in sync
+  across players. This needs [omxplayer-sync](https://github.com/turingmachine/omxplayer-sync)
+  installed; without it the player plays as normal.
 
 ## Web interface
 
@@ -45,7 +68,7 @@ Open `http://<network name>.local` in a browser on the same network.
 - **Video presets** only change the video lines in `/boot/config.txt`; other settings are kept.
 
 Files the web interface may create in `/boot`: `mp4m-password.txt`, `hostname.txt`, `alsa.txt`,
-`mp4museum.py.new`. `mp4m-update.txt` is only read.
+`mp4m-player.txt`, `mp4museum.py.new`. `mp4m-update.txt` is only read.
 
 ## Getting the code onto the Pi
 
@@ -76,8 +99,10 @@ It stops when you close the SSH session; reboot to go back to the installed vers
 
 ## Installing permanently
 
-1. Run `sudo raspi-config`, open **Overlay File System** (under Performance Options or
-   Advanced Options) and turn it off. Reboot.
+1. Run `sudo raspi-config` and open **Overlay File System** (under Performance Options or
+   Advanced Options). Answer **No** to "Would you like the overlay file system to be enabled?".
+   It then says the boot partition is read-only and can't be changed while the overlay is on;
+   that's fine, leave it read-only (`install.sh` makes it writable when it needs to). Reboot.
 2. Download the code as above, then run the install script:
    ```bash
    cd ~/mp4m-src/v7-beta
@@ -86,8 +111,9 @@ It stops when you close the SSH session; reboot to go back to the installed vers
    It installs the web interface to `/boot/mp4m-web` and the player to `/boot/mp4museum.py`
    (an edited player is kept; the new one is saved as `mp4museum.py.new`), the boot video,
    logo and `.bashrc` to `/home/pi`, the `mp4m-webservice` service and the `mp4m-update` command.
-3. Run `sudo raspi-config` again, turn the overlay file system back on, and answer **yes** to
-   write-protecting the boot partition. Reboot.
+3. Run `sudo raspi-config` again, open **Overlay File System** and answer **Yes**. If it asks
+   "Would you like the boot partition to be write-protected?", answer **Yes**; if it says the boot
+   partition is already read-only, nothing more is needed. Reboot.
 
 Check the web interface with `systemctl status mp4m-webservice`, and its log with
 `journalctl -u mp4m-webservice`.

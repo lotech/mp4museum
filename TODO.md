@@ -13,7 +13,7 @@ a network is optional.
 - [x] Login with password (default `mp4museum`), changeable in the web interface
 - [x] Unique network name per player (`mp4museum-xxxx.local`), changeable in the web interface
 - [x] Credit MP4MUSEUM and link to the website and source
-- [x] New boot video
+- [x] New boot video (later back to the original; a custom one can go in `/boot/mp4museum-boot.mp4`)
 - [x] Remove duplicated network code
 - [x] Test on the Pi 3B, including permanent install and boot video
 
@@ -29,15 +29,25 @@ a network is optional.
 
 ## 3. Player
 
-- [ ] Bring back sync mode (v6 had it, using omxplayer-sync)
-- [ ] Use one VLC instance instead of creating one per file (removes the "start twice" workaround)
-- [ ] Setting for how long images are shown
-- [ ] "Now playing" / status in the web interface
-- [ ] Player reads only the first character of `alsa.txt`, so sound cards 10+ don't work (web UI is limited to 0–9 for now)
+- [x] Bring back sync mode (v6 had it, using omxplayer-sync); only runs when omxplayer-sync is installed
+- [x] Use one VLC instance instead of creating one per file
+- [ ] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround, kept for now)
+- [x] Setting for how long images are shown
+- [x] "Now playing", Pause/Resume and Next in the web interface
+- [x] Sound cards 10 and above (player reads all of `alsa.txt`, web interface allows 0–99)
+- [x] Update check recognises an install from `install.sh` that already matches the latest version
+- [x] Loop files froze on the last frame (VLC's input-repeat); the player now restarts them itself
+- [ ] Test on the Pi 3B: boot video shows, images use the set duration, loop files, pause/next from the web and GPIO, sync mode (needs omxplayer-sync on the image?)
 
 ## 4. Installation
 
 - [ ] Install script to set up v7 on a fresh Raspberry Pi OS, instead of depending on the image (`install.sh` only covers the v7 image so far)
+
+## Development
+
+- [x] `CLAUDE.md` with the constraints and conventions for working on the code
+- [x] Commit the test suite to the repository (`tests/`, run with `python -m pytest tests`)
+- [ ] Run the tests on GitHub for every pull request (GitHub Actions)
 
 ## Ideas
 

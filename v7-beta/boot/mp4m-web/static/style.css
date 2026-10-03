@@ -148,6 +148,7 @@ pre {
 }
 
 .form-group input[type="text"],
+.form-group input[type="number"],
 .form-group select {
   padding: 12px;
   background-color: var(--bg-primary);

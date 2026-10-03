@@ -279,6 +279,70 @@ def _install(source_root, version):
             system.write_file(system.SCRIPT_FILE + '.new', new_player_text)
             return 'kept'
 
+def _tree_hashes(root):
+    """{relative path: sha256} of a web interface folder, without the manifest and cached bytecode."""
+    hashes = {}
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d != '__pycache__']
+        for name in files:
+            if name.endswith('.pyc') or (folder == root and name == MANIFEST_NAME):
+                continue
+            path = os.path.join(folder, name)
+            hashes[os.path.relpath(path, root)] = file_sha256(path)
+    return hashes
+
+def matches_installed(source_root):
+    """True if this copy is exactly what is installed: web interface, player, and the files
+    outside /boot (otherwise the update is offered, and says which files need install.sh)."""
+    return (os.path.isdir(APP_DIR)
+            and _tree_hashes(os.path.join(source_root, APP_SOURCE)) == _tree_hashes(APP_DIR)
+            and os.path.isfile(system.SCRIPT_FILE)
+            and file_sha256(system.SCRIPT_FILE) == file_sha256(os.path.join(source_root, PLAYER_SOURCE))
+            and not changed_system_files(source_root))
+
+# Commits already compared with the installed files and found different, with what was
+# installed at the time (no need to download them again unless that changed)
+_differs_from_local_copy = {}
+
+def _installed_fingerprint():
+    player = file_sha256(system.SCRIPT_FILE) if os.path.isfile(system.SCRIPT_FILE) else ''
+    tree = _tree_hashes(APP_DIR) if os.path.isdir(APP_DIR) else {}
+    return hashlib.sha256(json.dumps([tree, player], sort_keys=True).encode()).hexdigest()
+
+def identify_local_copy(latest, config=None, record=True):
+    """install.sh can't tell which commit it installed ("local copy"). If the installed files
+    are exactly this commit, record it (unless record=False), so the update check doesn't offer
+    the same version. Returns True if they match."""
+    config = config or read_config()
+    fingerprint = _installed_fingerprint()
+    if _differs_from_local_copy.get(latest['commit']) == fingerprint:
+        return False
+    archive = download(config['repo'], latest['commit'])
+    with tempfile.TemporaryDirectory(prefix='mp4m-update-') as temp:
+        source_root = extract(archive, temp)
+        # Compare first: reading doesn't need /boot writable
+        if not matches_installed(source_root):
+            _differs_from_local_copy[latest['commit']] = fingerprint
+            return False
+        if not record:
+            return True
+        if not _install_lock.acquire(blocking=False):
+            raise UpdateError("An update is already running.")
+        try:
+            with system.writable(system.BOOT_PATH):
+                # Again under the lock, in case something changed in the meantime
+                previous = installed_version()
+                if previous.get('commit') != 'local' or not matches_installed(source_root):
+                    return False
+                player_hash = file_sha256(system.SCRIPT_FILE)
+                manifest = dict(latest, repo=config['repo'], branch=config['branch'], player_sha256=player_hash,
+                                official_player_hashes=([player_hash] + [h for h in official_player_hashes(previous)
+                                                                         if h != player_hash])[:20])
+                system.write_file(os.path.join(APP_DIR, MANIFEST_NAME), json.dumps(manifest, indent=2))
+        finally:
+            _install_lock.release()
+    return True
+
 def update(latest=None, config=None):
     """Download a commit (default: the newest on the configured branch) and install it.
 
@@ -347,6 +411,14 @@ def main():
         latest = latest_commit(config['repo'], config['branch'])
         print(f"Latest:    {latest['commit'][:7]} {latest['date'][:10]}  {latest['message']}")
 
+        if latest['commit'] != installed.get('commit') and installed.get('commit') == 'local' and not args.force:
+            print("Comparing the local copy with the latest version...")
+            try:
+                if identify_local_copy(latest, config, record=not args.check):
+                    print("Already up to date (the local copy is this version).")
+                    return
+            except Exception as e:
+                print(f"Couldn't compare the local copy: {e}")
         if latest['commit'] == installed.get('commit') and not args.force:
             print("Already up to date.")
             return

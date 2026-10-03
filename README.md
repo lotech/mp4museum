@@ -25,12 +25,15 @@ This fork copies the v7 beta files off a running install and develops them furth
   card, and file names are checked.
 - **Login** with a password (default `mp4museum`), changeable in the web interface.
 - **A network name per player** (`mp4museum-xxxx.local`), so several players can share a network.
-- **Player** no longer uses a full CPU core while there is nothing to play.
+- **Player:** shows what is playing in the web interface with Pause/Resume and Next buttons,
+  has a setting for how long images are shown, brings back sync mode from version 6, uses one
+  VLC instance for everything, and no longer uses a full CPU core while there is nothing to play.
 - **Easier to maintain and install:** the web interface is split into modules and templates,
   runs as a system service, and has an install script.
 - **Updates from GitHub:** a Software Update button in the web interface, or
   `sudo mp4m-update` over SSH, installs the latest version and offers to reboot.
-- **A new boot video.** The MP4MUSEUM logo screen is kept.
+- **Your own boot video** if you want one: put `mp4museum-boot.mp4` on the SD card's boot partition.
+  The original boot video and the MP4MUSEUM logo screen are kept.
 
 The player is meant to run offline; a network is only needed for the web interface.
 See [`v7-beta/README.md`](v7-beta/README.md) for the files, how to try them on a Pi and how

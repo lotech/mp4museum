@@ -89,9 +89,8 @@ function validateSoundDevice() {
   const value = document.getElementById('device').value.trim();
   const errorDiv = document.getElementById('deviceError');
 
-  // The player reads a single digit
-  if (value !== 'auto' && !/^[0-9]$/.test(value)) {
-    errorDiv.textContent = 'Please enter a number between 0 and 9';
+  if (value !== 'auto' && !/^[0-9]{1,2}$/.test(value)) {
+    errorDiv.textContent = 'Please enter a number between 0 and 99';
     errorDiv.style.display = 'block';
     return false;
   }
@@ -129,8 +128,29 @@ function saveAndReboot() {
     .catch(error => alert('Error saving script: ' + error));
 }
 
+// ----- Now playing ----- //
+function refreshNowPlaying() {
+  const text = document.getElementById('nowPlayingText');
+  if (!text || document.hidden) {
+    return;
+  }
+  fetch(text.dataset.statusUrl, {headers: {'X-Requested-With': 'fetch'}})
+    .then(response => response.ok ? response.json() : null)
+    .then(status => {
+      if (status) {
+        text.textContent = status.text;
+      }
+    })
+    .catch(() => {
+      // Try again next time
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   if (document.querySelector('.tabs')) {
     restoreActiveTab();
+  }
+  if (document.getElementById('nowPlayingText')) {
+    setInterval(refreshNowPlaying, 5000);
   }
 });
