@@ -65,7 +65,8 @@ a network is optional.
 - [x] Badge on the player card: which program shows the file (VLC, omxplayer)
 - [x] Changing the loop player starts the loop video playing now again with it
 - [x] Rename files in the web interface (order, `-loop`)
-- [ ] Try mpv instead of VLC and omxplayer (seamless loops with `--loop-file`, no black frames between files, images, control over its IPC socket); not on the image, so it needs installing
+- [x] Tried mpv on the Pi 3B (Buster): it loops with a pause like omxplayer's, so no gain there. It also needs the KMS driver (`dtoverlay=vc4-fkms-v3d`, only set for a Pi 4 in `config.txt`; without it mpv has no video output: the Debian build has no `--vo=rpi`), installing from `legacy.raspbian.org` (Buster's packages moved there), `--hwdec=mmal-copy` (frames copied by the CPU, it dropped frames) and the picture was the wrong size. Worked: `mpv --fs --vo=gpu --gpu-context=drm --hwdec=mmal-copy --loop-file=inf <file>`
+- [ ] mpv again on a newer Raspberry Pi OS or a Pi 4 (KMS and hardware decoding are the default there, and omxplayer doesn't exist): seamless loops?, no black frames between files, images, control over its IPC socket
 
 ## 5. Installation
 
