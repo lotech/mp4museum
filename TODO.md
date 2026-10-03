@@ -15,7 +15,7 @@ a network is optional.
 - [x] Credit MP4MUSEUM and link to the website and source
 - [x] New boot video
 - [x] Remove duplicated network code
-- [ ] Test on the Pi 3B
+- [x] Test on the Pi 3B (web service run from SSH; permanent install and boot video still to check)
 
 ## 2. Code structure
 
