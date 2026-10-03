@@ -189,6 +189,8 @@ def index():
                            update_available=session.get('update'),
                            image_duration=system.get_image_duration(),
                            loop_player=system.get_loop_player(),
+                           boot_video_plays=system.get_boot_video_plays(),
+                           show_address=system.get_show_address(),
                            omxplayer_installed=system.omxplayer_installed())
 
 
@@ -362,6 +364,34 @@ def set_image_duration():
         flash(f"Images are now shown for {int(seconds)} seconds.", "success")
     except Exception as e:
         flash(f"Failed to save the image duration: {e}", "error")
+    return redirect(url_for('index'))
+
+@app.route('/set_boot_video_plays', methods=['POST'])
+def set_boot_video_plays():
+    value = request.form.get('boot_video_plays', '')
+    if not value.isdecimal() or int(value) not in system.BOOT_VIDEO_PLAYS:
+        flash("Please choose how often the boot video plays.", "error")
+        return redirect(url_for('index'))
+    try:
+        system.save_player_setting('boot_video_plays', int(value))
+        times = {2: "twice", 1: "once", 0: "not at all"}[int(value)]
+        flash(f"The boot video will play {times} from the next start.", "success")
+    except Exception as e:
+        flash(f"Failed to save the setting: {e}", "error")
+    return redirect(url_for('index'))
+
+@app.route('/set_show_address', methods=['POST'])
+def set_show_address():
+    value = request.form.get('show_address', '')
+    if value not in ('yes', 'no'):
+        flash("Please choose whether to show the address.", "error")
+        return redirect(url_for('index'))
+    try:
+        system.save_player_setting('show_address', value)
+        flash("The address will be shown on the logo screen from the next start." if value == 'yes'
+              else "The address won't be shown on the logo screen from the next start.", "success")
+    except Exception as e:
+        flash(f"Failed to save the setting: {e}", "error")
     return redirect(url_for('index'))
 
 @app.route('/set_loop_player', methods=['POST'])

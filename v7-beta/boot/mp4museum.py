@@ -10,7 +10,8 @@
 # that don't start playing; loop files restarted by the player; custom boot
 # video from /boot; VLC kept open between files; omxplayer for loop videos
 # when it is installed; position for the web interface, which can also choose
-# the file to play; exit code 0 only when stopped on purpose (.bashrc restarts it)
+# the file to play; exit code 0 only when stopped on purpose (.bashrc restarts it);
+# how often the boot video plays and the player's address on the logo screen (settings)
 
 import signal, sys
 # stopped on purpose (Ctrl-C on the console, SIGTERM, SIGHUP): exit code 0, so .bashrc doesn't
@@ -18,7 +19,7 @@ import signal, sys
 for quit_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(quit_signal, lambda signum, frame: sys.exit(0))
 
-import time, vlc, os, glob, json, shutil, re, struct
+import time, vlc, os, glob, json, shutil, re, struct, socket
 import RPi.GPIO as GPIO
 import subprocess
 
@@ -28,8 +29,11 @@ BOOT_VIDEO = '/home/pi/mp4museum-boot.mp4'
 CUSTOM_BOOT_VIDEO = '/boot/mp4museum-boot.mp4'
 LOGO = '/home/pi/mp4m-v7beta.jpg'
 ALSA_FILE = '/boot/alsa.txt'
-# image_duration=<seconds> and loop_player=omxplayer|vlc, set in the web interface
+# image_duration=<seconds>, loop_player=omxplayer|vlc, boot_video_plays=0|1|2 and
+# show_address=yes|no, set in the web interface
 SETTINGS_FILE = '/boot/mp4m-player.txt'
+# the network name set in the web interface (else the web interface sets a default one)
+HOSTNAME_FILE = '/boot/hostname.txt'
 # what is playing, for the web interface
 STATUS_FILE = '/tmp/mp4museum-status.json'
 # from the web interface, followed by SIGUSR1: {"id": ..., "file": ...} plays that file;
@@ -62,7 +66,8 @@ if os.path.isfile(ALSA_FILE):
         audiodevice = card
 
 def read_settings():
-    settings = {'image_duration': DEFAULT_IMAGE_DURATION, 'loop_player': 'omxplayer'}
+    settings = {'image_duration': DEFAULT_IMAGE_DURATION, 'loop_player': 'omxplayer',
+                'boot_video_plays': 2, 'show_address': True}
     try:
         with open(SETTINGS_FILE, 'r') as f:
             for line in f:
@@ -71,6 +76,10 @@ def read_settings():
                     settings['image_duration'] = max(1, int(value))
                 elif key == 'loop_player' and value in ('vlc', 'omxplayer'):
                     settings['loop_player'] = value
+                elif key == 'boot_video_plays' and value in ('0', '1', '2'):
+                    settings['boot_video_plays'] = int(value)
+                elif key == 'show_address' and value in ('yes', 'no'):
+                    settings['show_address'] = value == 'yes'
     except OSError:
         pass
     return settings
@@ -598,6 +607,40 @@ def sync_mode():
             write_status('sync', sync_file, engine='omxplayer-sync')
             subprocess.run(["omxplayer-sync", "-u", flag, sync_file])
 
+# the address of the web interface, e.g. "http://mp4museum-1a2b.local" and "192.168.1.42" on a
+# second line (not there yet without a network)
+def address_text():
+    name = None
+    try:
+        with open(HOSTNAME_FILE, 'r') as f:
+            name = f.read().strip().lower()
+    except OSError:
+        pass
+    if not name or not re.match(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$', name):
+        name = socket.gethostname()
+    text = 'http://%s.local' % name
+    try:
+        output = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=5).stdout
+        addresses = [a for a in output.split() if '.' in a and not a.startswith('169.254.')]
+        if addresses:
+            text += '\n' + '   '.join(addresses[:2])
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return text
+
+# shown in the bottom right corner of the logo screen, so it's easy to find the web interface
+def show_address(on):
+    try:
+        if on:
+            player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, address_text())
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, 30)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.X, 30)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, 30)
+            player.video_set_marquee_int(vlc.VideoMarqueeOption.Position, 10)
+        player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1 if on else 0)
+    except Exception as e:
+        print("couldn't show the address on the logo screen: %s" % e, flush=True)
+
 # *** run player ****
 
 boot_video = CUSTOM_BOOT_VIDEO if os.path.isfile(CUSTOM_BOOT_VIDEO) else BOOT_VIDEO
@@ -610,14 +653,21 @@ if boot_video != BOOT_VIDEO and entry and entry[1] >= SKIP_AFTER and entry[0] ==
 
 # start player twice to make sure it is working
 # seems weird but works
-boot_played = [vlc_play(boot_video) for _ in range(2)]
-# forgiven only when both played: it could stop the player on the second
-if boot_played == ["ended", "ended"]:
+# (boot_video_plays: 2 by default; fewer to test whether the first file still shows properly
+# after a cold start)
+settings = read_settings()
+boot_played = [vlc_play(boot_video) for _ in range(settings['boot_video_plays'])]
+# forgiven only when all played: it could stop the player on the second
+if boot_played and all(result == "ended" for result in boot_played):
     forgive(boot_video)
 
 # please do not remove my logo screen
 skip_requested = False
+if settings['show_address']:
+    show_address(True)
 vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,) + IMAGE_OPTIONS)
+if settings['show_address']:
+    show_address(False)
 
 # add event listener which reacts to GPIO signal
 GPIO.add_event_detect(11, GPIO.RISING, callback = buttonPause, bouncetime = 234)

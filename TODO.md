@@ -31,7 +31,7 @@ a network is optional.
 
 - [x] Bring back sync mode (v6 had it, using omxplayer-sync); only runs when omxplayer-sync is installed
 - [x] Use one VLC instance instead of creating one per file
-- [ ] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround, kept for now)
+- [ ] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround, kept for now). Setting for it in Media → Playback (`boot_video_plays`: 2, 1, 0); test with several cold starts (unplugged) that the first file shows properly, with sound
 - [x] Setting for how long images are shown
 - [x] "Now playing", Pause/Resume and Next in the web interface
 - [x] Sound cards 10 and above (player reads all of `alsa.txt`, web interface allows 0–99)
@@ -89,7 +89,8 @@ a network is optional.
 - [ ] Update from a file (USB stick or upload) for players that are never online
 - [ ] Updates that change files outside `/boot` (applied at boot, before the overlay is set up)
 
-- [ ] Show the network name on screen (e.g. on the logo screen), since every player now has its own name
+- [x] Show the network name on screen: `http://<name>.local` and the IP address on the logo screen (VLC marquee), setting `show_address`
+- [ ] Test on the Pi: does the address show on the logo screen (VLC's marquee with the Pi's video output), is it readable?
 - [ ] Announce the web interface over Bonjour/mDNS (`_http._tcp`) so players show up in network browsers
 - [ ] Offline setup: create a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (there is no Wi-Fi setting yet)
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)

@@ -48,6 +48,48 @@ def test_start_up_and_playlist_order(tmp_path):
     assert first_play(r, 'c.jpg')['options'] == [':image-duration=10'] + image
 
 
+
+def marquee(result):
+    """(what was set on VLC's marquee, at what point in the plays) in order: (option, value, plays before)."""
+    events, played = [], 0
+    for event in result['log']:
+        if 'play' in event:
+            played += 1
+        elif 'marquee' in event:
+            events.append((event['marquee'], event['value'], played))
+    return events
+
+
+def test_address_on_the_logo_screen(tmp_path):
+    enable, text = 0, 1
+    r = run(tmp_path, files=['/media/internal/a.mp4'], max_plays=5)
+    m = marquee(r)
+    # set just before the logo (after the two boot video plays), taken off after it
+    assert (text, 'http://mp4museum-1a2b.local\n192.168.1.42', 2) in m
+    assert [e for e in m if e[0] == enable] == [(enable, 1, 2), (enable, 0, 3)]
+    # the name set in the web interface (the Pi may not have taken it yet); no network yet
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/hostname.txt': 'Gallery-3\n'},
+            addresses='', max_plays=5)
+    assert (text, 'http://gallery-3.local', 2) in marquee(r)
+    # two addresses at most; link-local ones (no DHCP answer) left out
+    r = run(tmp_path, files=['/media/internal/a.mp4'], addresses='169.254.3.4 10.0.0.5 192.168.1.42 172.17.0.1',
+            max_plays=5)
+    assert (text, 'http://mp4museum-1a2b.local\n10.0.0.5   192.168.1.42', 2) in marquee(r)
+    # turned off in the web interface
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'show_address=no\n'}, max_plays=5)
+    assert marquee(r) == [] and plays(r)[2] == 'mp4m-v7beta.jpg'
+
+
+def test_boot_video_plays_setting(tmp_path):
+    for times in (0, 1, 2):
+        r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=%d\n' % times},
+                max_plays=times + 2)
+        assert plays(r)[:times + 2] == ['mp4museum-boot.mp4'] * times + ['mp4m-v7beta.jpg', 'a.mp4']
+    # anything else: twice, as in the original
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=5\n'}, max_plays=4)
+    assert plays(r)[:4] == ['mp4museum-boot.mp4'] * 2 + ['mp4m-v7beta.jpg', 'a.mp4']
+
+
 def test_boot_video_original_or_custom(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4'], max_plays=4)
     assert [event['play'] for event in r['log'] if 'play' in event][:2] == ['/home/pi/mp4museum-boot.mp4'] * 2

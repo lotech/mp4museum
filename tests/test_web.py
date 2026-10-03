@@ -930,3 +930,24 @@ def test_device_info(pi, client, tmp_path, monkeypatch):
     info = dict(system.get_device_info())
     assert info['Memory'] == '861 MB for programs' and 'Model' not in info and 'Power' not in info
     assert system.format_duration(59) == '0 min' and system.format_duration(3 * 86400 + 7200) == '3 d 2 h'
+
+
+def test_start_up_settings(pi, client):
+    html = client.get('/').data.decode()
+    assert '<option value="2" selected>Play twice (default)</option>' in html
+    assert '<option value="yes" selected>Show (default)</option>' in html
+    r = client.post('/set_boot_video_plays', data={'boot_video_plays': '0'}, follow_redirects=True)
+    assert b'will play not at all' in r.data
+    r = client.post('/set_show_address', data={'show_address': 'no'}, follow_redirects=True)
+    assert b"won&#39;t be shown" in r.data
+    # saved for the player, keeping the other settings
+    client.post('/set_image_duration', data={'seconds': '7'})
+    assert sorted(open(system.PLAYER_SETTINGS_FILE).read().split()) == ['boot_video_plays=0', 'image_duration=7', 'show_address=no']
+    assert system.get_boot_video_plays() == 0 and system.get_show_address() is False
+    html = client.get('/').data.decode()
+    assert '<option value="0" selected>' in html and '<option value="no" selected>' in html
+    for route, field, bad in (('/set_boot_video_plays', 'boot_video_plays', '3'), ('/set_boot_video_plays', 'boot_video_plays', 'x'),
+                              ('/set_show_address', 'show_address', 'maybe')):
+        r = client.post(route, data={field: bad}, follow_redirects=True)
+        assert b'Please choose' in r.data
+    assert system.get_boot_video_plays() == 0 and system.get_show_address() is False

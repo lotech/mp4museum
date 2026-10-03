@@ -47,6 +47,9 @@ vlc = types.ModuleType('vlc')
 class _S:
     NothingSpecial, Opening, Buffering, Playing, Paused, Stopped, Ended, Error = range(8)
 vlc.State = _S
+class _M:
+    Enable, Text, Color, Opacity, Position, Refresh, Size, Timeout, X, Y = range(10)
+vlc.VideoMarqueeOption = _M
 class Media:
     def __init__(self, path, options):
         self.path, self.options = path, list(options)
@@ -100,6 +103,10 @@ class Player:
         # known once it is playing, as in VLC
         playing = self.state in (_S.Playing, _S.Paused, _S.Ended)
         return int(self.length * 1000) if playing and self.length < 10 ** 8 else 0
+    def video_set_marquee_int(self, option, value):
+        log.append({'marquee': option, 'value': value, 'at': round(clock['now'] - 1000, 2)})
+    def video_set_marquee_string(self, option, value):
+        log.append({'marquee': option, 'value': value, 'at': round(clock['now'] - 1000, 2)})
     def get_time(self):
         if self.media is None:
             return -1
@@ -130,9 +137,14 @@ def fake_run(cmd, *args, **kwargs):
         log.append({'probe': cmd[2]})
         codec = scenario.get('omx_codec', 'h264')
         return subprocess.CompletedProcess(cmd, 1, stdout='Input #0, mov,mp4\n    Stream #0:0(und): Video: %s (High)\n' % codec)
+    if cmd == ['hostname', '-I']:
+        # scenario option addresses (default one IPv4 and one IPv6 address)
+        return subprocess.CompletedProcess(cmd, 0, stdout=scenario.get('addresses', '192.168.1.42 fd00::1 ') + '\n')
     log.append({'run': cmd})
     raise SystemExit('sync ran')
 subprocess.run = fake_run
+import socket
+socket.gethostname = lambda: 'mp4museum-1a2b'
 
 # --- fake omxplayer ---
 # /usr/bin/omxplayer is a script that runs omxplayer.bin; both are modelled. Scenario options:
@@ -199,6 +211,7 @@ shutil.which = lambda name: '/usr/bin/' + name if name in scenario.get('installe
 tmp = tempfile.mkdtemp()
 paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
          '/boot/alsa.txt': os.path.join(tmp, 'alsa.txt'), '/boot/mp4m-player.txt': os.path.join(tmp, 'mp4m-player.txt'),
+         '/boot/hostname.txt': os.path.join(tmp, 'hostname.txt'),
          '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json'),
          '/tmp/mp4museum-play.json': os.path.join(tmp, 'play.json'),
          '/tmp/mp4museum-skipped.json': os.path.join(tmp, 'skipped.json'),
