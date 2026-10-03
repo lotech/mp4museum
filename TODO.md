@@ -87,4 +87,10 @@ a network is optional.
 - [ ] Offline setup: create a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (there is no Wi-Fi setting yet)
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
 - [ ] "Restore default config.txt" button (the old "Auto" video preset used to do this)
+- [ ] OSC control over the network (show control software, Max/MSP, TouchOSC, QLab), for the basic controls:
+  - e.g. `/mp4museum/play`, `/pause`, `/toggle`, `/next`, `/previous`, `/rewind`, `/play <file name or number>`
+  - maybe also `/sync` (start a file on several players at once) and a status reply (what is playing, position)
+  - OSC is simple UDP messages: parse them in Python rather than adding a package (players may never be online)
+  - in the web service (it already sends the player its commands) or the player; port and on/off in the web interface (System); off by default, as anyone on the network could control the player
+  - needs a "previous file" in the player, which doesn't exist yet
 - [x] "Save and Reboot" asks for confirmation twice
