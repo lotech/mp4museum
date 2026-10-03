@@ -38,7 +38,11 @@ in alphabetical order, over and over.
 
 - **Boot video:** the original MP4MUSEUM one (`/home/pi/mp4museum-boot.mp4`). To use your own,
   put it on the SD card's boot partition as `mp4museum-boot.mp4` (it shows up as a drive on
-  a computer); delete it to go back to the original.
+  a computer); delete it to go back to the original. It plays twice, as in the original (a
+  warm-up for the video output); Media → Playback can make that once or not at all.
+- **Logo screen:** shows the player's address (`http://<name>.local` and its IP address) in the
+  corner for its 10 seconds, so it's easy to find the web interface. It can be turned off in
+  Media → Playback.
 
 - **Loops:** a file with `loop.` in its name (e.g. `intro-loop.mp4`) plays again and again
   until Next is pressed; then the playlist carries on. Loop videos are played with

@@ -618,6 +618,23 @@ def save_player_setting(key, value):
 def save_image_duration(seconds):
     save_player_setting('image_duration', seconds)
 
+# how often the boot video plays at start-up: twice in the original, as a warm-up
+BOOT_VIDEO_PLAYS = (2, 1, 0)
+
+def get_boot_video_plays():
+    value = read_player_settings().get('boot_video_plays', '')
+    return int(value) if value.isdecimal() and int(value) in BOOT_VIDEO_PLAYS else 2
+
+def get_show_address():
+    """Whether the player shows its name and IP address on the logo screen (default yes)."""
+    return read_player_settings().get('show_address', '') != 'no'
+
+def player_has_start_up_settings():
+    """Whether the player script reads boot_video_plays and show_address: one edited here before
+    they existed is kept by updates, and doesn't."""
+    script = read_script_file()
+    return 'boot_video_plays' in script and 'show_address' in script
+
 LOOP_PLAYERS = ('vlc', 'omxplayer')
 
 def get_loop_player():

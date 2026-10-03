@@ -47,6 +47,9 @@ vlc = types.ModuleType('vlc')
 class _S:
     NothingSpecial, Opening, Buffering, Playing, Paused, Stopped, Ended, Error = range(8)
 vlc.State = _S
+class _M:
+    Enable, Text, Color, Opacity, Position, Refresh, Size, Timeout, X, Y = range(10)
+vlc.VideoMarqueeOption = _M
 class Media:
     def __init__(self, path, options):
         self.path, self.options = path, list(options)
@@ -100,6 +103,12 @@ class Player:
         # known once it is playing, as in VLC
         playing = self.state in (_S.Playing, _S.Paused, _S.Ended)
         return int(self.length * 1000) if playing and self.length < 10 ** 8 else 0
+    def video_set_marquee_int(self, option, value):
+        log.append({'marquee': option, 'value': value, 'at': round(clock['now'] - 1000, 2)})
+    def video_set_marquee_string(self, option, value):
+        if scenario.get('no_marquee'):
+            raise NameError('libvlc_video_set_marquee_string')
+        log.append({'marquee': option, 'value': value, 'at': round(clock['now'] - 1000, 2)})
     def get_time(self):
         if self.media is None:
             return -1
@@ -130,6 +139,15 @@ def fake_run(cmd, *args, **kwargs):
         log.append({'probe': cmd[2]})
         codec = scenario.get('omx_codec', 'h264')
         return subprocess.CompletedProcess(cmd, 1, stdout='Input #0, mov,mp4\n    Stream #0:0(und): Video: %s (High)\n' % codec)
+    if cmd == ['hostname', '-I']:
+        # scenario options addresses (default one IPv4 and one IPv6 address) and addresses_from:
+        # [[seconds, addresses], ...], what it says from then on (the network coming up)
+        addresses = scenario.get('addresses', '192.168.1.42 fd00::1 ')
+        for at, later in scenario.get('addresses_from', []):
+            if clock['now'] - 1000 >= at:
+                addresses = later
+        log.append({'hostname -I': addresses, 'at': round(clock['now'] - 1000, 2)})
+        return subprocess.CompletedProcess(cmd, 0, stdout=addresses + '\n')
     log.append({'run': cmd})
     raise SystemExit('sync ran')
 subprocess.run = fake_run
@@ -199,6 +217,9 @@ shutil.which = lambda name: '/usr/bin/' + name if name in scenario.get('installe
 tmp = tempfile.mkdtemp()
 paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
          '/boot/alsa.txt': os.path.join(tmp, 'alsa.txt'), '/boot/mp4m-player.txt': os.path.join(tmp, 'mp4m-player.txt'),
+         '/boot/hostname.txt': os.path.join(tmp, 'hostname.txt'),
+         # scenario write: {'/proc/cpuinfo': 'Serial : ...'}; no network interfaces
+         '/proc/cpuinfo': os.path.join(tmp, 'cpuinfo'), '/sys/class/net': os.path.join(tmp, 'net'),
          '/tmp/mp4museum-status.json': os.path.join(tmp, 'status.json'),
          '/tmp/mp4museum-play.json': os.path.join(tmp, 'play.json'),
          '/tmp/mp4museum-skipped.json': os.path.join(tmp, 'skipped.json'),

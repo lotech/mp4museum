@@ -48,6 +48,90 @@ def test_start_up_and_playlist_order(tmp_path):
     assert first_play(r, 'c.jpg')['options'] == [':image-duration=10'] + image
 
 
+
+def marquee(result):
+    """What was set on VLC's marquee, in order: (option, value, the file playing then)."""
+    events, playing = [], None
+    for event in result['log']:
+        if 'play' in event:
+            playing = event['play'].split('/')[-1]
+        elif 'marquee' in event:
+            events.append((event['marquee'], event['value'], playing))
+    return events
+
+
+def test_address_on_the_logo_screen(tmp_path):
+    import system
+    enable, text = 0, 1
+    serial = 'Serial\t\t: 00000000831b1a81\n'
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/proc/cpuinfo': serial}, max_plays=5)
+    m = marquee(r)
+    # the name the web interface gives the Pi (from its serial number), worked out the same way
+    original, system.read_serial = system.read_serial, lambda: '00000000831b1a81'
+    try:
+        name = system.default_hostname()
+    finally:
+        system.read_serial = original
+    assert (text, 'http://%s.local\n192.168.1.42' % name, 'mp4m-v7beta.jpg') in m
+    # VLC only sets it on a picture being shown: on once the logo shows. Once the logo has ended,
+    # VLC can't take it off any more, so VLC is stopped (that drops it) before the first file
+    switched = [(e[1], e[2]) for e in m if e[0] == enable]
+    assert switched == [(1, 'mp4m-v7beta.jpg'), (0, 'mp4m-v7beta.jpg')]
+    on = [e['at'] for e in r['log'] if e.get('marquee') == enable][0]
+    logo, first = first_play(r, 'mp4m-v7beta.jpg')['at'], first_play(r, 'a.mp4')['at']
+    assert logo < on < logo + 2
+    stops = [e['at'] for e in r['log'] if 'stop_call' in e]
+    assert [t for t in stops if logo + 9 < t <= first] and not [t for t in stops if t > first]
+
+    # the name set in the web interface; no serial number: from the MAC address, else mp4museum
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/hostname.txt': 'Gallery-3\n'}, max_plays=5)
+    assert (text, 'http://gallery-3.local\n192.168.1.42', 'mp4m-v7beta.jpg') in marquee(r)
+    r = run(tmp_path, files=['/media/internal/a.mp4'], max_plays=5)
+    assert (text, 'http://mp4museum.local\n192.168.1.42', 'mp4m-v7beta.jpg') in marquee(r)
+
+    # no address yet (the network is still coming up): looked up again until there is one
+    r = run(tmp_path, files=['/media/internal/a.mp4'], addresses='', addresses_from=[[5, '192.168.1.50']],
+            write={'/boot/mp4m-player.txt': 'boot_video_plays=0\n'}, max_plays=3)
+    texts = [e[1] for e in marquee(r) if e[0] == text]
+    assert texts == ['http://mp4museum.local', 'http://mp4museum.local\n192.168.1.50']
+    lookups = [e['at'] for e in r['log'] if 'hostname -I' in e]
+    assert 3 <= len(lookups) <= 5 and lookups[-1] < 7
+
+    # two addresses at most; link-local ones (no answer from the router) left out
+    r = run(tmp_path, files=['/media/internal/a.mp4'], addresses='169.254.3.4 10.0.0.5 192.168.1.42 172.17.0.1',
+            max_plays=5)
+    assert (text, 'http://mp4museum.local\n10.0.0.5   192.168.1.42', 'mp4m-v7beta.jpg') in marquee(r)
+
+    # next pressed during the logo: taken off as well
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=0\n'},
+            signals=[{'at': 4, 'signal': 'SIGUSR1'}], max_plays=3)
+    assert [(e[1], e[2]) for e in marquee(r) if e[0] == enable] == [(1, 'mp4m-v7beta.jpg'), (0, 'mp4m-v7beta.jpg')]
+    assert plays(r)[:2] == ['mp4m-v7beta.jpg', 'a.mp4']
+
+    # VLC can't do it: said once in the log, and playing goes on as usual
+    r = run(tmp_path, files=['/media/internal/a.mp4'], no_marquee=True, max_plays=5)
+    assert r['stdout'].count("couldn't show the address") == 1 and plays(r)[2:4] == ['mp4m-v7beta.jpg', 'a.mp4']
+    logo, first = first_play(r, 'mp4m-v7beta.jpg')['at'], first_play(r, 'a.mp4')['at']
+    assert not [e for e in r['log'] if 'stop_call' in e and logo < e['at'] <= first]
+
+    # turned off in the web interface
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'show_address=no\n'}, max_plays=5)
+    assert marquee(r) == [] and plays(r)[2] == 'mp4m-v7beta.jpg' and 'hostname -I' not in str(r['log'])
+    # and then VLC isn't stopped after the logo (as before)
+    logo, first = first_play(r, 'mp4m-v7beta.jpg')['at'], first_play(r, 'a.mp4')['at']
+    assert not [e for e in r['log'] if 'stop_call' in e and logo < e['at'] <= first]
+
+
+def test_boot_video_plays_setting(tmp_path):
+    for times in (0, 1, 2):
+        r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=%d\n' % times},
+                max_plays=times + 2)
+        assert plays(r)[:times + 2] == ['mp4museum-boot.mp4'] * times + ['mp4m-v7beta.jpg', 'a.mp4']
+    # anything else: twice, as in the original
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-player.txt': 'boot_video_plays=5\n'}, max_plays=4)
+    assert plays(r)[:4] == ['mp4museum-boot.mp4'] * 2 + ['mp4m-v7beta.jpg', 'a.mp4']
+
+
 def test_boot_video_original_or_custom(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4'], max_plays=4)
     assert [event['play'] for event in r['log'] if 'play' in event][:2] == ['/home/pi/mp4museum-boot.mp4'] * 2
@@ -133,13 +217,14 @@ def test_vlc_stays_open_between_files_and_loop_passes(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/clip-loop.mp4'],
             media={'clip-loop.mp4': 3}, max_plays=12)
     assert plays(r)[3:4] == ['a.mp4'] and plays(r)[4:9] == ['clip-loop.mp4'] * 5
-    assert stop_calls(r) == []
+    # (only after the logo, at start-up, to take the address off)
+    assert [e['stop_call'] for e in stop_calls(r)] == ['/home/pi/mp4m-v7beta.jpg']
 
 
 def test_vlc_stopped_when_skipped_and_when_idle(tmp_path):
     r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/b.mp4'], media={'a.mp4': 100},
             signals=[{'at': 30, 'signal': 'SIGUSR1'}], max_plays=6)
-    assert [e['stop_call'] for e in stop_calls(r)][:1] == ['/media/internal/a.mp4']
+    assert [e['stop_call'] for e in stop_calls(r)][:2] == ['/home/pi/mp4m-v7beta.jpg', '/media/internal/a.mp4']
     r = run(tmp_path, files=[], max_seconds=30)
     assert stop_calls(r)     # no last frame left on screen while there's nothing to play
 

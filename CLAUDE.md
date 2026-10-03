@@ -40,15 +40,17 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   pin 11 pause, pin 13 next. `.bashrc` starts it again unless it exits with 0 (Ctrl-C, SIGTERM,
   SIGHUP); a file it was playing when it died is skipped until replaced (`/tmp/mp4museum-skipped.json`),
   so one bad file can't stop it again and again. VLC is not stopped when a file ends by itself (`stop()` closes
-  the video output: black frames), only on skip, failure, idle or before handing the screen to
-  omxplayer. `loop.` H.264/MPEG-4 videos (checked with `omxplayer -i`) are looped by `omxplayer --loop` when it is installed (it
+  the video output: black frames), only on skip, failure, idle, before handing the screen to
+  omxplayer, and after the logo screen when it showed the address (VLC's marquee can only be
+  changed on a picture being shown; stopping drops it). `loop.` H.264/MPEG-4 videos (checked with `omxplayer -i`) are looped by `omxplayer --loop` when it is installed (it
   holds the last frame; VLC still shows a black frame each time it starts a file again on
   the Pi). omxplayer is no longer developed and isn't on newer OS versions, so with
   `loop_player=vlc` or without omxplayer, the player restarts them in VLC (VLC's
   `input-repeat` froze on the Pi). Talks to the web interface through
   `/tmp/mp4museum-status.json` (status it writes, with position, length and `engine`: vlc or omxplayer), `SIGUSR1` (next),
   `SIGUSR2` (pause), `/tmp/mp4museum-play.json` (a file chosen in the web interface, or
-  `"command": "rewind"`, read when SIGUSR1 arrives) and `/boot/mp4m-player.txt` (settings). Edited players from before may not
+  `"command": "rewind"`, read when SIGUSR1 arrives) and `/boot/mp4m-player.txt` (settings: `image_duration`,
+  `loop_player`, `boot_video_plays`, `show_address`). Edited players from before may not
   write `play_file` in their status; the web interface then doesn't offer choosing a file.
   Keep the author's logo screen ("please do not remove my logo screen") and his `(c)` header.
   Users can edit this file in the web interface, so the updater only replaces it if unedited.

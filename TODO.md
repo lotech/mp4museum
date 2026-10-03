@@ -31,7 +31,7 @@ a network is optional.
 
 - [x] Bring back sync mode (v6 had it, using omxplayer-sync); only runs when omxplayer-sync is installed
 - [x] Use one VLC instance instead of creating one per file
-- [ ] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround, kept for now)
+- [ ] Find out on the Pi whether the boot video still needs to play twice ("start twice" workaround, kept for now). Setting for it in Media → Playback (`boot_video_plays`: 2, 1, 0); test with several cold starts (unplugged) that the first file shows properly, with sound
 - [x] Setting for how long images are shown
 - [x] "Now playing", Pause/Resume and Next in the web interface
 - [x] Sound cards 10 and above (player reads all of `alsa.txt`, web interface allows 0–99)
@@ -70,7 +70,7 @@ a network is optional.
 - [x] Images kept VLC busy (one core at 100 % on a Pi 3, video ~0 %): it converted the still 10 times a second. `:image-chroma=I420` converts it once (`image-fps` made a paused image move on). To check on the Pi: CPU while an image shows, and whether large images show now
 - [ ] Test on the Pi: with 256 MB, does a 3300 x 2550 image show? (Then the 2048 pixel limit could go up)
 - [ ] Warn about videos the Pi can't decode in hardware, like large images: H.265/HEVC (phones and editing software often export it), VP9, AV1. A Pi 3 decodes H.264 and MPEG-4 Part 2 in hardware (an H.264 1080p25 MP4 played at 0.4 % CPU); others are decoded in software, stutter and heat the Pi. Mark them in the playlist and warn on upload, saying to export as H.264. The codec can be read with `omxplayer -i` (the player's `omx_can_play` does it for loops), or from the MP4 header without omxplayer (newer OS)
-- [ ] Heat: a Pi 3 B+ (heatsink, no case) ran at 89 °C and slowed itself down; the heatsink was hot. Check after the image fix, and against a second Pi
+- [x] Heat: a Pi 3 B+ (heatsink, no case) ran at 89 °C and slowed itself down. Images were part of it (fixed: 100 % CPU -> 5 %), but with the CPU idle, looping a video, that board still reached 79.5 °C in 10 minutes; another Pi 3 B+ with the same SD card, file and place stayed at 44 °C. That board (or its heatsink pad) was faulty
 - [x] Tried mpv on the Pi 3B (Buster): it loops with a pause like omxplayer's, so no gain there. It also needs the KMS driver (`dtoverlay=vc4-fkms-v3d`, only set for a Pi 4 in `config.txt`; without it mpv has no video output: the Debian build has no `--vo=rpi`), installing from `legacy.raspbian.org` (Buster's packages moved there), `--hwdec=mmal-copy` (frames copied by the CPU, it dropped frames) and the picture was the wrong size. Worked: `mpv --fs --vo=gpu --gpu-context=drm --hwdec=mmal-copy --loop-file=inf <file>`
 - [ ] mpv again on a newer Raspberry Pi OS or a Pi 4 (KMS and hardware decoding are the default there, and omxplayer doesn't exist): seamless loops?, no black frames between files, images, control over its IPC socket
 
@@ -89,7 +89,8 @@ a network is optional.
 - [ ] Update from a file (USB stick or upload) for players that are never online
 - [ ] Updates that change files outside `/boot` (applied at boot, before the overlay is set up)
 
-- [ ] Show the network name on screen (e.g. on the logo screen), since every player now has its own name
+- [x] Show the network name on screen: `http://<name>.local` and the IP address on the logo screen (VLC marquee), setting `show_address`
+- [ ] Test on the Pi: does the address show on the logo screen (VLC's marquee with the Pi's video output), is it readable, is it gone from the first file? Does the IP address appear when the network comes up during the logo?
 - [ ] Announce the web interface over Bonjour/mDNS (`_http._tcp`) so players show up in network browsers
 - [ ] Offline setup: create a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (there is no Wi-Fi setting yet)
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
