@@ -114,31 +114,6 @@
           </div>
           <p class="hint">Add -loop to the end of the file name to loop or hold a clip. omxplayer is preferred for loops.</p>
         </form>
-        <form method="post" action="{{ url_for('set_boot_video_plays') }}" class="setting">
-          <label for="boot_video_plays">{{ icon('film') }}Boot video at start-up</label>
-          <div class="input-row">
-            <select name="boot_video_plays" id="boot_video_plays">
-              <option value="1"{% if boot_video_plays == 1 %} selected{% endif %}>Play once (default)</option>
-              <option value="2"{% if boot_video_plays == 2 %} selected{% endif %}>Play twice</option>
-              <option value="0"{% if boot_video_plays == 0 %} selected{% endif %}>Don't play</option>
-            </select>
-            <button type="submit" class="button">Save</button>
-          </div>
-        </form>
-        <form method="post" action="{{ url_for('set_show_address') }}" class="setting">
-          <label for="show_address">{{ icon('tag') }}Show network address on boot</label>
-          <div class="input-row">
-            <select name="show_address" id="show_address">
-              <option value="yes"{% if show_address %} selected{% endif %}>Show (default)</option>
-              <option value="no"{% if not show_address %} selected{% endif %}>Don't show</option>
-            </select>
-            <button type="submit" class="button">Save</button>
-          </div>
-        </form>
-        {% if not start_up_settings %}
-        <p class="hint">The player script on this Pi was edited before these two settings existed, so it doesn't
-          use them. Updates keep an edited script and save the new one as /boot/mp4museum.py.new.</p>
-        {% endif %}
       </div>
     </section>
 
@@ -378,6 +353,37 @@
         </div>
         <p class="hint">From {{ update_config.repo }}{% if update_config.branch != 'master' %} (branch {{ update_config.branch }}){% endif %}.
           Custom player script is untouched. Over SSH: <code>sudo mp4m-update</code></p>
+      </section>
+
+      <section class="card">
+        <h3>{{ icon('power') }}Start-up</h3>
+        <div class="stack-settings">
+          <form method="post" action="{{ url_for('set_boot_video_plays') }}" class="setting">
+            <label for="boot_video_plays">{{ icon('film') }}Boot video at start-up</label>
+            <div class="input-row">
+              <select name="boot_video_plays" id="boot_video_plays">
+                <option value="1"{% if boot_video_plays == 1 %} selected{% endif %}>Play once (default)</option>
+                <option value="2"{% if boot_video_plays == 2 %} selected{% endif %}>Play twice</option>
+                <option value="0"{% if boot_video_plays == 0 %} selected{% endif %}>Don't play</option>
+              </select>
+              <button type="submit" class="button">Save</button>
+            </div>
+          </form>
+          <form method="post" action="{{ url_for('set_show_address') }}" class="setting">
+            <label for="show_address">{{ icon('tag') }}Show network address on boot</label>
+            <div class="input-row">
+              <select name="show_address" id="show_address">
+                <option value="yes"{% if show_address %} selected{% endif %}>Show (default)</option>
+                <option value="no"{% if not show_address %} selected{% endif %}>Don't show</option>
+              </select>
+              <button type="submit" class="button">Save</button>
+            </div>
+          </form>
+          {% if not start_up_settings %}
+          <p class="hint">The player script on this Pi was edited before these two settings existed, so it doesn't
+            use them. Updates keep an edited script and save the new one as /boot/mp4museum.py.new.</p>
+          {% endif %}
+        </div>
       </section>
 
       <section class="card">

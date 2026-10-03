@@ -11,7 +11,8 @@
 # video from /boot; VLC kept open between files; omxplayer for loop videos
 # when it is installed; position for the web interface, which can also choose
 # the file to play; exit code 0 only when stopped on purpose (.bashrc restarts it);
-# how often the boot video plays and the player's address on the logo screen (settings)
+# how often the boot video plays and the player's address on the logo screen (settings);
+# previous file; the button on pin 13 pressed once, twice or held
 
 import signal, sys
 # stopped on purpose (Ctrl-C on the console, SIGTERM, SIGHUP): exit code 0, so .bashrc doesn't
@@ -19,7 +20,7 @@ import signal, sys
 for quit_signal in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(quit_signal, lambda signum, frame: sys.exit(0))
 
-import time, vlc, os, glob, json, shutil, re, struct, hashlib
+import time, vlc, os, glob, json, shutil, re, struct, hashlib, threading
 import RPi.GPIO as GPIO
 import subprocess
 
@@ -132,14 +133,68 @@ def buttonPause(channel):
     if (inputfilter > 50):
         pause_toggle()
 
+# the button on pin 13 (next in the original): pressed once, next file (or play, when paused or
+# held at the first frame); twice, the previous file; held down, back to the start of the file,
+# held there until it is pressed again
+BUTTON_TWICE = .4       # pressed again within this long of letting go: twice
+BUTTON_HELD = 1         # down this long: held
+BUTTON_STEADY = .03     # a press or a release counts once it has lasted this long, so switch
+                        # bounce and interference / static discharges aren't taken for presses
+# what the button asked for ('press', 'twice' or 'held', and files_started when the press
+# began), done by the SIGUSR1 handler: on the main thread, like the web interface's buttons, so
+# it doesn't change what the loop is in the middle of
+button_pressed = None
+# how many playlist files the loop has started: a press is only known for what it is up to 1 s
+# later, when the file it was meant for may have ended by itself and the next one started
+files_started = 0
+button_reader = None
+
+def pin_stays(pin, level, seconds):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if GPIO.input(pin) != level:
+            return False
+        time.sleep(.005)
+    return True
+
+def wait_for(pin, level, seconds):
+    """Wait up to seconds for the pin to be steadily at level (1: pressed); True if it was."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if GPIO.input(pin) == level and pin_stays(pin, level, BUTTON_STEADY):
+            return True
+        time.sleep(.005)
+    return False
+
+def read_and_send(started):
+    """Read the press now starting and send what it is, as soon as that's known: held at 1 s
+    (not when let go), twice at the second press, once when no second one has come. started:
+    the playlist's file count when it began (see next_signal)."""
+    global button_pressed
+    if not wait_for(13, 1, .1):
+        return
+    if not wait_for(13, 0, BUTTON_HELD - BUTTON_STEADY):
+        pressed = 'held'
+    elif wait_for(13, 1, BUTTON_TWICE):
+        pressed = 'twice'
+    else:
+        pressed = 'press'
+    button_pressed = (pressed, started)
+    os.kill(os.getpid(), signal.SIGUSR1)
+    if pressed != 'press':
+        # let go first (while this thread is busy, new presses aren't read), or the rest of a
+        # hold would be read as another press
+        wait_for(13, 0, 10)
+
 def buttonNext(channel):
-    inputfilter = 0
-    for x in range(0,200):
-        if GPIO.input(13):
-            inputfilter = inputfilter + 1
-        time.sleep(.001)
-    if (inputfilter > 50):
-        next_file()
+    # read on a thread of its own, so the pause button (RPi.GPIO calls them one at a time) isn't
+    # kept waiting. The edges of a press being read (switch bounce, the second of two) are left
+    # to it; any after it read as not pressed
+    global button_reader
+    if button_reader and button_reader.is_alive():
+        return
+    button_reader = threading.Thread(target=read_and_send, args=(files_started,), daemon=True)
+    button_reader.start()
 
 # omxplayer, when it is playing a loop file (see omx_loop)
 omx = None
@@ -157,6 +212,10 @@ def read_play_request():
 
 # a request left from before the player started is not played
 handled_play_request = read_play_request()[0]
+
+def play_request_waiting():
+    request_id = read_play_request()[0]
+    return request_id is not None and request_id != handled_play_request
 
 def play_request():
     """The request from the web interface since the last time, or None."""
@@ -194,27 +253,73 @@ skip_requested = False
 requested_file = None
 # previous pressed this many times since the loop last chose a file (two quick presses: two back)
 previous_requested = 0
+def next_signal():
+    """SIGUSR1: from the web interface (next, or its request), or the button on pin 13."""
+    global button_pressed
+    pressed, button_pressed = button_pressed, None
+    if pressed is None or play_request_waiting():
+        next_file()
+    if pressed is None:
+        return
+    pressed, started = pressed
+    # files the playlist has moved on by itself since the press began: it is meant for the file
+    # playing then
+    moved_on = files_started - started
+    if pressed == 'twice':
+        for _ in range(1 + moved_on):
+            previous_file()
+    elif pressed == 'held':
+        if moved_on:
+            for _ in range(moved_on):
+                previous_file()
+        else:
+            rewind()
+    elif pressed == 'press' and not moved_on:
+        # (moved on: that was the next file already)
+        if is_paused():
+            pause_toggle()
+        else:
+            skip()
+
 def next_file():
-    global skip_requested, requested_file, rewind_requested, previous_requested
+    global requested_file, previous_requested
     request = play_request()
     if request and request.get('command') == 'rewind':
         rewind()
         return
     if request and request.get('command') == 'previous':
-        if not playlist_started:
-            # the boot video and logo: there's nothing before them
-            return
-        previous_requested += 1
-        requested_file = None
-    elif request and isinstance(request.get('file'), str):
+        previous_file()
+        return
+    if request and isinstance(request.get('file'), str):
         requested_file = request['file']
         previous_requested = 0
+    skip()
+
+def previous_file():
+    global requested_file, previous_requested
+    if not playlist_started:
+        # the boot video and logo: there's nothing before them
+        return
+    previous_requested += 1
+    requested_file = None
+    skip()
+
+def skip():
+    global skip_requested, rewind_requested
     skip_requested = True
     # next overtakes a rewind that is still waiting
     rewind_requested = False
     take_play_request()
     if not omx:
         player.stop()
+
+def is_paused():
+    if rewind_requested:
+        # held at the first frame (on its way), unless play has been pressed already
+        return not play_requested
+    if omx:
+        return omx_paused
+    return player.get_state() == vlc.State.Paused
 
 def pause_toggle():
     global omx_paused, omx_last_key, play_requested
@@ -234,7 +339,7 @@ def pause_toggle():
         player.pause()
 
 # the web interface sends signals for its pause and next buttons
-signal.signal(signal.SIGUSR1, lambda signum, frame: next_file())
+signal.signal(signal.SIGUSR1, lambda signum, frame: next_signal())
 signal.signal(signal.SIGUSR2, lambda signum, frame: pause_toggle())
 
 # stopped on purpose: as at the top, and omxplayer is stopped too (see the end) so it isn't left
@@ -758,8 +863,13 @@ if logo_address and logo_address.text is not None:
     player.stop()
 
 # add event listener which reacts to GPIO signal
+# (RPi.GPIO's thread, and the button's, are started with the signals from the web interface
+# blocked, so those always go to the main thread, where the loop can hold them off while it
+# picks the next file)
+signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1, signal.SIGUSR2})
 GPIO.add_event_detect(11, GPIO.RISING, callback = buttonPause, bouncetime = 234)
-GPIO.add_event_detect(13, GPIO.RISING, callback = buttonNext, bouncetime = 1234)
+GPIO.add_event_detect(13, GPIO.RISING, callback = buttonNext, bouncetime = 50)
+signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1, signal.SIGUSR2})
 
 # check for sync mode instructions
 sync_mode()
@@ -827,6 +937,7 @@ try:
                                 % (file, size[0], size[1], image_limit))
                     continue
             played = True
+            files_started += 1
             # read for every file, so a new image duration applies straight away
             settings = read_settings()
             options = [':image-duration=%d' % settings['image_duration']] + list(IMAGE_OPTIONS)

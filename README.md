@@ -12,7 +12,8 @@ affiliated with or supported by the original project.
 
 A media player for exhibitions on the Raspberry Pi. It boots straight into playing the
 videos and images on a USB stick (or SD card) in a loop and needs no network. Buttons on the
-GPIO pins pause or skip, and files with `loop.` in their name repeat.
+GPIO pins pause, or skip to the next file (pressed twice: the previous one; held: back to the
+start), and files with `loop.` in their name repeat.
 
 ## What this fork adds
 

@@ -16,7 +16,7 @@ The player is meant to run offline. A network is optional and only needed for th
 
 | Path | Purpose |
 |---|---|
-| `boot/mp4museum.py` | Player: plays everything in `/media/*/` in order, GPIO pause (pin 11) and next (pin 13), sync mode with omxplayer-sync |
+| `boot/mp4museum.py` | Player: plays everything in `/media/*/` in order, GPIO pause (pin 11) and next/previous/back to the start (pin 13), sync mode with omxplayer-sync |
 | `boot/mp4m-web/` | Web interface (Flask, port 80, runs as root): `webservice.py` (routes), `system.py` (partitions, config.txt, network name, password), `updater.py` (software update), `templates/`, `static/`. On the boot partition so it can be updated without turning off the overlay |
 | `etc/systemd/system/mp4m-webservice.service` | Starts the web interface at boot |
 | `usr/local/bin/mp4m-update` | The `sudo mp4m-update` command |
@@ -39,11 +39,11 @@ in alphabetical order, over and over.
 
 - **Boot video:** the original MP4MUSEUM one (`/home/pi/mp4museum-boot.mp4`). To use your own,
   put it on the SD card's boot partition as `mp4museum-boot.mp4` (it shows up as a drive on
-  a computer); delete it to go back to the original. It plays once; Media → Playback can
+  a computer); delete it to go back to the original. It plays once; System → Start-up can
   make that twice (as in the original, a warm-up for the video output) or not at all.
 - **Logo screen:** shows the player's address (`http://<name>.local` and its IP address) in the
   corner for its 10 seconds, so it's easy to find the web interface. It can be turned off in
-  Media → Playback.
+  System → Start-up.
 
 - **Loops:** a file with `loop.` in its name (e.g. `intro-loop.mp4`) plays again and again
   until Next is pressed; then the playlist carries on. Loop videos are played with
@@ -62,7 +62,11 @@ in alphabetical order, over and over.
 - **Images** more than 2048 pixels wide or high come out scrambled on a Pi 3 (after a long
   wait), so a Pi 3 or older skips them. The web interface marks them "too large" and warns
   when one is uploaded. Resize them to the screen's size, e.g. 1920×1080.
-- **Buttons:** GPIO pin 11 pauses and resumes, pin 13 skips to the next file. The web interface
+- **Buttons:** GPIO pin 11 pauses and resumes. The button on pin 13 (wired to 3.3 V, e.g. pin 1):
+  pressed once, the next file (or play, when paused or held at the first frame); twice within
+  0.4 s, the previous file; held for 1 s, back to the start of the file, held there until it is
+  pressed again. A single press acts 0.4 s after it, once it's clear no second one follows.
+  The web interface
   has the same buttons, shows what is playing and how far it has got (the player writes
   `/tmp/mp4museum-status.json`), and can start any file in the playlist (it writes
   `/tmp/mp4museum-play.json` and sends the player the same signal as Next).
