@@ -43,6 +43,11 @@ OPEN_TIMEOUT = 20
 # an image still showing this long after its time is over is moved on from (a very large image
 # can take VLC a long time on a Pi, and come out scrambled)
 IMAGE_GRACE = 20
+# VLC sends a still image to the screen 10 times a second, converting its pixel format each
+# time: a whole CPU core on a Pi 3, and the Pi hot. Converted once, to the format the Pi's video
+# output takes, it costs almost nothing. (Sending it less often, image-fps, made a paused image
+# move on anyway.)
+IMAGE_OPTIONS = (':image-chroma=I420',)
 IMAGE_TYPES = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff')
 # the largest image (pixels on each side) a Pi 3 or older can show: bigger ones come out
 # scrambled (seen on a Pi 3B with 3300 x 2550) and are skipped. Not known for a Pi 4 or 5.
@@ -612,7 +617,7 @@ if boot_played == ["ended", "ended"]:
 
 # please do not remove my logo screen
 skip_requested = False
-vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,))
+vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,) + IMAGE_OPTIONS)
 
 # add event listener which reacts to GPIO signal
 GPIO.add_event_detect(11, GPIO.RISING, callback = buttonPause, bouncetime = 234)
@@ -674,7 +679,7 @@ try:
             played = True
             # read for every file, so a new image duration applies straight away
             settings = read_settings()
-            options = [':image-duration=%d' % settings['image_duration']]
+            options = [':image-duration=%d' % settings['image_duration']] + list(IMAGE_OPTIONS)
             loop_engine = loop_omx_ok = None
             if "loop." in file:
                 # play it again and again until next is pressed
