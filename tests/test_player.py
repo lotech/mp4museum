@@ -830,3 +830,19 @@ def test_button_press_meant_for_the_file_playing_when_it_began(tmp_path):
     # not moved on: as usual
     r = run(tmp_path, files=BUTTON_FILES, media=BUTTON_MEDIA, button=[[30, .1]], button_delay=1, max_plays=5)
     assert plays(r)[3:5] == ['a.mp4', 'b.mp4'] and 31 <= first_play(r, 'b.mp4')['at'] <= 32
+
+
+# ----- Files switched off in the web interface ----- #
+def test_switched_off_files_are_left_out(tmp_path):
+    files = ['/media/internal/a.mp4', '/media/internal/b.mp4', '/media/internal/c.mp4', '/media/usb0/d.mp4']
+    off = {'/boot/mp4m-disabled.txt': '/media/internal/b.mp4\n/media/usb0/d.mp4\n'}
+    r = run(tmp_path, files=files, write=off, max_plays=7)
+    assert plays(r)[3:7] == ['a.mp4', 'c.mp4', 'a.mp4', 'c.mp4']
+    # previous passes over them too: from c.mp4 back to a.mp4
+    r = run(tmp_path, files=files, media={'a.mp4': 5, 'c.mp4': 100}, write=off,
+            signals=[{'at': 40, 'command': 'previous'}], max_plays=6)
+    assert plays(r)[3:6] == ['a.mp4', 'c.mp4', 'a.mp4']
+    # all switched off: nothing to play, as with no files (no spinning through the list)
+    r = run(tmp_path, files=['/media/internal/a.mp4'], write={'/boot/mp4m-disabled.txt': '/media/internal/a.mp4\n'},
+            max_seconds=60)
+    assert plays(r)[3:] == [] and r['statuses'][-1]['state'] == 'idle'

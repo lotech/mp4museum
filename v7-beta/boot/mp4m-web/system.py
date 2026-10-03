@@ -39,6 +39,8 @@ PASSWORD_FILE = os.path.join(BOOT_PATH, "mp4m-password.txt")
 HOSTNAME_FILE = os.path.join(BOOT_PATH, "hostname.txt")
 # Player settings and status, shared with /boot/mp4museum.py
 PLAYER_SETTINGS_FILE = os.path.join(BOOT_PATH, "mp4m-player.txt")
+# files switched off in the web interface (one path per line): the player leaves them out
+DISABLED_FILE = os.path.join(BOOT_PATH, "mp4m-disabled.txt")
 PLAYER_STATUS_FILE = "/tmp/mp4museum-status.json"
 # A file chosen in the web interface, read by the player when it gets SIGUSR1
 PLAY_REQUEST_FILE = "/tmp/mp4museum-play.json"
@@ -766,10 +768,30 @@ def get_skipped_files():
     except (OSError, ValueError, TypeError):
         return {}
 
+_disabled_lock = threading.Lock()
+
+def get_disabled_files():
+    """The paths of the files switched off in the web interface."""
+    try:
+        with open(DISABLED_FILE, 'r') as f:
+            return {line.rstrip('\n') for line in f if line.strip()}
+    except OSError:
+        return set()
+
+def update_disabled_files(add=(), remove=()):
+    """Switch files off (add) or on again (remove), keeping the others."""
+    with _disabled_lock:
+        paths = get_disabled_files()
+        changed = (paths - set(remove)) | set(add)
+        if changed != paths:
+            with writable(BOOT_PATH):
+                write_file(DISABLED_FILE, ''.join(path + '\n' for path in sorted(changed)))
+
 def get_playlist():
     """Every file the player plays, in its order (/media/*/*.*: the media partition and USB
     sticks), and the media partition's other files, which it doesn't play (no extension)."""
     skipped = get_skipped_files()
+    disabled = get_disabled_files()
     limit = image_limit()
     media_root = os.path.dirname(MEDIA_PATH)
     paths = set(glob.glob(os.path.join(media_root, '*', '*.*')))
@@ -794,7 +816,8 @@ def get_playlist():
                         'plays': '.' in name, 'loop': 'loop.' in path, 'size': size,
                         'pixels': pixels, 'large': is_large_image(pixels, limit),
                         # the player compares the same way: a replaced file is played again
-                        'skipped': path in skipped and skipped[path] == version})
+                        'skipped': path in skipped and skipped[path] == version,
+                        'disabled': path in disabled})
     return entries
 
 _play_request_lock = threading.Lock()

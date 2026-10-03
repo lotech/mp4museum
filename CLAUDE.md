@@ -51,7 +51,8 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   `SIGUSR2` (pause), `/tmp/mp4museum-play.json` (a file chosen in the web interface, or
   `"command": "rewind"` or `"previous"`, read when SIGUSR1 arrives; the status says which
   commands it can do, `rewind`/`previous`: true) and `/boot/mp4m-player.txt` (settings: `image_duration`,
-  `loop_player`, `boot_video_plays`, `show_address`). Edited players from before may not
+  `loop_player`, `boot_video_plays`, `show_address`) and `/boot/mp4m-disabled.txt` (files switched
+  off in the web interface, one path per line: left out of the playlist). Edited players from before may not
   write `play_file` in their status; the web interface then doesn't offer choosing a file.
   Keep the author's logo screen ("please do not remove my logo screen") and his `(c)` header.
   The logo is `boot/mp4m-web/static/logo.jpg` (updates bring it; `/home/pi/mp4m-v7beta.jpg`

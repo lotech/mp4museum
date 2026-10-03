@@ -1005,3 +1005,36 @@ def test_start_up_settings(pi, client):
     with open(system.SCRIPT_FILE, 'w') as f:
         f.write("settings = {'boot_video_plays': 1, 'show_address': True}\n")
     assert system.get_boot_video_plays() == 1
+
+
+def test_switch_files_off_and_on(pi, client):
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    (pi.media / 'b.mp4').write_bytes(b'x')
+    usb = pi.media.parent / 'usb0'
+    usb.mkdir()
+    (usb / 'c.mp4').write_bytes(b'x')
+    a, c = str(pi.media / 'a.mp4'), str(usb / 'c.mp4')
+    # off: written for the player, the file itself untouched; USB sticks (read-only) too
+    for path in (a, c):
+        r = client.post('/switch_file', data={'file': path, 'off': '1'}, follow_redirects=True)
+        assert b'switched off' in r.data
+    assert open(system.DISABLED_FILE).read() == '%s\n%s\n' % tuple(sorted([a, c]))
+    assert (pi.media / 'a.mp4').read_bytes() == b'x' and ['mount', '-o', 'remount,rw', str(pi.boot)] in pi.commands
+    entries = {e['name']: e for e in system.get_playlist()}
+    assert entries['a.mp4']['disabled'] and not entries['b.mp4']['disabled'] and entries['c.mp4']['disabled']
+    html = client.get('/').data.decode()
+    assert html.count('switched-off') == 2 and 'Switch on a.mp4' in html and 'Switch off b.mp4' in html
+    # not played from the web interface while off
+    r = client.post('/player/play', data={'file': a}, headers={'X-Requested-With': 'fetch'})
+    assert r.status_code == 409 and 'switched off' in r.get_json()['error']
+    # renamed: still off under its new name; deleted: off no more (a new file of that name plays)
+    client.post('/rename', data={'filename': 'a.mp4', 'new_name': 'a2.mp4'})
+    assert str(pi.media / 'a2.mp4') in system.get_disabled_files() and a not in system.get_disabled_files()
+    client.post('/delete', data={'filename': 'a2.mp4'})
+    assert system.get_disabled_files() == {c}
+    # on again
+    assert b'switched on again' in client.post('/switch_file', data={'file': c, 'off': '0'}, follow_redirects=True).data
+    assert system.get_disabled_files() == set()
+    # only files in the playlist
+    r = client.post('/switch_file', data={'file': '/etc/passwd', 'off': '1'}, follow_redirects=True)
+    assert b"t in the playlist" in r.data and system.get_disabled_files() == set()

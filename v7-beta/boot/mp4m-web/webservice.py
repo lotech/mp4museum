@@ -296,6 +296,8 @@ def player_play():
     entry = next((e for e in system.get_playlist() if e['path'] == path and e['plays']), None)
     if not entry:
         error = "That file isn't in the playlist."
+    elif entry['disabled']:
+        error = "That file is switched off. Switch it on to play it."
     elif not status:
         error = "The player is not running."
     elif status.get('state') == 'sync':
@@ -521,10 +523,31 @@ def delete_file():
             with system.writable(system.MEDIA_PATH):
                 os.remove(file_path)
             flash(f"File '{filename}' deleted successfully.", "success")
+            # a file of the same name added later is played
+            system.update_disabled_files(remove=[file_path])
         except Exception as e:
             flash(f"Failed to delete file: {e}", "error")
     else:
         flash("File not found.", "error")
+    return redirect(url_for('index'))
+
+
+@app.route('/switch_file', methods=['POST'])
+def switch_file():
+    """Switch a file off (the player leaves it out) or on again, without changing the file."""
+    path = request.form.get('file', '')
+    entry = next((e for e in system.get_playlist() if e['path'] == path and e['plays']), None)
+    if not entry and path not in system.get_disabled_files():
+        flash("That file isn't in the playlist.", "error")
+        return redirect(url_for('index'))
+    off = request.form.get('off') == '1'
+    try:
+        system.update_disabled_files(add=[path] if off else [], remove=[] if off else [path])
+    except Exception as e:
+        flash(f"Failed to save the setting: {e}", "error")
+        return redirect(url_for('index'))
+    name = os.path.basename(path)
+    flash(f"{name} is switched off: the player leaves it out." if off else f"{name} is switched on again.", "success")
     return redirect(url_for('index'))
 
 
@@ -571,6 +594,12 @@ def rename_file():
         except Exception as e:
             flash(f"Failed to rename the file: {e}", "error")
             return redirect(url_for('index'))
+        # switched off: it stays off under its new name
+        if old_path in system.get_disabled_files():
+            try:
+                system.update_disabled_files(add=[new_path], remove=[old_path])
+            except Exception as e:
+                flash(f"Couldn't keep it switched off: {e}", "error")
     flash(f"Renamed '{filename}' to '{new_name}'.", "success")
     if '.' not in new_name:
         flash(f"'{new_name}' has no extension, so the player won't play it.", "warning")

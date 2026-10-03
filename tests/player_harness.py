@@ -280,6 +280,7 @@ tmp = tempfile.mkdtemp()
 paths = {'/boot/mp4museum-boot.mp4': os.path.join(tmp, 'custom-boot.mp4'),
          '/boot/alsa.txt': os.path.join(tmp, 'alsa.txt'), '/boot/mp4m-player.txt': os.path.join(tmp, 'mp4m-player.txt'),
          '/boot/hostname.txt': os.path.join(tmp, 'hostname.txt'),
+         '/boot/mp4m-disabled.txt': os.path.join(tmp, 'disabled.txt'),
          '/boot/mp4m-web/static/logo.jpg': os.path.join(tmp, 'logo.jpg'),
          # scenario write: {'/proc/cpuinfo': 'Serial : ...'}; no network interfaces
          '/proc/cpuinfo': os.path.join(tmp, 'cpuinfo'), '/sys/class/net': os.path.join(tmp, 'net'),

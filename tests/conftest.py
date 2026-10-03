@@ -77,9 +77,14 @@ def pi(tmp_path, monkeypatch):
         'PLAY_REQUEST_FILE': str(tmp_path / 'mp4museum-play.json'),
         'PLAYER_LOG_FILE': str(tmp_path / 'mp4museum.log'),
         'PLAYER_SKIPPED_FILE': str(tmp_path / 'mp4museum-skipped.json'),
+        'DISABLED_FILE': p.path('mp4m-disabled.txt'),
         'LOCK_DIR': str(tmp_path / 'locks'),
     }.items():
         monkeypatch.setattr(system, name, value)
+    # a path added to system.py and not here would be the real one: tests must not touch it
+    real = [name for name, value in vars(system).items()
+            if isinstance(value, str) and value.startswith(('/boot', '/media'))]
+    assert not real, 'add these to the pi fixture: %s' % real
     monkeypatch.setattr(system, 'run_command', p.run_command)
     monkeypatch.setattr(system, 'is_read_only', lambda mount_point: p.read_only)
     monkeypatch.setattr(system, 'media_available', lambda: True)
