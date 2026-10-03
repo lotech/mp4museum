@@ -450,5 +450,8 @@ def test_page_check_is_quiet_offline(client, monkeypatch):
     fetch = {'X-Requested-With': 'fetch'}
     for _ in range(3):
         assert client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json() == {'update': None}
-    assert len(calls) == 1          # tried again after an hour, not on every page
+    assert len(calls) == 1          # not on every page
+    webservice._auto_check['time'] -= webservice.AUTO_CHECK_RETRY
+    client.post('/check_update', data={'auto': '1'}, headers=fetch)
+    assert len(calls) == 2          # but again after an hour
     assert b'reach GitHub' not in client.get('/').data

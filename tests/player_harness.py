@@ -15,10 +15,11 @@ scenario = json.load(open(sys.argv[1]))
 log = []
 clock = {'now': 1000.0}
 
-def fire_signals():
-    # scripted events: send signals at given times; {'play': path} chooses a file as the web interface does
+def fire_signals(place=None):
+    # scripted events: send signals at given times; {'play': path} chooses a file as the web interface does;
+    # {'when': 'settings'} waits until the player next reads its settings (just before it starts a file)
     for event in scenario.get('signals', []):
-        if not event.get('done') and clock['now'] - 1000 >= event['at']:
+        if not event.get('done') and clock['now'] - 1000 >= event['at'] and event.get('when') == place:
             event['done'] = True
             if 'play' in event:
                 with open(paths['/tmp/mp4museum-play.json'], 'w') as f:
@@ -36,6 +37,7 @@ def fake_sleep(seconds):
         fire_signals()
 time.sleep = fake_sleep
 time.time = lambda: clock['now']
+time.monotonic = lambda: clock['now'] - 500
 
 # --- fake vlc ---
 vlc = types.ModuleType('vlc')
@@ -109,7 +111,15 @@ sys.modules['RPi'] = rpi; sys.modules['RPi.GPIO'] = gpio
 media_files = scenario.get('files', [])
 _glob.glob = lambda pattern: [f for f in media_files if _glob.fnmatch.fnmatch(f, pattern)]
 import fnmatch; _glob.fnmatch = fnmatch
-subprocess.run = lambda cmd, *a, **k: log.append({'run': cmd}) or (_ for _ in ()).throw(SystemExit('sync ran'))
+def fake_run(cmd, *args, **kwargs):
+    if cmd[:2] == ['omxplayer', '-i']:
+        # omxplayer -i: the file's streams; scenario option omx_codec (default h264)
+        log.append({'probe': cmd[2]})
+        codec = scenario.get('omx_codec', 'h264')
+        return subprocess.CompletedProcess(cmd, 1, stdout='Input #0, mov,mp4\n    Stream #0:0(und): Video: %s (High)\n' % codec)
+    log.append({'run': cmd})
+    raise SystemExit('sync ran')
+subprocess.run = fake_run
 
 # --- fake omxplayer ---
 # /usr/bin/omxplayer is a script that runs omxplayer.bin; both are modelled. Scenario options:
@@ -191,8 +201,13 @@ def watching_replace(a, b):
     if b == paths['/tmp/mp4museum-status.json']:
         statuses.append(json.load(open(b)))
 os.replace = watching_replace
+_real_open = open
+def watching_open(path, *args, **kwargs):
+    if path == paths['/boot/mp4m-player.txt']:
+        fire_signals('settings')
+    return _real_open(path, *args, **kwargs)
 try:
-    exec(compile(source, 'mp4museum.py', 'exec'), {'__name__': '__main__'})
+    exec(compile(source, 'mp4museum.py', 'exec'), {'__name__': '__main__', 'open': watching_open})
 except SystemExit as e:
     log.append({'exit': str(e)})
 print(json.dumps({'log': log, 'statuses': statuses}))

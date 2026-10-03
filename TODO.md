@@ -51,6 +51,7 @@ a network is optional.
 - [x] Update bar when a new version is available (checked by the page at most every few hours, quietly when offline)
 - [x] Sound, Video and System tabs in side-by-side cards; sound cards listed with a Use button; Lucide icons
 - [ ] Test on the Pi: choosing a file (VLC and omxplayer loops), the position for videos and images, uploading several files, the update bar
+- [ ] Test on the Pi: `omxplayer -i` reports the codec as expected (loops of H.264 files go to omxplayer, HEVC ones to VLC)
 
 ## 5. Installation
 

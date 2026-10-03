@@ -1,3 +1,5 @@
+{# MP4MUSEUM web interface, based on the v7 beta web service by Julius Schmiedel (http://mp4museum.org).
+   Modified 2026 in https://github.com/lotech/mp4museum (see git history). Licensed under the GNU GPL v3, see LICENSE. -#}
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% set kind_icons = {'video': 'film', 'image': 'image', 'audio': 'music', 'other': 'file'} %}
@@ -37,11 +39,11 @@
 
 {% block content %}
 <nav class="tabs">
-  <button class="tab active" data-tab="media" onclick="showTab('media')">{{ icon('list-video') }}<span>Media</span></button>
-  <button class="tab" data-tab="sound" onclick="showTab('sound')">{{ icon('volume-2') }}<span>Sound</span></button>
-  <button class="tab" data-tab="video" onclick="showTab('video')">{{ icon('monitor') }}<span>Video</span></button>
-  <button class="tab" data-tab="script" onclick="showTab('script')">{{ icon('code') }}<span>Script</span></button>
-  <button class="tab" data-tab="system" onclick="showTab('system')">{{ icon('settings') }}<span>System</span></button>
+  <button class="tab active" data-tab="media" onclick="showTab('media')" aria-label="Media">{{ icon('list-video') }}<span>Media</span></button>
+  <button class="tab" data-tab="sound" onclick="showTab('sound')" aria-label="Sound">{{ icon('volume-2') }}<span>Sound</span></button>
+  <button class="tab" data-tab="video" onclick="showTab('video')" aria-label="Video">{{ icon('monitor') }}<span>Video</span></button>
+  <button class="tab" data-tab="script" onclick="showTab('script')" aria-label="Script">{{ icon('code') }}<span>Script</span></button>
+  <button class="tab" data-tab="system" onclick="showTab('system')" aria-label="System">{{ icon('settings') }}<span>System</span></button>
 </nav>
 
 {# ----- Media ----- #}

@@ -45,7 +45,8 @@ in alphabetical order, over and over.
   omxplayer, which holds the last frame with a short pause at each loop. VLC, which plays
   everything else, shows a black frame each time it starts a video again on the Pi. omxplayer
   is no longer developed and isn't on newer Raspberry Pi OS versions, so VLC is used when it
-  isn't installed; VLC can also be chosen in the web interface (Media).
+  isn't installed, or for videos it can't decode on every Pi (only H.264 and MPEG-4 go to
+  omxplayer; HEVC, for example, plays in VLC). VLC can also be chosen in the web interface (Media).
 - **Images** are shown for 10 seconds, or as set in the web interface (`/boot/mp4m-player.txt`,
   `image_duration=<seconds>`). A new setting applies from the next image.
 - A file that hasn't started playing after 20 seconds (broken file, stalled USB stick) is skipped.

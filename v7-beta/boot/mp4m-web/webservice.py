@@ -214,16 +214,25 @@ def player_view(status):
                 folder=os.path.basename(os.path.dirname(path)) if path else None,
                 kind=system.media_kind(path) if path else None, loop='loop.' in (path or ''))
     position, length, since = status.get('position'), status.get('length'), status.get('since')
-    if isinstance(position, (int, float)) and isinstance(since, (int, float)):
+    # how long since the status was written; the player also writes the monotonic clock, which
+    # doesn't jump when the Pi sets its time from the network after starting
+    mono = status.get('mono')
+    if isinstance(mono, (int, float)):
+        passed = max(0, time.monotonic() - mono)
+    elif isinstance(since, (int, float)):
+        passed = max(0, time.time() - since)
+    else:
+        passed = None
+    if isinstance(position, (int, float)) and passed is not None:
         if view['state'] == 'playing':
-            position += max(0, time.time() - since)
+            position += passed
         if isinstance(length, (int, float)) and length > 0:
             view['length'] = length
             position = min(position, length)
         view['position'] = round(position, 1)
-    elif isinstance(since, (int, float)) and view['state'] in ('playing', 'paused', 'sync'):
-        # an older player script: how long it has been in this state
-        view['elapsed'] = round(max(0, time.time() - since))
+    elif passed is not None and view['state'] in ('playing', 'paused', 'sync'):
+        # an older player script, or omxplayer: how long it has been in this state
+        view['elapsed'] = round(passed)
     return view
 
 @app.route('/player/status')

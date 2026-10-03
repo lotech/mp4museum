@@ -81,6 +81,8 @@ function setUpToast(toast) {
 const KIND_ICONS = {video: 'film', image: 'image', audio: 'music', other: 'file'};
 let playerView = null;
 let playerViewTime = 0;
+// While a button press is on its way, the player's buttons stay disabled
+let playerBusy = false;
 
 function formatTime(seconds) {
   seconds = Math.max(0, Math.floor(seconds));
@@ -110,7 +112,7 @@ function showPlayer(view) {
   document.getElementById('playerLoop').hidden = !active || !view.loop;
   setIcon(card.querySelector('.player-kind'), active ? KIND_ICONS[view.kind] || 'file' : 'square-play');
 
-  const controls = view.running && ['playing', 'paused'].includes(state);
+  const controls = view.running && ['playing', 'paused'].includes(state) && !playerBusy;
   document.getElementById('pauseButton').disabled = !controls;
   document.getElementById('nextButton').disabled = !controls;
   document.querySelectorAll('.playlist-item').forEach(item => {
@@ -119,7 +121,7 @@ function showPlayer(view) {
     const button = item.querySelector('.item-play');
     if (button && item.classList.contains('not-played') === false) {
       // An older player script can't jump to a file
-      button.disabled = !view.play_file || state === 'sync' || !view.running;
+      button.disabled = !view.play_file || state === 'sync' || !view.running || playerBusy;
     }
   });
   showProgress();
@@ -157,7 +159,14 @@ function refreshPlayer() {
     return;
   }
   fetch(card.dataset.statusUrl, {headers: {'X-Requested-With': 'fetch'}})
-    .then(response => response.ok ? response.json() : null)
+    .then(response => {
+      if (response.status === 401) {
+        // Logged out (e.g. the password was changed): back to the login page
+        window.location.reload();
+        return null;
+      }
+      return response.ok ? response.json() : null;
+    })
     .then(view => showPlayer(view))
     .catch(() => {
       // Try again next time
@@ -166,8 +175,11 @@ function refreshPlayer() {
 
 // Pause, Next and the playlist's play buttons, without reloading the page
 function sendPlayerForm(form) {
-  const buttons = form.querySelectorAll('button');
-  buttons.forEach(button => button.disabled = true);
+  if (playerBusy) {
+    return;
+  }
+  playerBusy = true;
+  showPlayer(playerView);
   fetch(form.action, {
     method: 'POST',
     headers: {'X-Requested-With': 'fetch'},
@@ -176,6 +188,10 @@ function sendPlayerForm(form) {
     .then(response => {
       if (response.status === 401) {
         window.location.reload();
+        return null;
+      }
+      if (!(response.headers.get('Content-Type') || '').includes('json')) {
+        showToast('Something went wrong (error ' + response.status + '). Try reloading the page.', 'error');
         return null;
       }
       return response.json();
@@ -191,7 +207,7 @@ function sendPlayerForm(form) {
     })
     .catch(() => showToast("Couldn't reach the player.", 'error'))
     .finally(() => {
-      buttons.forEach(button => button.disabled = false);
+      playerBusy = false;
       showPlayer(playerView);
     });
 }
@@ -211,14 +227,19 @@ function uploadFiles(input) {
     return;
   }
   document.getElementById('uploadProgress').hidden = false;
+  let failed = false;
   // One at a time; then reload the page to show the new files and the messages
   const next = index => {
     if (index >= files.length) {
-      window.location.reload();
+      // Leave time to read an error the reloaded page won't show
+      setTimeout(() => window.location.reload(), failed ? 6000 : 0);
       return;
     }
     uploadFile(form.action, files[index], index, files.length)
-      .catch(error => showToast(error, 'error'))
+      .catch(error => {
+        failed = true;
+        showToast(error, 'error');
+      })
       .then(() => next(index + 1));
   };
   next(0);
@@ -253,10 +274,11 @@ function uploadFile(url, file, index, count) {
       } catch (e) {
         // Not JSON: the page shows what went wrong after the reload
       }
-      if (request.status === 200 && answer.ok) {
+      if ((request.status === 200 && answer.ok) || answer.error) {
+        // An error the server reports is also shown when the page reloads
         resolve();
       } else {
-        reject(answer.error || 'Uploading ' + file.name + ' failed.');
+        reject('Uploading ' + file.name + ' failed (error ' + request.status + ').');
       }
     });
     request.addEventListener('error', () => reject('Uploading ' + file.name + " failed: the player couldn't be reached."));

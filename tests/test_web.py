@@ -459,11 +459,16 @@ def test_play_chosen_file(pi, client, monkeypatch):
         json.dump({'state': 'playing', 'file': str(pi.media / 'a.mp4'), 'since': time.time(), 'pid': 4242,
                    'play_file': True}, f)
 
-    r = client.post('/player/play', data={'file': path}, headers={'X-Requested-With': 'fetch'})
+    old_umask = os.umask(0o077)
+    try:
+        r = client.post('/player/play', data={'file': path}, headers={'X-Requested-With': 'fetch'})
+    finally:
+        os.umask(old_umask)
     assert r.status_code == 200 and sent == [(4242, signal.SIGUSR1)]
     request = json.load(open(system.PLAY_REQUEST_FILE))
     assert request['file'] == path and request['id']
     assert oct(os.stat(system.PLAY_REQUEST_FILE).st_mode & 0o777) == '0o644'   # the player runs as pi
+    assert [n for n in os.listdir(os.path.dirname(system.PLAY_REQUEST_FILE)) if n.startswith('.mp4museum-play')] == []
     # a new id each time, so the player knows it is a new request
     client.post('/player/play', data={'file': path})
     assert json.load(open(system.PLAY_REQUEST_FILE))['id'] != request['id']
@@ -530,3 +535,34 @@ def test_every_icon_is_in_the_sprite():
     # chosen by file type, in the template and the JavaScript
     used |= {'film', 'image', 'music', 'file', 'square-play'}
     assert len(used) > 20 and used <= symbols, used - symbols
+
+
+def test_play_requests_at_the_same_time(pi, monkeypatch):
+    monkeypatch.setattr(system, 'signal_player', lambda signum: True)
+    errors = []
+    def ask(n):
+        for i in range(200):
+            try:
+                system.request_play('/media/internal/%d-%d.mp4' % (n, i))
+            except Exception as e:
+                errors.append(e)
+    threads = [threading.Thread(target=ask, args=(n,)) for n in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == [] and json.load(open(system.PLAY_REQUEST_FILE))['file'].endswith('-199.mp4')
+
+
+def test_position_survives_the_clock_being_set(client, monkeypatch):
+    # the Pi has no clock of its own: its time can jump by days when it gets a network
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    with open(system.PLAYER_STATUS_FILE, 'w') as f:
+        json.dump({'state': 'playing', 'file': '/media/internal/a.mp4', 'since': time.time() - 3 * 86400,
+                   'mono': time.monotonic() - 10, 'pid': 4242, 'position': 5, 'length': 600, 'play_file': True}, f)
+    assert 14.5 <= client.get('/player/status').get_json()['position'] <= 16
+
+
+def test_page_starts_with_doctype(client):
+    assert client.get('/').data.startswith(b'<!doctype html>')
+    assert client.get('/login').data.startswith(b'<!doctype html>')

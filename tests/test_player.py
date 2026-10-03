@@ -260,3 +260,26 @@ def test_status_has_position_and_length(tmp_path):
     paused = [s for s in statuses if s['state'] == 'paused'][0]
     resumed = statuses[statuses.index(paused) + 1]
     assert 9 <= paused['position'] <= 11 and abs(resumed['position'] - paused['position']) < .1
+
+
+def test_omxplayer_only_for_codecs_it_can_play(tmp_path):
+    # HEVC (or MPEG-2 without a licence key) can play black in omxplayer without it stopping
+    files = ['/media/internal/clip-loop.mkv']
+    for codec, with_omx in (('hevc', False), ('mpeg2video', False), ('mpeg4', True), ('h264', True)):
+        r = run(tmp_path, files=files, installed=['omxplayer'], omx_codec=codec, media={'clip-loop.mkv': 3},
+                max_plays=5, max_seconds=60)
+        assert [e['probe'] for e in r['log'] if 'probe' in e][:1] == files[:1]
+        assert bool(omx_starts(r)) == with_omx, codec
+
+
+def test_next_while_a_file_is_starting(tmp_path):
+    # the press comes before VLC has started the file: it is skipped, not played to the end
+    r = run(tmp_path, files=['/media/internal/a.mp4', '/media/internal/b.mp4'], media={'a.mp4': 100},
+            signals=[{'at': 20, 'signal': 'SIGUSR1', 'when': 'settings'}], max_plays=6)
+    assert 20 <= first_play(r, 'a.mp4')['at'] <= 21 and 21 <= first_play(r, 'b.mp4')['at'] <= 22
+
+
+def test_status_has_a_clock_that_does_not_jump(tmp_path):
+    r = run(tmp_path, files=['/media/internal/a.mp4'], max_plays=4)
+    status = r['statuses'][-1]
+    assert status['mono'] == status['since'] - 500

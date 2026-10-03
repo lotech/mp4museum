@@ -473,15 +473,24 @@ def get_playlist():
                         'plays': '.' in name, 'loop': 'loop.' in path, 'size': size})
     return entries
 
+_play_request_lock = threading.Lock()
+
 def request_play(path):
     """Ask the player to play this file now, then carry on from there. False if it isn't running."""
-    request = PLAY_REQUEST_FILE + '.tmp'
-    with open(request, 'w') as f:
-        json.dump({'id': uuid.uuid4().hex, 'file': path}, f)
-    # The player runs as pi, the web interface as root
-    os.chmod(request, 0o644)
-    os.replace(request, PLAY_REQUEST_FILE)
-    return signal_player(signal.SIGUSR1)
+    with _play_request_lock:
+        # A new file with a random name: /tmp is shared with other users, so never a name chosen in advance
+        fd, request = tempfile.mkstemp(dir=os.path.dirname(PLAY_REQUEST_FILE), prefix='.mp4museum-play-')
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump({'id': uuid.uuid4().hex, 'file': path}, f)
+                # The player runs as pi, the web interface as root
+                os.fchmod(f.fileno(), 0o644)
+            os.replace(request, PLAY_REQUEST_FILE)
+        except BaseException:
+            if os.path.exists(request):
+                os.remove(request)
+            raise
+        return signal_player(signal.SIGUSR1)
 
 def signal_player(signum):
     """Send the player a signal (SIGUSR1: next, SIGUSR2: pause/resume). False if it isn't running."""
