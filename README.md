@@ -32,7 +32,8 @@ This fork copies the v7 beta files off a running install and develops them furth
   runs as a system service, and has an install script.
 - **Updates from GitHub:** a Software Update button in the web interface, or
   `sudo mp4m-update` over SSH, installs the latest version and offers to reboot.
-- **A new boot video.** The MP4MUSEUM logo screen is kept.
+- **Your own boot video** if you want one: put `mp4museum-boot.mp4` on the SD card's boot partition.
+  The original boot video and the MP4MUSEUM logo screen are kept.
 
 The player is meant to run offline; a network is only needed for the web interface.
 See [`v7-beta/README.md`](v7-beta/README.md) for the files, how to try them on a Pi and how

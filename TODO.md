@@ -13,7 +13,7 @@ a network is optional.
 - [x] Login with password (default `mp4museum`), changeable in the web interface
 - [x] Unique network name per player (`mp4museum-xxxx.local`), changeable in the web interface
 - [x] Credit MP4MUSEUM and link to the website and source
-- [x] New boot video
+- [x] New boot video (later back to the original; a custom one can go in `/boot/mp4museum-boot.mp4`)
 - [x] Remove duplicated network code
 - [x] Test on the Pi 3B, including permanent install and boot video
 

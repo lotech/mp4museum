@@ -22,7 +22,7 @@ The player is meant to run offline. A network is optional and only needed for th
 | `usr/local/bin/mp4m-update` | The `sudo mp4m-update` command |
 | `home/pi/.bashrc` | Autostart on tty1: runs `/boot/mp4museum.py` |
 | `home/pi/mp4m-v7beta.jpg` | Logo screen shown after boot |
-| `home/pi/mp4museum-boot.mp4` | Boot video |
+| `home/pi/mp4museum-boot.mp4` | Boot video (the original from the v7 image) |
 | `boot/config.txt` | Video/audio config (video lines set by the web UI video presets) |
 | `boot/cmdline.txt` | `boot=overlay` – root filesystem is read-only via overlayfs |
 | `etc/fstab` | `/boot` mounted ro; third partition (exFAT) mounted ro at `/media/internal` for media |
@@ -35,6 +35,10 @@ The player is meant to run offline. A network is optional and only needed for th
 The player (`/boot/mp4museum.py`, started from `.bashrc`) plays the boot video, the
 MP4MUSEUM logo, then every file in `/media/*/` (the internal media partition and USB sticks)
 in alphabetical order, over and over.
+
+- **Boot video:** the original MP4MUSEUM one (`/home/pi/mp4museum-boot.mp4`). To use your own,
+  put it on the SD card's boot partition as `mp4museum-boot.mp4` (it shows up as a drive on
+  a computer); delete it to go back to the original.
 
 - **Loops:** a file with `loop.` in its name (e.g. `intro-loop.mp4`) plays again and again
   until Next is pressed; then the playlist carries on.

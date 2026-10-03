@@ -7,7 +7,8 @@
 # waits between scans when there is nothing to play; one VLC instance for
 # everything; image duration setting; now playing, pause and next for the web
 # interface; sync mode back from v6; sound cards 10 and above; skips files
-# that don't start playing; loop files restarted by the player
+# that don't start playing; loop files restarted by the player; custom boot
+# video from /boot
 
 import time, vlc, os, glob, json, signal, shutil
 import RPi.GPIO as GPIO
@@ -15,6 +16,8 @@ import subprocess
 
 MEDIA_FILES = '/media/*/*.*'
 BOOT_VIDEO = '/home/pi/mp4museum-boot.mp4'
+# a boot video put on the boot partition (e.g. from a computer) is played instead
+CUSTOM_BOOT_VIDEO = '/boot/mp4museum-boot.mp4'
 LOGO = '/home/pi/mp4m-v7beta.jpg'
 ALSA_FILE = '/boot/alsa.txt'
 # image_duration=<seconds>, set in the web interface
@@ -147,10 +150,12 @@ def sync_mode():
 
 # *** run player ****
 
+boot_video = CUSTOM_BOOT_VIDEO if os.path.isfile(CUSTOM_BOOT_VIDEO) else BOOT_VIDEO
+
 # start player twice to make sure it is working
 # seems weird but works
-vlc_play(BOOT_VIDEO)
-vlc_play(BOOT_VIDEO)
+vlc_play(boot_video)
+vlc_play(boot_video)
 
 # please do not remove my logo screen
 vlc_play(LOGO, (':image-duration=%d' % DEFAULT_IMAGE_DURATION,))
