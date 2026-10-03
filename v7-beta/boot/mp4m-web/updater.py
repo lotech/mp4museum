@@ -292,11 +292,13 @@ def _tree_hashes(root):
     return hashes
 
 def matches_installed(source_root):
-    """True if the web interface and player in this copy are exactly what is installed."""
+    """True if this copy is exactly what is installed: web interface, player, and the files
+    outside /boot (otherwise the update is offered, and says which files need install.sh)."""
     return (os.path.isdir(APP_DIR)
             and _tree_hashes(os.path.join(source_root, APP_SOURCE)) == _tree_hashes(APP_DIR)
             and os.path.isfile(system.SCRIPT_FILE)
-            and file_sha256(system.SCRIPT_FILE) == file_sha256(os.path.join(source_root, PLAYER_SOURCE)))
+            and file_sha256(system.SCRIPT_FILE) == file_sha256(os.path.join(source_root, PLAYER_SOURCE))
+            and not changed_system_files(source_root))
 
 # Commits already compared with the installed files and found different, with what was
 # installed at the time (no need to download them again unless that changed)

@@ -321,6 +321,19 @@ def test_local_copy_identical_to_latest_is_recorded(pi, client, github):
     assert github.latest['commit'][:7].encode() in client.get('/').data
 
 
+def test_local_copy_with_outdated_files_outside_boot_is_offered(pi, client, github, monkeypatch):
+    updater.install_from(str(github.source), LOCAL, check_system_files=False)
+    webservice.RUNNING_VERSION = installed()
+    # e.g. the boot video changed in the latest commit, but /boot is identical
+    boot_video = pi.path('installed-boot-video.mp4')
+    open(boot_video, 'w').write('older boot video')
+    monkeypatch.setattr(updater, 'SYSTEM_FILES', {'v7-beta/home/pi/mp4museum-boot.mp4': boot_video})
+    assert b'An update is available' in client.post('/check_update', follow_redirects=True).data
+    assert installed()['commit'] == 'local'
+    r = client.post('/install_update')
+    assert b'install.sh' in r.data and boot_video.encode() in r.data
+
+
 def test_local_copy_that_differs_is_offered(pi, client, github):
     updater.install_from(str(github.source), LOCAL, check_system_files=False)
     webservice.RUNNING_VERSION = installed()
