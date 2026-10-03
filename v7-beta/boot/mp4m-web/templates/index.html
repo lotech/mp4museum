@@ -278,7 +278,8 @@
         </div>
       </form>
       <p class="hint">Needs a reboot. Memory for decoding video and drawing the screen.{% if memory_mb %}
-        Linux has {{ memory_mb }} MB besides it.{% endif %} Only the gpu_mem lines in /boot/config.txt are changed.</p>
+        Linux has {{ memory_mb }} MB besides it.{% endif %} Only the gpu_mem lines in /boot/config.txt are changed.{% if gpu_mem_in_sections %}
+        Some Pi models have their own setting there; Apply sets it for all of them.{% endif %}</p>
     </section>
     </div>
 

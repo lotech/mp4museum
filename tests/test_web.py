@@ -864,7 +864,7 @@ def test_graphics_memory(pi, client, tmp_path):
     assert system.board_memory_megabytes() == 512
 
 
-def test_graphics_memory_only_changes_the_line_for_every_pi():
+def test_graphics_memory_lines_in_config(pi, client):
     config = ('# comment\n\ndisable_splash=1\n[pi4]\ngpu_mem=76\ngpu_mem_1024=200\ndtoverlay=x\n'
               '[all]\ngpu_mem=64\ngpu_mem_1024=300\ngpu_mem_512 = 100\n')
     assert system.get_gpu_mem(config) == 64
@@ -872,9 +872,17 @@ def test_graphics_memory_only_changes_the_line_for_every_pi():
     assert system.get_gpu_mem(config, 1024) == 300 and system.get_gpu_mem(config, 4096) == 300
     assert system.get_gpu_mem(config, 512) == 100 and system.get_gpu_mem(config, 256) == 64
     changed = system.set_gpu_mem_in_config(config, 512)
-    # the lines for every Pi that would win over it are taken out; the Pi 4 section is left alone
-    assert changed == config.replace('[all]\ngpu_mem=64\ngpu_mem_1024=300\ngpu_mem_512 = 100\n', '[all]\ngpu_mem=512\n')
+    # the lines that would win over it on some boards, in model sections too, are taken out or
+    # set the same; the rest of the Pi 4 section is left alone
+    assert changed == ('# comment\n\ndisable_splash=1\n[pi4]\ngpu_mem=512\ndtoverlay=x\n'
+                       '[all]\ngpu_mem=512\n')
     assert system.get_gpu_mem(changed, 1024) == 512
+    # the page says when a model section sets it differently
+    assert system.gpu_mem_in_model_sections(config) and system.gpu_mem_in_model_sections(changed)
+    assert not system.gpu_mem_in_model_sections('gpu_mem=64\n[pi4]\ndtoverlay=x\n')
+    assert 'have their own setting' not in client.get('/').data.decode()
+    open(system.CONFIG_FILE, 'w').write(config)
+    assert 'have their own setting' in client.get('/').data.decode()
     # not set: added at the top, where it applies to every Pi
     config = '# comment\n\ndisable_splash=1\n[pi4]\ndtoverlay=x\n'
     changed = system.set_gpu_mem_in_config(config, 256)

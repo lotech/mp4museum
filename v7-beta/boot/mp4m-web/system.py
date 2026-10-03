@@ -329,17 +329,25 @@ def get_gpu_mem(config_text, board=None):
             override = int(match.group(2))
     return override if override is not None else value
 
+def gpu_mem_in_model_sections(config_text):
+    """Whether a model section (e.g. [pi4]) sets the graphics memory: it may differ from
+    get_gpu_mem() on some boards. set_gpu_mem_in_config sets those lines too."""
+    return any(not everywhere and (GPU_MEM_OVERRIDE_RE.match(line) or re.match(r'\s*gpu_mem\s*=', line))
+               for line, everywhere in _applies_to_all(config_text))
+
 def set_gpu_mem_in_config(config_text, megabytes):
-    """config.txt with gpu_mem for every Pi set to megabytes, and gpu_mem_256/512/1024 lines for
-    every Pi taken out (they would win over it); nothing else changes."""
+    """config.txt with gpu_mem set to megabytes for every Pi. gpu_mem lines in model sections
+    (e.g. [pi4]) get the same value and gpu_mem_256/512/1024 lines are taken out, as they would
+    win over it on the boards they are for; nothing else changes."""
     lines, done = [], False
     for line, everywhere in _applies_to_all(config_text):
-        if everywhere and GPU_MEM_OVERRIDE_RE.match(line):
+        if GPU_MEM_OVERRIDE_RE.match(line):
             continue
-        if everywhere and re.match(r'\s*gpu_mem\s*=', line):
-            if done:
+        if re.match(r'\s*gpu_mem\s*=', line):
+            if everywhere and done:
                 continue
-            line, done = f"gpu_mem={megabytes}\n", True
+            line = f"gpu_mem={megabytes}\n"
+            done = done or everywhere
         lines.append(line)
     if not done:
         # after the comments at the top, before any [section]

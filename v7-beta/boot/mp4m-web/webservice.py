@@ -153,7 +153,8 @@ def index():
     is_available = system.media_available()
     # Get sound devices from aplay -l
     sound_status, sound_out = system.run_command(["aplay", "-l"])
-    current_mode_key, current_mode = system.get_current_video_mode(system.read_config_text())
+    config_text = system.read_config_text() or ''
+    current_mode_key, current_mode = system.get_current_video_mode(config_text)
     free_space = system.get_free_space() if is_available else 0
     board = system.board_memory_megabytes()
 
@@ -170,7 +171,8 @@ def index():
                            current_mode=current_mode,
                            current_mode_key=current_mode_key,
                            video_modes=system.VIDEO_MODES,
-                           gpu_mem=system.get_gpu_mem(system.read_config_text(), board),
+                           gpu_mem=system.get_gpu_mem(config_text, board),
+                           gpu_mem_in_sections=system.gpu_mem_in_model_sections(config_text),
                            gpu_mem_choices=system.gpu_mem_choices(board),
                            gpu_mem_recommended=system.recommended_gpu_mem(board),
                            memory_mb=system.memory_megabytes(),
