@@ -501,3 +501,13 @@ def test_large_webp_skipped_too(tmp_path):
             contents={'/media/internal/b.webp': vp8x.hex()},
             write={'/proc/device-tree/model': 'Raspberry Pi 3 Model B\0'}, max_plays=5)
     assert 'b.webp: 4000 x 3000' in r['stdout'] and 'b.webp' not in plays(r)
+
+
+def test_play_pressed_while_a_rewind_is_on_its_way(tmp_path):
+    # omxplayer takes a while to stop: play pressed meanwhile is for the first frame, not lost
+    r = run(tmp_path, files=['/media/internal/clip-loop.mp4'], installed=['omxplayer'], omx_hangs=True,
+            signals=[{'at': 40, 'command': 'rewind'}, {'at': 41, 'signal': 'SIGUSR2'}], max_seconds=100)
+    starts = [round(e['at']) for e in omx_starts(r)]
+    assert len(starts) == 2 and starts[1] < 50, starts       # straight back to playing from the start
+    assert [e for e in r['log'] if 'key' in e] == []          # not sent to the omxplayer being stopped
+    assert not [s for s in r['statuses'] if s['state'] == 'paused']

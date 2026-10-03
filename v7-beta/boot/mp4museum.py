@@ -143,6 +143,13 @@ def play_request():
 # back to the first frame, paused, until play is pressed
 rewind_requested = False
 rewound = False
+# play pressed while a rewind is on its way: the first frame isn't held
+play_requested = False
+
+def take_play_request():
+    global play_requested
+    requested, play_requested = play_requested, False
+    return requested
 def rewind():
     global rewind_requested, rewound
     if skip_requested:
@@ -172,11 +179,16 @@ def next_file():
     skip_requested = True
     # next overtakes a rewind that is still waiting
     rewind_requested = False
+    take_play_request()
     if not omx:
         player.stop()
 
 def pause_toggle():
-    global omx_paused, omx_last_key
+    global omx_paused, omx_last_key, play_requested
+    if rewind_requested:
+        # for the first frame on its way (not the omxplayer being stopped)
+        play_requested = not play_requested
+        return
     process = omx
     if process:
         # omxplayer only reads keys once it has started, and keys that arrive together are
@@ -239,7 +251,8 @@ def vlc_play(source, options=(), limit=None):
             # rewind pressed between files: this one waits at its first frame
             rewind_requested = False
             player.set_time(0)
-            player.set_pause(1)
+            if not take_play_request():
+                player.set_pause(1)
             rewound = True
         state = 'paused' if current_state == vlc.State.Paused else 'playing'
         length = player.get_length()
@@ -322,7 +335,6 @@ def omx_loop(source):
     player.stop()
     while not skip_requested:
         if rewind_requested:
-            rewind_requested = False
             hold_first_frame(source)
             if skip_requested:
                 break
@@ -492,6 +504,7 @@ def hold_first_frame(source):
     player.set_media(media)
     player.play()
     started = time.time()
+    global rewind_requested
     while (player.get_state() not in (vlc.State.Playing, vlc.State.Ended, vlc.State.Error)
            and time.time() - started < OPEN_TIMEOUT and not skip_requested):
         time.sleep(.01)
@@ -501,9 +514,12 @@ def hold_first_frame(source):
     while player.get_state() == vlc.State.Playing and time.time() < paused_by and not skip_requested:
         time.sleep(.01)
     player.set_time(0)
-    write_status('paused', source, 0)
-    while player.get_state() == vlc.State.Paused and not skip_requested:
-        time.sleep(.05)
+    # from here play presses go to VLC; one pressed on the way means: play it from the start
+    rewind_requested = False
+    if not take_play_request():
+        write_status('paused', source, 0)
+        while player.get_state() == vlc.State.Paused and not skip_requested:
+            time.sleep(.05)
     # omxplayer takes the screen again
     player.stop()
     media.release()
