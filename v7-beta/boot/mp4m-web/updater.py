@@ -229,14 +229,14 @@ def official_player_hashes(manifest):
     return hashes
 
 def _install(source_root, version):
-    previous = installed_version()
-    previous_players = official_player_hashes(previous)
     new_player = os.path.join(source_root, PLAYER_SOURCE)
     new_player_hash = file_sha256(new_player)
 
     new_dir = APP_DIR + '.new'
     old_dir = APP_DIR + '.old'
+    # writable() holds the /boot lock, so no other process installs while this one reads what is installed
     with system.writable(system.BOOT_PATH):
+        previous_players = official_player_hashes(installed_version())
         for leftover in (new_dir, old_dir):
             shutil.rmtree(leftover, ignore_errors=True)
         copy_tree(os.path.join(source_root, APP_SOURCE), new_dir)
