@@ -16,8 +16,8 @@ The player is meant to run offline. A network is optional and only needed for th
 
 | Path | Purpose |
 |---|---|
-| `boot/mp4museum.py` | Player: plays everything in `/media/*/` in order, GPIO pause (pin 11) and next/previous/back to the start (pin 13), sync mode with omxplayer-sync |
-| `boot/mp4m-web/` | Web interface (Flask, port 80, runs as root): `webservice.py` (routes), `system.py` (partitions, config.txt, network name, password), `updater.py` (software update), `templates/`, `static/`. On the boot partition so it can be updated without turning off the overlay |
+| `boot/mp4museum.py` | Player: plays the media files in `/media/*/` in order, GPIO pause (pin 11) and next/previous/back to the start (pin 13), sync mode with omxplayer-sync |
+| `boot/mp4m-web/` | Web interface (Flask, port 80, runs as root): `webservice.py` (routes), `system.py` (partitions, config.txt, network name, password), `updater.py` (software update), `clone.py` (cloning the player to an SD card), `templates/`, `static/`. On the boot partition so it can be updated without turning off the overlay |
 | `etc/systemd/system/mp4m-webservice.service` | Starts the web interface at boot |
 | `usr/local/bin/mp4m-update` | The `sudo mp4m-update` command |
 | `home/pi/.bashrc` | Autostart on tty1: runs `/boot/mp4museum.py`, and again if it stops by itself |
@@ -30,13 +30,18 @@ The player is meant to run offline. A network is optional and only needed for th
 | `etc/usbmount/usbmount.conf` | USB sticks auto-mounted read-only at `/media/usb0..7` |
 | `etc/systemd/system/getty@tty1.service.d/autologin.conf` | Auto-login of user `pi` on tty1 |
 | `etc/initramfs-tools/scripts/overlay` | Read-only root with tmpfs overlay (standard raspi-config overlay script) |
+| `install.sh` | Installs the files above that aren't on the image (see "Installing permanently") |
+
+`boot/cmdline.txt`, `boot/config.txt`, `boot/issue.txt` and the files in `etc/` other than the
+service are as on the image, for reference: `install.sh` doesn't install them.
 
 ## Player
 
 The player (`/boot/mp4museum.py`, started from `.bashrc`) plays the boot video, the
 MP4MUSEUM logo, then every video, image and sound file in `/media/*/` (the internal media
-partition and USB sticks) in alphabetical order, over and over. Other files are left out (an SD
-card in a USB reader has a Pi's boot files on it).
+partition, then each USB stick) in order of name (capital letters first), over and over. Other
+files are left out (an SD card in a USB reader has a Pi's boot files on it), and so are files in
+subfolders and hidden files (names starting with `.`).
 
 - **Boot video:** the original MP4MUSEUM one (`/home/pi/mp4museum-boot.mp4`). To use your own,
   put it on the SD card's boot partition as `mp4museum-boot.mp4` (it shows up as a drive on
@@ -62,9 +67,10 @@ card in a USB reader has a Pi's boot files on it).
   `image_duration=<seconds>`). A new setting applies from the next image.
 - A file that hasn't started playing after 20 seconds (broken file, stalled USB stick) is skipped.
 - **If the player stops** by itself (an error, or out of memory, e.g. on an image far bigger
-  than the screen), `.bashrc` starts it again, and the file it was playing is skipped until it
-  is replaced or chosen in the web interface (a custom boot video: the original is played instead). Its output is in `/tmp/mp4museum.log` (also on
-  the System tab). Ctrl-C on the console stops it for good, as before.
+  than the screen), `.bashrc` starts it again. A file that was playing when it stopped twice is
+  skipped (marked "skipped" in the playlist) until it is replaced, chosen in the web interface,
+  or the Pi restarts; a custom boot video is replaced by the original. Its output is in
+  `/tmp/mp4museum.log` (also on the System tab). Ctrl-C on the console stops it for good, as before.
 - **Images** more than 2048 pixels wide or high come out scrambled on a Pi 3 (after a long
   wait), so a Pi 3 or older skips them. The web interface marks them "too large" and warns
   when one is uploaded. Resize them to the screen's size, e.g. 1920×1080.
@@ -86,16 +92,22 @@ card in a USB reader has a Pi's boot files on it).
 
 Open `http://<network name>.local` in a browser on the same network.
 
-- **Media:** the player (what is playing and with which program, VLC or omxplayer; Pause/Resume,
-  Next, and Rewind: the file starts again and holds its first frame until play is pressed),
-  playback settings (changing the loop player starts the loop video playing now again), and the
-  playlist: every file the player plays, from the media partition and USB sticks, in order.
-  Start any file from there (its play button or its name); upload files (several at once, with progress),
-  rename them (files play in alphabetical order; add `-loop` to repeat a video), download or delete them.
+- **Media:** the player (what is playing and with which program, VLC or omxplayer; Previous,
+  Pause/Resume, Next, and Rewind: the file starts again and holds its first frame until play is
+  pressed), playback settings (changing the loop player starts the loop video playing now again),
+  and the playlist: every file the player plays, from the media partition and USB sticks, in
+  order, and the media partition's other files, marked "not played". The list fills the window
+  and scrolls inside its card, keeping the file playing in view. Start any file from there (its
+  play button or its name); upload files (several at once, with progress), rename them (files
+  play in order of name; add `-loop` to repeat a video), download, delete or switch them off.
   Files on a USB stick can be copied to the player, so they play without the stick. The copy runs
-  in the background (reboots and updates wait for it); on a Pi 3 it may slow down playback meanwhile.
+  in the background; meanwhile rebooting, updates and cloning say to wait, and on a Pi 3 playback
+  may slow down. While the stick is in, its copy plays too: switch one off, or take the stick out.
+- **Sound:** the sound cards found, with a Use button (needs a reboot).
+- **Script:** edit the player script, then save (and reboot to use it).
 - **Updates:** when the player has an internet connection, the page checks for a new version
-  by itself (at most every few hours) and shows a bar to install it.
+  by itself (at most every few hours) and shows a bar to install it. When the installed version
+  came from another branch (`sudo mp4m-update --branch`), the bar says installing it switches back.
 
 - **Password:** `mp4museum` by default, can be changed on the System tab. It is stored
   hashed in `/boot/mp4m-password.txt`; delete that file to reset to the default.
@@ -112,10 +124,14 @@ Open `http://<network name>.local` in a browser on the same network.
   `gpu_mem_256`/`_512`/`_1024` lines (which win over `gpu_mem`) are taken out, and `gpu_mem`
   lines in model sections such as `[pi4]` get the same value.
 - **Device** (System tab): the Pi's model, memory, graphics memory in use, temperature, whether
-  the power supply has been too weak since it started, free space and OS version.
+  the power supply has been too weak since it started, free space, OS version, Linux kernel, how
+  long it has been running and its serial number.
 
 Files the web interface may create in `/boot`: `mp4m-password.txt`, `hostname.txt`, `alsa.txt`,
-`mp4m-player.txt`, `mp4m-disabled.txt`, `mp4museum.py.new`. `mp4m-update.txt` is only read.
+`mp4m-player.txt`, `mp4m-disabled.txt`, `mp4museum.py.new`. `mp4m-update.txt` is only read. It
+also changes `config.txt` (Video tab) and `mp4museum.py` (Script tab, updates), and updates
+replace `mp4m-web/` (through `mp4m-web.new` and `mp4m-web.old`). Uploads and copies are written
+to the media partition as hidden `.upload-…` files first.
 
 ## Getting the code onto the Pi
 
@@ -143,6 +159,10 @@ sudo python3 -B ~/mp4m-src/v7-beta/boot/mp4m-web/webservice.py
 
 The terminal shows the player's network name, e.g. `Network name: mp4museum-1a2b.local`.
 It stops when you close the SSH session; reboot to go back to the installed version.
+
+To try a branch on an installed player instead, `sudo mp4m-update --branch <name>` installs it
+on `/boot`, so it stays after a reboot; updating from the web interface or `sudo mp4m-update`
+goes back to `master`.
 
 ## Installing permanently
 
@@ -182,8 +202,10 @@ An update replaces the web interface in `/boot/mp4m-web`, and the player script
 `/boot/mp4museum.py` unless it has been edited on that player. In that case the edited
 script is kept and the new one is saved as `/boot/mp4museum.py.new`. Nothing outside `/boot`
 can be updated this way, because the rest of the system is a read-only RAM overlay. When an
-update changes files there (`.bashrc`, the boot video, the service), it says so; install
-those with `install.sh` as above.
+update changes files there (`.bashrc`, the boot video, the old logo, the service, the
+`mp4m-update` command), it says so; install those with `install.sh` as above. While a card is
+being cloned or a file is copied or uploaded, an update is refused with a message: install it
+when that's done.
 
 An update is checked before anything is changed, and swaps the web interface folder in one
 step. If the power goes off in the middle of that, the web interface is put back when the
@@ -209,19 +231,30 @@ it says the card is ready, take it out; the next card put in shows up in the lis
   player and web interface), and the system as installed (not what is only in RAM now).
 - **Its own network name:** `hostname.txt` isn't copied, so the new player makes its name from
   its own serial number. Set a name in the web interface once it's running.
-- **Media files:** copied, or left out (an empty media partition). Hidden files and folders,
-  such as what a Mac leaves on a card (`.Spotlight-V100`, `._…`), aren't copied.
-- **Partitions:** the system partition is the size the system needs plus 1 GB, and the media
-  partition fills the rest of the card. Use a card of 8 GB or more, bigger with the media files;
-  the page says if it's too small.
+- **Media files:** the media partition's files (not those on USB sticks), copied or left out (an
+  empty media partition). Hidden files and folders, such as what a Mac leaves on a card
+  (`.Spotlight-V100`, `._…`), aren't copied.
+- **Partitions:** the system partition is the size the system uses plus a fifth and 1 GB (at
+  least 3 GB), and the media partition fills the rest of the card. A card of any size works if
+  it all fits: 8 GB or more, bigger with the media files. The page says if it's too small, before
+  anything is erased.
 - **Partition IDs:** the card gets new ones, so it can't be mixed up with this player's card.
   If it had the same ones before (a card made from the same image), reboot this player once
   afterwards.
 
 It needs `mkfs.exfat` from exfat-utils, which isn't on the v7 image: `install.sh` installs it
 when the Pi has an internet connection (run it again later if it didn't). It only works with the
-overlay file system on, on a player started from its own SD card. While a card is being made,
-the web interface doesn't reboot or install updates, and neither does `mp4m-update`.
+overlay file system on, on a player started from its own SD card, with a card reader that uses
+512-byte sectors (most do).
+
+- **A card in use:** if the player is playing a file from the card, it moves on first. If
+  another program is using the card, nothing is changed: take it out, put it back in and try
+  again.
+- **While a card is being made:** USB sticks and cards plugged in aren't mounted (this is put
+  back afterwards, also if the web interface restarts), and rebooting, updates (also
+  `mp4m-update`), uploads and copies from USB sticks are refused with a message until it's done.
+  A card can't be started while a file is copied or uploaded or an update installs.
+
 Every card made this way, like every card made from the v7 image, shares this player's SSH host
 keys and machine ID.
 

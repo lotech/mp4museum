@@ -871,7 +871,8 @@ def set_hostname():
         # The old address no longer works, so send the browser to the new one
         with open(os.path.join(app.static_folder, 'style.css'), 'r') as f:
             inline_css = f.read()
-        return render_template('hostname_changed.html', new_url=f"http://{name}.local/", inline_css=inline_css)
+        return render_template('hostname_changed.html', name=name, new_url=f"http://{name}.local/",
+                               inline_css=inline_css)
     flash(f"Network name changed to {name}.local", "success")
     return redirect(url_for('index'))
 
@@ -1018,7 +1019,7 @@ def version():
 UPDATED_PAGE = """<!doctype html>
 <html>
   <head>
-    <title>MP4Museum - Updated</title>
+    <title>{{ hostname }} - Updated - MP4Museum</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>{{ inline_css|safe }}</style>
   </head>
