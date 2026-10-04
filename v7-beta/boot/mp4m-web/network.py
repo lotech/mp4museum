@@ -850,7 +850,7 @@ def dns_servers():
             if line.startswith('nameserver') and len(line.split()) > 1]
 
 def view():
-    """What the Network and Wi-Fi cards show."""
+    """What the Network tab shows: the network in use and the settings."""
     settings = target_settings()
     addresses = system.interface_addresses(COMMAND_TIMEOUT)
     in_use = routers()
@@ -867,22 +867,26 @@ def view():
             'name': name, 'kind': kind, 'label': 'Wi-Fi' if kind == 'wireless' else 'Ethernet',
             'state': state or 'unknown', 'connected': state == 'up',
             'addresses': [address for family, address in addresses.get(name, []) if family == 'IPv4'],
+            'ipv6': [address for family, address in addresses.get(name, []) if family == 'IPv6'],
+            'mac': system.read_mac(name) if name in present else '',
             'router': in_use.get(name), 'next_start': name in next_start,
             'setting': (settings.get('interfaces') or {}).get(name) or {'mode': 'dhcp', 'address': '', 'router': '', 'dns': []},
         })
     wifi = settings.get('wifi') or {'enabled': True, 'country': '', 'networks': []}
     interface = wireless[0] if wireless else None
     ssid, signal = _wifi_link(interface) if interface else (None, None)
+    country_names = countries()
     return {
         'available': os.path.exists(DHCPCD_CONF),
         'interfaces': interfaces,
         'wired': [i for i in interfaces if i['kind'] == 'wired'],
         'wifi_interface': next((i for i in interfaces if i['name'] == interface), None),
         'wifi': dict(wifi, managed='wifi' in settings, blocked=wifi_blocked() if interface else False,
-                     ssid=ssid, signal=signal),
+                     ssid=ssid, signal=signal,
+                     country_name=dict(country_names).get(wifi['country'], wifi['country'])),
         'addresses': addresses,
         'dns': dns_servers(),
-        'countries': countries(),
+        'countries': country_names,
         'pending': pending(),
         'rollback': rollback(),
     }

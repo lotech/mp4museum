@@ -396,8 +396,47 @@
 
 {# ----- Network ----- #}
 <div id="network" class="tab-content">
-  <div class="grid-2">
-    <div class="stack">
+  <div class="network-layout">
+    {# what is in use: first on a phone, on the right on a wider screen #}
+    <section class="card network-status" id="networkStatus">
+      <h3>{{ icon('network') }}Network in use</h3>
+      <dl class="device-info">
+        <dt>Address</dt><dd><a href="http://{{ hostname }}.local/">http://{{ hostname }}.local</a></dd>
+        {% if network.dns %}<dt>DNS servers</dt><dd>{{ network.dns|join(', ') }}</dd>{% endif %}
+        {% if network.wifi_interface %}<dt>Wi-Fi country</dt><dd>{{ network.wifi.country_name if network.wifi.country else 'Not set: channels 1–11 only' }}</dd>{% endif %}
+      </dl>
+      {# the ones connected first #}
+      {% for port in network.interfaces|sort(attribute='connected', reverse=True) %}
+      {% set wireless = port.kind == 'wireless' %}
+      {% set off = wireless and (network.wifi.managed and not network.wifi.enabled or network.wifi.blocked) %}
+      <div class="status-port">
+        <h4>{{ icon('wifi' if wireless else 'ethernet-port') }}{{ port.label }} <span class="hint">{{ port.name }}</span>
+          {% if port.state == 'absent' %}<span class="badge muted">Not plugged in</span>
+          {% elif off %}<span class="badge muted">Off</span>
+          {% elif port.connected %}<span class="badge on">Connected</span>
+          {% else %}<span class="badge muted">Not connected</span>{% endif %}</h4>
+        <dl class="device-info">
+          {% if wireless and network.wifi.ssid %}
+          <dt>Wi-Fi network</dt><dd>{{ network.wifi.ssid }}{% if network.wifi.signal is not none %} <span class="hint">(signal {{ network.wifi.signal }} dBm)</span>{% endif %}</dd>
+          {% endif %}
+          <dt>IP address</dt><dd>{% for address in port.addresses %}<a href="http://{{ address.split('/')[0] }}/">{{ address }}</a>{% if not loop.last %}<br>{% endif %}{% else %}None{% endfor %}</dd>
+          {% if port.router %}<dt>Router</dt><dd>{{ port.router }}</dd>{% endif %}
+          <dt>Set to</dt><dd>{{ 'Fixed address' if port.setting.mode == 'static' and not port.next_start else 'Automatic (DHCP)' }}
+            {%- if port.next_start %}<br><span class="hint">From the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic (DHCP)' }}</span>{% endif %}</dd>
+          {% if port.ipv6 %}<dt>IPv6</dt><dd>{{ port.ipv6|join('<br>'|safe) }}</dd>{% endif %}
+          {% if port.mac %}<dt>MAC address</dt><dd>{{ port.mac }}</dd>{% endif %}
+        </dl>
+      </div>
+      {% else %}
+      <p class="current">No network ports found.</p>
+      {% endfor %}
+      <details>
+        <summary>Details</summary>
+        <pre>{{ network_status }}</pre>
+      </details>
+    </section>
+
+    <div class="stack network-settings">
       <section class="card">
         <h3>{{ icon('tag') }}Network name</h3>
         <p class="current">This player is at <strong>http://{{ hostname }}.local</strong></p>
@@ -420,28 +459,17 @@
         {% endif %}
         {% for port in network.wired %}
         <div class="network-port">
-          <p class="current"><strong>{{ port.label }}</strong> <span class="hint">{{ port.name }}</span><br>
-            {% if port.state == 'absent' %}Not plugged in
-            {%- elif port.addresses %}{{ port.addresses|join(', ') }}{% if port.router %}, router {{ port.router }}{% endif %}
-            {%- else %}Not connected{% endif %}
-            {%- if port.next_start %}. From the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic' }}
-            {%- else %} ({{ 'fixed address' if port.setting.mode == 'static' else 'automatic' }}){% endif %}</p>
+          {% if network.wired|length > 1 %}<p class="current"><strong>{{ port.name }}</strong></p>{% endif %}
+          {% if port.next_start %}<p class="hint">Saved for the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic (DHCP)' }}.</p>{% endif %}
           {% if network.available %}{{ address_form(port) }}{% endif %}
         </div>
         {% else %}
         <p class="current">No Ethernet port found.</p>
         {% endfor %}
-        {% if network.dns %}<p class="hint">DNS servers in use: {{ network.dns|join(', ') }}</p>{% endif %}
         <p class="hint">Changes are tried first: open the player again and choose Keep within 5 minutes, or it goes
           back to the previous settings. Clone to another device leaves fixed addresses out.</p>
-        <details>
-          <summary>Details</summary>
-          <pre>{{ network_status }}</pre>
-        </details>
       </section>
-    </div>
 
-    <div class="stack">
       <section class="card" id="wifi" data-scan-url="{{ url_for('scan_wifi') }}">
         <h3>{{ icon('wifi') }}Wi-Fi</h3>
         {% set wifi = network.wifi %}
@@ -449,11 +477,8 @@
         {% if not port %}
         <p class="current">This Pi has no Wi-Fi.</p>
         {% else %}
-        <p class="current">
-          {%- if wifi.managed and not wifi.enabled %}Off
-          {%- elif wifi.ssid %}Connected to <strong>{{ wifi.ssid }}</strong>{% if wifi.signal is not none %} (signal {{ wifi.signal }} dBm){% endif %}{% if port.addresses %}: {{ port.addresses|join(', ') }}{% endif %}
-          {%- elif wifi.blocked %}Off: add a network to turn it on
-          {%- else %}Not connected{% endif %}</p>
+        {% if wifi.managed and not wifi.enabled %}<p class="current">Wi-Fi is off.</p>
+        {% elif wifi.blocked %}<p class="current">Wi-Fi is off: add a network to turn it on.</p>{% endif %}
 
         {% if wifi.networks %}
         <ul class="choice-list">

@@ -785,7 +785,7 @@ def test_save_for_the_next_start(ports):
 # ----- The page ----- #
 def test_network_cards(ports, client):
     page = client.get('/').data.decode()
-    assert 'Ethernet</strong> <span class="hint">enxb827eb4e4fd4' in page
+    assert 'Ethernet <span class="hint">enxb827eb4e4fd4</span>' in page
     assert 'Wi-Fi</h3>' in page and 'Not set: channels allowed everywhere' in page
     assert '<option value="GB">Britain (UK)</option>' in page and 'networkBar' not in page
 
@@ -798,6 +798,31 @@ def test_network_settings_have_their_own_tab(ports, client):
     for card in ('Network name</h3>', 'Ethernet</h3>', 'Wi-Fi</h3>'):
         assert card in network_tab and card not in system_tab
     assert 'Password</h3>' in system_tab
+
+
+def test_network_in_use_card(ports, client, monkeypatch):
+    """Addresses and settings in use, listed in one card (before the settings, so first on a phone)."""
+    with open(network.SETTINGS_FILE, 'w') as f:
+        json.dump(dict(FIXED, wifi={'country': 'GB', 'networks': [{'ssid': 'Gallery', 'password': 'secret-password'}]}), f)
+    outputs = {
+        ('ip', '-o'): '2: enxb827eb4e4fd4    inet 192.168.1.50/24 brd 192.168.1.255 scope global\n'
+                      '2: enxb827eb4e4fd4    inet6 fe80::1/64 scope link\n'
+                      '3: wlan0    inet 192.168.10.248/24 brd 192.168.10.255 scope global',
+        ('ip', '-4'): 'default via 192.168.1.1 dev enxb827eb4e4fd4 proto static',
+        ('iw', 'dev'): 'Connected to aa:bb:cc:dd:ee:ff (on wlan0)\n\tSSID: Gallery\n\tsignal: -60 dBm',
+    }
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (True, outputs.get(tuple(cmd[:2]), '')))
+    page = client.get('/').data.decode()
+    card = page.split('id="networkStatus">')[1].split('</section>')[0]
+    assert page.index('id="networkStatus"') < page.index('id="ethernet"')
+    assert '<a href="http://192.168.1.50/">192.168.1.50/24</a>' in card and '192.168.10.248/24' in card
+    assert '<dt>Router</dt><dd>192.168.1.1</dd>' in card and 'fe80::1/64' in card
+    assert 'Gallery <span class="hint">(signal -60 dBm)</span>' in card
+    assert '<dt>Wi-Fi country</dt><dd>Britain (UK)</dd>' in card and 'Fixed address' in card
+    assert '<dt>MAC address</dt><dd>b8:27:eb:00:00:01</dd>' in card
+    assert '<dt>DNS servers</dt><dd>192.168.1.1</dd>' in card
+    # connected first (wlan0 is down here)
+    assert card.index('enxb827eb4e4fd4</span>') < card.index('wlan0</span>')
 
 
 def test_fixed_address_from_the_page(ports, client):
@@ -996,7 +1021,8 @@ def test_scan_says_when_wifi_couldnt_be_blocked_again(ports, client, monkeypatch
 def test_wifi_off_on_the_image(ports, client):
     blocked(ports)
     page = client.get('/').data.decode()
-    assert 'Off: add a network to turn it on' in page and 'Turn Wi-Fi on' in page
+    assert 'Wi-Fi is off: add a network to turn it on.' in page and 'Turn Wi-Fi on' in page
+    assert '<span class="badge muted">Off</span>' in page
     blocked(ports, soft='0')
     assert 'Turn Wi-Fi off' in client.get('/').data.decode()
 

@@ -105,7 +105,7 @@ def read_serial():
 def read_mac(interface):
     """The MAC address of a network interface, or '' if it doesn't exist."""
     try:
-        with open(f'/sys/class/net/{interface}/address', 'r') as f:
+        with open(os.path.join(NET_PATH, interface, 'address'), 'r') as f:
             return f.read().strip()
     except OSError:
         return ''

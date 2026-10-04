@@ -1106,6 +1106,61 @@ select {
 }
 
 /* ----- Network ----- */
+/* settings on the left, what is in use on the right (and first on a phone) */
+.network-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+.network-settings {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.network-status {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: 20px;
+}
+
+@media (max-width: 900px) {
+  .network-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .network-settings, .network-status {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+  }
+}
+
+.status-port {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.status-port h4 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.status-port h4 .badge {
+  margin-left: auto;
+}
+
+.network-status a {
+  color: inherit;
+}
+
 .network-bar {
   background: #3a2f17;
   border-color: #6b5420;

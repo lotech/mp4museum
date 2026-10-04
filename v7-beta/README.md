@@ -115,6 +115,9 @@ Open `http://<network name>.local` in a browser on the same network.
   from the Pi's serial number, so several players can share a network. Change it on the
   Network tab, or put the name in `/boot/hostname.txt` from a computer.
   The name is logged at startup; see `journalctl -u mp4m-webservice`.
+- **Network in use** (Network tab): the player's address, and for each port and Wi-Fi whether it's
+  connected, its IP addresses, router, Wi-Fi network and signal, how it's set and its MAC address;
+  the DNS servers and the Wi-Fi country.
 - **Addresses** (Network tab): each Ethernet port and Wi-Fi gets its address automatically (DHCP)
   or a fixed one (address/prefix, router, DNS servers). A change is tried straight away: open the
   player again (at the new address if it changed) and choose Keep within 5 minutes, or it goes
