@@ -36,8 +36,6 @@ DEFAULT_BRANCH = 'master'
 
 APP_DIR = os.path.join(system.BOOT_PATH, 'mp4m-web')
 MANIFEST_NAME = 'installed.json'
-# there while the web interface makes an SD card (clone.MARKER)
-CLONE_MARKER = '/run/mp4m-clone.json'
 
 # Where things are in the repository
 APP_SOURCE = 'v7-beta/boot/mp4m-web'
@@ -393,9 +391,6 @@ def main():
 
     if os.geteuid() != 0:
         sys.exit("Please run with sudo.")
-    if not args.check and os.path.exists(CLONE_MARKER):
-        # the web interface restarts after an update, which would stop it half way
-        sys.exit("A card is being made in the web interface: update when it's done.")
 
     try:
         if args.from_dir:
@@ -433,6 +428,10 @@ def main():
         if not args.yes and not ask("Install this update?"):
             return
 
+        # held until the web interface has restarted (which would stop making a card half way)
+        busy = system.try_busy_lock()
+        if busy is None:
+            sys.exit("A card is being made in the web interface: update when it's done.")
         summary = update(latest, config)
     except UpdateError as e:
         sys.exit(f"{e} Nothing was changed.")

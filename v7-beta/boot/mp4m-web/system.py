@@ -179,6 +179,18 @@ def _unlock_mount(fd):
     if fd is not None:
         os.close(fd)
 
+def try_busy_lock():
+    """Held while an update is installed (until the web interface has restarted) or an SD card
+    is made, across processes, so one doesn't stop the other half way. Its file descriptor
+    (close it to let go), or None if the other holds it."""
+    fd = os.open(os.path.join(LOCK_DIR, 'mp4m-busy.lock'), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
 class _MountState:
     def __init__(self):
         self.lock = threading.Lock()

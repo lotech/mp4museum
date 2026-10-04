@@ -269,8 +269,13 @@ def test_web_check_and_install(pi, client, github):
 
 def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     monkeypatch.setenv('INVOCATION_ID', 'x')
+    held = []
+    real_lock = system.try_busy_lock
+    monkeypatch.setattr(system, 'try_busy_lock', lambda: held.append(real_lock()) or held[-1])
     client.post('/check_update')
     r = client.post('/install_update')
+    # no card can be started until the web interface has restarted
+    assert real_lock() is None
     assert ['systemd-run', '--on-active=2', 'systemctl', 'restart', 'mp4m-webservice'] in pi.commands
     assert b'waitForNewVersion' in r.data
     # one page: it says the web interface is restarting, then offers the reboot itself (not on
@@ -288,6 +293,9 @@ def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     # tried again after a failure: that attempt is waited for
     assert page.index('stopWaiting = false;') < page.index("fetch('/reboot', {method: 'POST'")
 
+    # (the restart lets go of the lock)
+    os.close(held[0])
+
     # if the restart can't be scheduled, the page doesn't pretend it is restarting: the reboot
     # is offered straight away
     monkeypatch.setattr(system, 'run_command',
@@ -298,6 +306,10 @@ def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     page = r.data.decode()
     assert 'Update installed' in page and 'waitForNewVersion' not in page and 'Restarting' not in page
     assert 'id="rebootButtons" class="button-row" >' in page and 'confirm_reboot' not in page
+    # not restarting: a card can be made
+    lock = real_lock()
+    assert lock is not None
+    os.close(lock)
     client.post('/reboot')
     assert ['reboot'] in pi.commands
 
@@ -396,8 +408,7 @@ def cli(monkeypatch, capsys, pi):
 
 
 def test_cli_waits_for_a_card_being_made(cli, github):
-    with open(updater.CLONE_MARKER, 'w') as f:
-        f.write('{}')
+    making_a_card = system.try_busy_lock()
     code, out = cli([], answers=['y'])
     assert code == "A card is being made in the web interface: update when it's done."
     assert github.downloads == []

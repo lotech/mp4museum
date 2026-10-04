@@ -32,7 +32,7 @@ PROC_MOUNTS = '/proc/mounts'
 PROC_CMDLINE = '/proc/cmdline'
 TEMP_DIR = '/tmp'
 # there while a card is being made, with usbmount's settings to put back if the web interface
-# stops part way (it's in RAM: a reboot clears it). mp4m-update doesn't update meanwhile
+# stops part way (it's in RAM: a reboot clears it). (mp4m-update waits through system.try_busy_lock)
 MARKER = '/run/mp4m-clone.json'
 WORK_PREFIX = 'mp4m-clone-'
 SECTOR = 512
@@ -106,7 +106,8 @@ def _mounts():
 
 
 def _partition_of(device, disk):
-    return re.match(re.escape(disk) + r'p?\d+$', device) is not None
+    """Whether device is the disk or one of its partitions."""
+    return re.match(re.escape(disk) + r'(p?\d+)?$', device) is not None
 
 
 def _in_use_by_system(disk):
@@ -223,20 +224,30 @@ def start(device, with_media, size=None):
     # too small: said now, not after it has started
     root_used, media_used = sizes()
     plan(card['size'], root_used, media_used, with_media, source_partitions()[1][0][1])
-    with _lock:
-        if state['running']:
-            raise CloneError("A card is being made already.")
-        state.update(running=True, step='Starting', percent=None, done=False, error=None, card=card,
-                     same_id_before=False, finished=None)
-    threading.Thread(target=_clone, args=(card, with_media), daemon=True).start()
+    busy = system.try_busy_lock()
+    if busy is None:
+        raise CloneError("An update is being installed: make the card when it's done.")
+    try:
+        with _lock:
+            if state['running']:
+                raise CloneError("A card is being made already.")
+            state.update(running=True, step='Starting', percent=None, done=False, error=None, card=card,
+                         same_id_before=False, finished=None)
+        threading.Thread(target=_clone, args=(card, with_media, busy), daemon=True).start()
+    except BaseException:
+        os.close(busy)
+        raise
 
 
-def _clone(card, with_media):
+def _clone(card, with_media, busy):
     try:
         clone(card, with_media)
         _set(running=False, done=True, step='Done', percent=100, finished=time.monotonic())
     except Exception as e:
         _set(running=False, error=str(e), step='Stopped', finished=time.monotonic())
+    finally:
+        # updates can be installed again
+        os.close(busy)
 
 
 def clone(card, with_media, progress=_set):

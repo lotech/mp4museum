@@ -95,7 +95,7 @@ def pi(tmp_path, monkeypatch):
         monkeypatch.setattr(system, name, value)
     # a path added to system.py and not here would be the real one: tests must not touch it
     real = [name for name, value in vars(system).items()
-            if isinstance(value, str) and value.startswith(('/boot', '/media'))]
+            if isinstance(value, str) and value.startswith(('/boot', '/media', '/run'))]
     assert not real, 'add these to the pi fixture: %s' % real
     monkeypatch.setattr(system, 'run_command', p.run_command)
     monkeypatch.setattr(system, 'is_read_only', lambda mount_point: p.read_only)
@@ -128,7 +128,6 @@ def pi(tmp_path, monkeypatch):
     monkeypatch.setattr(updater, 'APP_DIR', p.path('mp4m-web'))
     monkeypatch.setattr(updater, 'UPDATE_CONFIG_FILE', p.path('mp4m-update.txt'))
     monkeypatch.setattr(updater, 'SYSTEM_FILES', {})
-    monkeypatch.setattr(updater, 'CLONE_MARKER', clone.MARKER)
     monkeypatch.setattr(updater, '_differs_from_local_copy', {})
 
     monkeypatch.setattr(webservice, 'RUNNING_VERSION', {})

@@ -11,6 +11,7 @@ function showTab(tabId) {
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === tabId));
   content.classList.add('active');
+  fitPlaylist();
 
   // Remember the active tab for the next page load
   try {
@@ -128,6 +129,9 @@ function showPlayer(view) {
   if (rewind) rewind.disabled = !controls || !view.rewind;
   document.querySelectorAll('.playlist-item').forEach(item => {
     const current = active && item.dataset.path === view.file;
+    if (current && !item.classList.contains('current')) {
+      showInPlaylist(item);
+    }
     item.classList.toggle('current', current);
     if (!item.classList.contains('not-played')) {
       // An older player script can't jump to a file. When the player isn't running the buttons
@@ -345,6 +349,7 @@ function checkForUpdate() {
       commit.textContent = answer.update.commit;
       text.append(commit, ' (' + answer.update.date + ') ' + (answer.update.message || ''));
       bar.hidden = false;
+      fitPlaylist();
     })
     .catch(() => {
       // No internet: nothing to show
@@ -353,6 +358,7 @@ function checkForUpdate() {
 
 function hideUpdateBar() {
   document.getElementById('updateBar').hidden = true;
+  fitPlaylist();
   try {
     sessionStorage.setItem('updateBarHidden', '1');
   } catch (e) {
@@ -467,6 +473,38 @@ function showStoredToasts() {
   }
 }
 
+// The playlist fills the window down to its bottom edge, and scrolls inside its card when its
+// files don't fit
+function fitPlaylist() {
+  const list = document.getElementById('playlist');
+  if (!list || !list.offsetParent) {
+    // (on a tab that isn't shown)
+    return;
+  }
+  const box = list.getBoundingClientRect();
+  const card = list.closest('.card');
+  const below = card ? card.getBoundingClientRect().bottom - box.bottom : 0;
+  let height = window.innerHeight - (box.top + window.scrollY) - below - 16;
+  if (height < 320) {
+    // below the player (a phone): most of the window, once scrolled down to it
+    height = window.innerHeight * 0.8;
+  }
+  list.style.maxHeight = Math.round(height) + 'px';
+}
+
+// A long playlist scrolls inside its card: keep the file playing in view when it changes
+// (the list only, not the page)
+function showInPlaylist(item) {
+  const list = item.parentElement;
+  const box = list.getBoundingClientRect();
+  const row = item.getBoundingClientRect();
+  if (row.top < box.top) {
+    list.scrollTop -= box.top - row.top;
+  } else if (row.bottom > box.bottom) {
+    list.scrollTop += row.bottom - box.bottom;
+  }
+}
+
 // ----- Copying a file from a USB stick to this player ----- //
 function followCopies() {
   // the page again when they're done, which says how they went
@@ -541,6 +579,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(showProgress, 250);
     document.addEventListener('visibilitychange', refreshPlayer);
   }
+  fitPlaylist();
+  window.addEventListener('resize', fitPlaylist);
   if (document.getElementById('clone')) {
     followClone();
   }

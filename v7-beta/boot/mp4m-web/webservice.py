@@ -556,6 +556,9 @@ def copy_to_player():
         flash("That file isn't on a USB stick any more.", "error")
     elif not system.is_valid_filename(entry['name']):
         flash(f"'{entry['name']}' has characters in its name the player can't store. Rename it on a computer first.", "error")
+    elif clone.is_running():
+        # it may be reading from the card being made
+        flash("A card is being made: copy files when it's done.", "error")
     elif os.path.islink(path):
         # a stick formatted ext4 could point anywhere
         flash(f"'{entry['name']}' is a link, not a file.", "error")
@@ -928,12 +931,19 @@ def install_update():
     if not latest:
         flash("Check for updates first.", "error")
         return redirect(url_for('index'))
+    # held until the web interface restarts, so a card can't be started meanwhile
+    busy_lock = system.try_busy_lock()
+    if busy_lock is None:
+        flash("A card is being made: install the update when it's done.", "error")
+        return redirect(url_for('index'))
     try:
         summary = updater.update(latest)
     except updater.UpdateError as e:
+        os.close(busy_lock)
         flash(f"Update failed, nothing was changed: {e}", "error")
         return redirect(url_for('index'))
     except Exception as e:
+        os.close(busy_lock)
         flash(f"The update stopped part way: {e}. Try again, or run 'sudo mp4m-update --force' over SSH.", "error")
         return redirect(url_for('index'))
     session.pop('update', None)
@@ -944,6 +954,8 @@ def install_update():
         restarting, output = system.run_command(['systemd-run', '--on-active=2', 'systemctl', 'restart', 'mp4m-webservice'])
         if not restarting:
             print(f"Failed to schedule a restart of the web interface: {output}", flush=True)
+    if not restarting:
+        os.close(busy_lock)
     try:
         # The templates have just been replaced, so this page doesn't use them
         with open(os.path.join(updater.APP_DIR, 'static', 'style.css'), 'r') as f:

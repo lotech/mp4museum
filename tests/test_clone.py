@@ -9,6 +9,8 @@ import json
 import os
 import shutil
 import sys
+import threading
+import time
 
 import pytest
 
@@ -136,11 +138,19 @@ def test_never_lists_the_card_the_pi_runs_from(pi):
 
 
 def test_never_lists_a_disk_the_system_uses(pi):
-    # e.g. the Pi started with a card of the same image in the reader, and mounted its /boot from it
-    pi.disks += [READER, dict(READER, name='sdb', size='8000000000')]
+    # e.g. the Pi started with a card of the same image in the reader, and mounted its /boot from
+    # it; or a disk without partitions mounted somewhere
+    pi.disks += [READER, dict(READER, name='sdb', size='8000000000'), dict(READER, name='sdc')]
     with open(clone.PROC_MOUNTS, 'a') as f:
-        f.write('/dev/sda1 /media/usb0 vfat ro 0 0\n/dev/sdb1 /boot vfat ro 0 0\n')
+        f.write('/dev/sda1 /media/usb0 vfat ro 0 0\n/dev/sdb1 /boot vfat ro 0 0\n/dev/sdc /mnt ext4 rw 0 0\n')
     assert [card['device'] for card in clone.list_cards()] == ['/dev/sda']
+
+
+def test_a_disk_without_partitions_is_unmounted_too(pi):
+    with open(clone.PROC_MOUNTS, 'a') as f:
+        f.write('/dev/sda /media/usb0 exfat ro 0 0\n/dev/sdab1 /media/usb1 vfat ro 0 0\n')
+    clone._unmount_card('/dev/sda')
+    assert [cmd for cmd in pi.commands if cmd[0] == 'umount'] == [['umount', '/media/usb0']]
 
 
 def test_no_cards_when_lsblk_fails(pi, monkeypatch):
@@ -311,7 +321,8 @@ def ready(pi, monkeypatch):
     started = []
     monkeypatch.setattr(clone, 'sizes', lambda: (2 * 1024 ** 3, 1024 ** 3))
     monkeypatch.setattr(clone, 'source_partitions', lambda: (SOURCE_ID, [(8192, 524288)]))
-    monkeypatch.setattr(clone, '_clone', lambda card, with_media: started.append((card['device'], with_media)))
+    monkeypatch.setattr(clone, '_clone', lambda card, with_media, busy: (started.append((card['device'], with_media)),
+                                                                         os.close(busy)))
     return started
 
 
@@ -376,6 +387,32 @@ def test_start_refuses_while_a_file_is_copied(ready, monkeypatch):
     assert ready == [] and not clone.is_running()
 
 
+def test_start_refuses_while_an_update_is_installed(ready):
+    # by mp4m-update, which restarts the web interface when it's done
+    installing = system.try_busy_lock()
+    with pytest.raises(clone.CloneError, match='An update is being installed'):
+        clone.start('/dev/sda', False)
+    assert ready == [] and not clone.is_running()
+    os.close(installing)
+
+
+def test_updates_wait_while_a_card_is_made(pi, monkeypatch):
+    pi.disks.append(READER)
+    monkeypatch.setattr(clone, 'sizes', lambda: (2 * 1024 ** 3, 1024 ** 3))
+    monkeypatch.setattr(clone, 'source_partitions', lambda: (SOURCE_ID, [(8192, 524288)]))
+    go = threading.Event()
+    monkeypatch.setattr(clone, 'clone', lambda card, with_media: go.wait(5))
+    clone.start('/dev/sda', False)
+    assert system.try_busy_lock() is None
+    go.set()
+    deadline = time.monotonic() + 5
+    while clone.is_running() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    lock = system.try_busy_lock()
+    assert lock is not None
+    os.close(lock)
+
+
 def test_start_refuses_a_card_too_small(ready, pi):
     pi.disks[-1] = dict(READER, size=str(4 * 1024 ** 3))
     with pytest.raises(clone.CloneError, match='too small'):
@@ -385,7 +422,7 @@ def test_start_refuses_a_card_too_small(ready, pi):
 
 def test_state_when_done_or_failed(pi, monkeypatch):
     monkeypatch.setattr(clone, 'clone', lambda card, with_media: None)
-    clone._clone(CARD, False)
+    clone._clone(CARD, False, system.try_busy_lock())
     assert clone.get_state()['done'] and clone.get_state()['recent'] and not clone.get_state()['running']
     # the page stops saying how it went after a while
     finished = clone.state['finished']
@@ -393,7 +430,7 @@ def test_state_when_done_or_failed(pi, monkeypatch):
         m.setattr(clone.time, 'monotonic', lambda: finished + clone.RESULT_SHOWN)
         assert not clone.get_state()['recent']
     monkeypatch.setattr(clone, 'clone', lambda card, with_media: (_ for _ in ()).throw(clone.CloneError('sfdisk: no')))
-    clone._clone(CARD, False)
+    clone._clone(CARD, False, system.try_busy_lock())
     assert clone.get_state()['error'] == 'sfdisk: no' and not clone.get_state()['running']
 
 
@@ -431,6 +468,17 @@ def test_copy_from_the_web_interface(client, ready):
 def test_copy_refused_is_said(client, ready):
     client.post('/clone', data={'device': '/dev/sdb', 'media': 'with'}, follow_redirects=False)
     assert "That card isn&#39;t in a USB reader any more." in client.get('/').get_data(as_text=True)
+
+
+def test_no_file_copies_while_a_card_is_made(client, pi, ready):
+    # the copy may read from the card being erased
+    clone.start('/dev/sda', False)
+    usb = pi.media.parent / 'usb0'
+    usb.mkdir()
+    (usb / 'film.mp4').write_bytes(b'f')
+    page = client.post('/copy_to_player', data={'file': str(usb / 'film.mp4')}, follow_redirects=True).data.decode()
+    assert 'A card is being made: copy files when it&#39;s done.' in page
+    assert system.copies_running() == [] and os.listdir(pi.media) == []
 
 
 def test_no_reboot_or_update_while_a_card_is_made(client, pi, ready):
