@@ -49,6 +49,16 @@ cp etc/systemd/system/mp4m-webservice.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable mp4m-webservice.service
 
+# Raspberry Pi OS prints "Wi-Fi is currently blocked by rfkill" at every login (on tty1, where
+# the player starts) until a Wi-Fi country is set with raspi-config. Wi-Fi is set up in the web
+# interface instead, so the message only clutters the screen. Moved aside with dpkg-divert, so a
+# package update doesn't bring it back (undo: dpkg-divert --rename --remove <file>).
+if [ -e /etc/profile.d/wifi-check.sh ]; then
+    echo "Hiding the 'Wi-Fi is currently blocked by rfkill' message at login"
+    dpkg-divert --local --quiet --rename --divert /etc/profile.d/wifi-check.sh.mp4m-off \
+        --add /etc/profile.d/wifi-check.sh
+fi
+
 if ! command -v mkfs.exfat >/dev/null && ! command -v mkexfatfs >/dev/null; then
     echo "Installing exfat-utils (for copying this player to an SD card, in the web interface)"
     # Buster's packages have moved to legacy.raspbian.org: a list just for this, the Pi's own is left as it is

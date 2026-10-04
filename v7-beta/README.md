@@ -193,7 +193,10 @@ goes back to `master`.
    It installs the web interface to `/boot/mp4m-web` and the player to `/boot/mp4museum.py`
    (an edited player is kept; the new one is saved as `mp4museum.py.new`), the boot video,
    logo and `.bashrc` to `/home/pi`, the `mp4m-webservice` service and the `mp4m-update` command,
-   and exfat-utils if it can (for copying to an SD card; it needs an internet connection).
+   and exfat-utils if it can (for copying to an SD card; it needs an internet connection). It
+   also hides the "Wi-Fi is currently blocked by rfkill" message Raspberry Pi OS prints on the
+   screen at login (Wi-Fi is set up in the web interface instead); to bring it back:
+   `sudo dpkg-divert --rename --remove /etc/profile.d/wifi-check.sh`.
 3. Run `sudo raspi-config` again, open **Overlay File System** and answer **Yes**. If it asks
    "Would you like the boot partition to be write-protected?", answer **Yes**; if it says the boot
    partition is already read-only, nothing more is needed. Reboot.

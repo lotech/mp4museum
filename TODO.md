@@ -126,7 +126,7 @@ as on the image).
 - [x] Wi-Fi in its card: network connected to, signal, address (fixed or automatic as above)
 - [x] Wi-Fi passwords aren't kept: the WPA key worked out from it (as `wpa_passphrase`). Names and keys are written in hexadecimal into `wpa_supplicant.conf`. A password written into `mp4m-network.json` by hand (setting up Wi-Fi from a computer) is used, and replaced by its key the next time the settings are saved
 - [x] Turn Wi-Fi off from the web interface (`rfkill block wifi`)
-- [ ] The rfkill message at login still shows on players where Wi-Fi isn't set up (and may show before the web interface unblocks it): hide it with `install.sh` (outside `/boot`), or unblock earlier at boot
+- [x] The rfkill message at login: `install.sh` moves `/etc/profile.d/wifi-check.sh` aside with `dpkg-divert` (kept through package updates). Test on the Pi: the message is gone from tty1 at boot
 - [ ] Offline setup: a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (`hostapd`/`dnsmasq` aren't on the image: needs `install.sh`, from `legacy.raspbian.org` like exfat-utils)
 - [ ] Test all of it on a Pi 3 B, a Pi 3 B+ (2.4 and 5 GHz) and a Pi 4, with the overlay on and after a reboot: a fixed address applied and kept; one not kept goes back (and the old address is gone); Wi-Fi joins without a country (channels 1–11) and with one; `iw reg get` after setting the country; scanning while wpa_supplicant scans (busy: `scan dump`); the rfkill message; the logo screen's address with a fixed address and on Wi-Fi only; a change while the page is on Wi-Fi
 
