@@ -335,6 +335,9 @@ def _apply(settings, at_start=False, again=None):
     current = _read(path)
     # (Wi-Fi no longer set up here: blocked again, as on the image, unless it wasn't before)
     block = True
+    # a retry of going back, where the Wi-Fi in use may differ from these settings
+    again_wifi = again is not None and (again.get('wifi') or None) != (wifi or None)
+    restored = False
     if wifi:
         text = wpa_conf(wifi)
         if current != text and current is not None and not current.startswith(WPA_HEADER):
@@ -346,20 +349,18 @@ def _apply(settings, at_start=False, again=None):
                 wifi, text = None, current
         if wifi and current != text:
             _write_etc(path, text, 0o600)
-    elif current is not None and current.startswith(WPA_HEADER):
+    elif current is not None and (current.startswith(WPA_HEADER) or again_wifi):
         # Wi-Fi no longer set up here (a first setup undone, the settings file deleted with the
-        # overlay off): back to what was there before, or as on the image
+        # overlay off): back to what was there before, or as on the image. (The copy is kept until
+        # that has worked, for trying again.)
         before = _wifi_before()
         text, block = (before['text'], before['blocked']) if before else (DEFAULT_WPA_CONF, True)
-        _write_etc(path, text, 0o600)
-        try:
-            if os.path.exists(WIFI_BEFORE_FILE):
-                os.remove(WIFI_BEFORE_FILE)
-        except OSError:
-            pass
+        if text != current:
+            _write_etc(path, text, 0o600)
+        restored = True
     else:
         text = current
-    again_wifi = again is not None and wifi and again.get('wifi') != wifi
+    wifi_problems = len(problems)
     if interface and (text != current or wifi and at_start or again_wifi):
         if wifi and not wifi['enabled'] or not wifi and block:
             _run(['rfkill', 'block', 'wifi'], problems)
@@ -373,6 +374,12 @@ def _apply(settings, at_start=False, again=None):
             if not ok or 'FAIL' in output:
                 # not running for this interface (dhcpcd's hook usually starts it)
                 _run(['wpa_supplicant', '-B', '-i', interface, '-c', path, '-D', 'nl80211,wext'], problems)
+    if restored and len(problems) == wifi_problems:
+        try:
+            if os.path.exists(WIFI_BEFORE_FILE):
+                os.remove(WIFI_BEFORE_FILE)
+        except OSError:
+            pass
     for problem in problems:
         print(f"Network settings: {problem}", flush=True)
     return problems
@@ -534,7 +541,8 @@ def _revert(token):
         print("Network settings: not kept, so the previous ones are used again.", flush=True)
 
 class NotApplied(Exception):
-    """Keep was asked for before the change had been applied (so before it could be tried)."""
+    """Keep was asked for before the change had been applied (so before it could be tried), or
+    applying it went wrong (args: what went wrong)."""
 
 def keep():
     """Save the settings being tried to /boot. False if none are waiting; NotApplied while they
@@ -544,6 +552,9 @@ def keep():
             return False
         if not _pending['finished']:
             raise NotApplied()
+        if _pending['problems']:
+            # (the page may have been reached at the old address, e.g. dhcpcd didn't answer)
+            raise NotApplied(_pending['problems'])
         settings = _pending['settings']
         with _apply_lock:
             # an interface saved for the next start and changed by this: in use now as saved

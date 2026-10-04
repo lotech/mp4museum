@@ -276,6 +276,41 @@ def test_kept_only_once_applied(ports, client, monkeypatch):
     assert network.keep() and saved(ports) == FIXED
 
 
+def test_a_change_that_failed_cant_be_kept(ports, client, monkeypatch):
+    """e.g. dhcpcd didn't answer: the page may still be on the old address."""
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[0] != 'dhcpcd', 'stopped after 30 seconds'))
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    page = client.get('/').data.decode()
+    assert "They didn't work, so they can't be kept" in page and 'network/keep' not in page
+    client.post('/network/keep')
+    assert saved(ports) is None and network.pending() is not None
+    assert "didn&#39;t work (dhcpcd -n enxb827eb4e4fd4: stopped after 30 seconds)" in client.get('/').data.decode()
+
+
+def test_going_back_from_wifi_is_tried_again_if_it_fails(ports, monkeypatch):
+    """Wi-Fi set up some other way comes back, even if the first try fails."""
+    by_hand = network.DEFAULT_WPA_CONF + 'network={\n\tssid="Studio"\n}\n'
+    with open(network.wpa_conf_path(), 'w') as f:
+        f.write(by_hand)
+    blocked(ports, soft='0')
+    network.change({'wifi': {'networks': [{'ssid': 'Gallery', 'password': 'secret-password'}]}})
+    ports.run_later(network.APPLY_DELAY)
+    failing = {'wpa_supplicant': True}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        return (False, 'FAIL') if cmd[0] in ('wpa_cli', 'wpa_supplicant') and failing['wpa_supplicant'] else (True, 'OK')
+    monkeypatch.setattr(system, 'run_command', run)
+    network.undo()
+    assert wpa(ports) == by_hand and network.rollback() and os.path.exists(network.WIFI_BEFORE_FILE)
+    failing['wpa_supplicant'] = False
+    ports.commands.clear()
+    ports.run_later(network.ROLLBACK_RETRY)
+    assert ['wpa_cli', '-i', 'wlan0', 'reconfigure'] in ports.commands and ['rfkill', 'block', 'wifi'] not in ports.commands
+    assert network.rollback() is None and not os.path.exists(network.WIFI_BEFORE_FILE)
+
+
 def test_change_not_kept_goes_back(ports):
     network.change(FIXED)
     ports.run_later()

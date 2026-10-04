@@ -1009,8 +1009,12 @@ def keep_network():
             flash("The new network settings are kept.", "success")
         else:
             flash("There was no change to keep: the player went back to the previous network settings.", "error")
-    except network.NotApplied:
-        flash("The new network settings are still being applied: try Keep again in a moment.", "error")
+    except network.NotApplied as e:
+        if e.args:
+            flash(f"The new network settings didn't work ({'; '.join(e.args[0])}), so they can't be kept. "
+                  "Undo, or change them.", "error")
+        else:
+            flash("The new network settings are still being applied: try Keep again in a moment.", "error")
     except Exception as e:
         flash(f"Failed to save the network settings: {e}", "error")
     return redirect(url_for('index'))
