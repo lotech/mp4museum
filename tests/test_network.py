@@ -230,6 +230,40 @@ def test_wifi_set_up_some_other_way_comes_back(ports):
     assert ['rfkill', 'block', 'wifi'] not in ports.commands and ['rfkill', 'unblock', 'wifi'] in ports.commands
 
 
+def test_the_first_copy_of_wifi_set_up_elsewhere_is_kept(ports, monkeypatch):
+    """Putting it back didn't block Wi-Fi again; a new Wi-Fi change mustn't copy that half way."""
+    by_hand = network.DEFAULT_WPA_CONF + 'network={\n\tssid="Studio"\n}\n'
+    with open(network.wpa_conf_path(), 'w') as f:
+        f.write(by_hand)
+    blocked(ports)
+    network.apply_at_start()
+    trial = {'wifi': {'networks': [{'ssid': 'Gallery', 'password': 'secret-password'}]}}
+    network.change(trial)
+    ports.run_later(network.APPLY_DELAY)
+    # (the trial unblocked it)
+    blocked(ports, soft='0')
+    failing = {'block': True}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        if cmd == ['rfkill', 'unblock', 'wifi']:
+            blocked(ports, soft='0')
+        if cmd == ['rfkill', 'block', 'wifi']:
+            if failing['block']:
+                return False, 'timed out'
+            blocked(ports)
+        return True, ''
+    monkeypatch.setattr(system, 'run_command', run)
+    network.undo()
+    assert network.rollback() and network.wifi_blocked() is False
+    failing['block'] = False
+    network.change(trial)
+    ports.run_later(network.APPLY_DELAY)
+    network.undo()
+    # blocked, as it was before any of this
+    assert wpa(ports) == by_hand and network.wifi_blocked() is True
+
+
 def test_nothing_changed(ports, client):
     client.post('/network/address', data={'interface': 'enxb827eb4e4fd4', 'mode': 'dhcp'})
     assert network.pending() is None and 'Nothing changed.' in client.get('/').data.decode()

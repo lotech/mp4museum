@@ -346,8 +346,10 @@ def _apply(settings, at_start=False, again=()):
     restored = False
     if wifi:
         text = wpa_conf(wifi)
-        if current != text and current is not None and not current.startswith(WPA_HEADER):
-            # set up some other way: kept, to put back if this is undone
+        if (current != text and current is not None and not current.startswith(WPA_HEADER)
+                and _wifi_before() is None):
+            # set up some other way: kept, to put back if this is undone (a copy still there is
+            # from before: putting it back didn't all work, and this file is that half way)
             try:
                 system.write_file(WIFI_BEFORE_FILE, json.dumps({'text': current, 'blocked': wifi_blocked()}))
             except OSError as e:
