@@ -313,11 +313,9 @@ def clone(card, with_media, progress=_set):
         _unmount_card(device)
         # a card with this player's image on it had the same partition IDs as this one: while it
         # was plugged in the Pi couldn't tell its own partitions from the card's
-        try:
-            old_id = '%08x' % int(json.loads(run(['sfdisk', '-J', device]))['partitiontable']['id'], 16)
+        old_id = _disk_id(device)
+        if old_id:
             progress(same_id_before=old_id == disk_id)
-        except (CloneError, ValueError, KeyError):
-            pass
 
         # the card chosen still there (not another one put in meanwhile)? Checked last thing
         # before it's erased
@@ -341,6 +339,12 @@ def clone(card, with_media, progress=_set):
             # e.g. a file on it still open: sfdisk leaves the card as it was
             raise CloneError(f"The card is in use, so it wasn't changed. Take it out, put it back in and "
                              f"try again. ({e})")
+        # Buster's sfdisk (util-linux 2.33) gives a new table a random disk ID, whatever label-id
+        # says: set it on its own, and make sure it's the one cmdline.txt and fstab will name
+        run(['sfdisk', '--disk-id', device, '0x' + new_id])
+        if _disk_id(device) != new_id:
+            raise CloneError("The card's partitions didn't get their new ID, so nothing was copied to it. "
+                             "Take it out, put it back in and try again.")
         _reread_partitions(device, "The Pi didn't take in the card's new partitions, so nothing was copied "
                                    "to it. Take it out, put it back in and try again.")
         run(['udevadm', 'settle'])
@@ -429,6 +433,14 @@ def recover():
         if name.startswith(WORK_PREFIX):
             _remove_work(os.path.join(TEMP_DIR, name))
     _restore_automount(saved.get('usbmount'))
+
+
+def _disk_id(device):
+    """The disk ID in the card's partition table (8 hex digits), or None."""
+    try:
+        return '%08x' % int(json.loads(run(['sfdisk', '-J', device]))['partitiontable']['id'], 16)
+    except (CloneError, ValueError, KeyError, TypeError):
+        return None
 
 
 def _reread_partitions(device, message, tries=10):

@@ -51,6 +51,7 @@ class Disks:
         self.busy = 0                   # times blockdev --rereadpt finds the card in use
         self.new_table = None
         self.kernel_keeps_old_table = False
+        self.disk_id_ignored = False
         # what Linux sees: the card's old partitions (a 31.9 GB card's image, past this card's end)
         self.sys = tmp_path / 'sys-block' / 'sda'
         self.write_sys([(8192, 524288), (19081216, 41504768), (532480, 18548736)])
@@ -118,7 +119,13 @@ class Disks:
             raise clone.CloneError(cmd[0] + ': failed')
         if cmd[0] == 'sfdisk' and cmd[1] == '-J':
             return table(SOURCE_ID if cmd[2] == clone.SOURCE_DISK else self.card_id)
+        if cmd[0] == 'sfdisk' and cmd[1] == '--disk-id':
+            if not self.disk_id_ignored:
+                self.card_id = cmd[3][2:]
+            return ''
         if cmd[0] == 'sfdisk':
+            # as Buster's sfdisk does: a random disk ID, not the script's label-id
+            self.card_id = '9af45d4d'
             self.sfdisk_input = input
             with open(clone.USBMOUNT_CONF) as f:
                 self.automount_while_partitioning = f.read()
@@ -241,6 +248,8 @@ def test_copies_this_player_to_the_card(pi, disks):
     # boot partition: copied as it is, then given the new ID and no network name
     assert (disks.dev / 'sda1').read_bytes() == (disks.dev / 'mmcblk0p1').read_bytes()
     assert 'root=PARTUUID=%s-02 ' % new_id in (disks.dev / 'sda1.d' / 'cmdline.txt').read_text()
+    # the card's partition table has that ID too (Buster's sfdisk ignores label-id: it's set apart)
+    assert ['sfdisk', '--disk-id', '/dev/sda', '0x' + new_id] in pi.commands and disks.card_id == new_id
     assert not (disks.dev / 'sda1.d' / 'hostname.txt').exists()
     # system: a new ext4 partition with the files, its fstab changed, no DHCP lease
     assert ['mkfs.ext4', '-F', '-q', '-L', 'rootfs', disks.partition('/dev/sda', 2)] in pi.commands
@@ -269,6 +278,14 @@ def test_new_partitions_are_checked_before_anything_is_written(pi, disks):
     assert not [cmd for cmd in pi.commands if cmd[0].startswith('mkfs')]
     assert (disks.dev / 'sda1').read_bytes() == b'\0' * len((disks.dev / 'mmcblk0p1').read_bytes())
     assert disks.mounted() == []
+
+
+def test_stops_if_the_card_doesnt_get_its_new_id(pi, disks):
+    # cmdline.txt and fstab would name partitions the card doesn't have: it wouldn't start
+    disks.disk_id_ignored = True
+    with pytest.raises(clone.CloneError, match="The card's partitions didn't get their new ID"):
+        clone.clone(CARD, with_media=False)
+    assert not [cmd for cmd in pi.commands if cmd[0].startswith('mkfs')]
 
 
 def test_waits_until_nothing_holds_the_card(pi, disks, monkeypatch):
