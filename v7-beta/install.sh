@@ -55,8 +55,9 @@ systemctl enable mp4m-webservice.service
 # replaced by one that does nothing; the original is kept next to it (undo, with the overlay off:
 # sudo mv /etc/profile.d/wifi-check.sh.mp4m-orig /etc/profile.d/wifi-check.sh).
 wifi_check=/etc/profile.d/wifi-check.sh
-# (an earlier version of this script moved it aside with dpkg-divert: undone, it's a conffile)
-if dpkg-divert --list "$wifi_check" | grep -q .; then
+# (an earlier version of this script moved it aside with dpkg-divert: undone, it's a conffile;
+# only that diversion, not one made by something else)
+if dpkg-divert --list "$wifi_check" | grep -qF "to $wifi_check.mp4m-off"; then
     dpkg-divert --quiet --rename --divert "$wifi_check.mp4m-off" --remove "$wifi_check"
 fi
 if [ -e "$wifi_check" ] && ! grep -q 'MP4MUSEUM' "$wifi_check"; then
