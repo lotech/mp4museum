@@ -373,6 +373,56 @@ function hideUpdateBar() {
   }
 }
 
+// ----- Network ----- //
+function showAddressFields(select) {
+  select.form.querySelector('.address-fields').hidden = select.value !== 'static';
+}
+
+function scanWifi() {
+  const card = document.getElementById('wifi');
+  const button = document.getElementById('wifiScan');
+  const result = document.getElementById('wifiScanResult');
+  button.disabled = true;
+  result.hidden = false;
+  result.textContent = 'Looking for networks…';
+  fetch(card.dataset.scanUrl, {headers: {'X-Requested-With': 'fetch'}, cache: 'no-store'})
+    .then(response => response.json().catch(() => ({networks: [], error: "The player didn't answer."})))
+    .then(answer => {
+      const list = document.getElementById('wifiNetworks');
+      list.replaceChildren(...answer.networks.map(network => {
+        const option = document.createElement('option');
+        option.value = network.ssid;
+        option.label = network.ssid + (network.signal !== null ? ' (' + Math.round(network.signal) + ' dBm)' : '') +
+                       (network.secure ? '' : ', no password');
+        return option;
+      }));
+      result.textContent = answer.error ? answer.error :
+        answer.networks.length ? answer.networks.length + ' found: click the name field to choose one.' : 'No networks found.';
+      document.getElementById('wifi_ssid').focus();
+    })
+    .catch(() => { result.textContent = "Couldn't look for networks."; })
+    .finally(() => { button.disabled = false; });
+}
+
+// How long a network change has left to be kept
+function countDownNetworkChange() {
+  const bar = document.getElementById('networkBar');
+  if (!bar) {
+    return;
+  }
+  const end = Date.now() + Number(bar.dataset.seconds) * 1000;
+  const label = document.getElementById('networkSeconds');
+  const timer = setInterval(() => {
+    const left = Math.max(0, Math.round((end - Date.now()) / 1000));
+    label.textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+    if (left === 0) {
+      clearInterval(timer);
+      // the previous settings are back: this address may be gone again
+      setTimeout(() => window.location.reload(), 5000);
+    }
+  }, 1000);
+}
+
 // ----- Reboot ----- //
 function reboot(askFirst) {
   if (askFirst && !confirm('Are you sure you want to reboot the system?')) {
@@ -646,4 +696,5 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(followCopies, 2000);
   }
   checkForUpdate();
+  countDownNetworkChange();
 });

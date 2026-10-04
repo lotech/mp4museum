@@ -465,8 +465,8 @@ def _read_interface_file(interface, name):
     except OSError:
         return ''
 
-def get_network_status():
-    """Each network interface with its state, MAC address and IP addresses."""
+def interface_addresses():
+    """{interface: [('IPv4' or 'IPv6', '192.168.1.120/24'), ...]}"""
     addresses = {}
     status, output = run_command(['ip', '-o', 'addr', 'show'])
     if status:
@@ -475,8 +475,14 @@ def get_network_status():
             parts = line.split()
             if len(parts) >= 4 and parts[2] in ('inet', 'inet6'):
                 interface = parts[1].split('@')[0]
-                label = 'IPv4' if parts[2] == 'inet' else 'IPv6'
-                addresses.setdefault(interface, []).append(f"{label} {parts[3]}")
+                addresses.setdefault(interface, []).append(('IPv4' if parts[2] == 'inet' else 'IPv6', parts[3]))
+    return addresses
+
+def get_network_status(addresses=None):
+    """Each network interface with its state, MAC address and IP addresses (addresses: from
+    interface_addresses(), if already read)."""
+    addresses = {interface: [f"{label} {address}" for label, address in found]
+                 for interface, found in (interface_addresses() if addresses is None else addresses).items()}
 
     lines = [f"Network name: {socket.gethostname()}.local"]
     interfaces = network_interfaces()

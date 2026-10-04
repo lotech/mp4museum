@@ -5,8 +5,8 @@ The card keeps its boot partition (copied as it is), gets a system partition the
 the system uses plus room (the files copied from the original, read-only system partition,
 not the overlay in RAM), and a media partition filling the rest of the card (empty, or with the
 media files). Its disk ID is new, so it never has the same partition IDs as the card the Pi runs
-from (cmdline.txt and fstab on it are changed to match), and its network name, set here, is left
-for it to make from its own serial number.
+from (cmdline.txt and fstab on it are changed to match), its network name, set here, is left
+for it to make from its own serial number, and fixed addresses are left out (Wi-Fi is kept).
 
 Part of https://github.com/lotech/mp4museum (added 2026), a fork of MP4MUSEUM by Julius
 Schmiedel. Licensed under the GNU GPL v3, see LICENSE.
@@ -24,6 +24,7 @@ import tempfile
 import threading
 import time
 
+import network
 import system
 
 # the card the Pi runs from, and its partitions (fstab: PARTUUID=<disk id>-01 /boot, -02 /,
@@ -420,6 +421,8 @@ def clone(card, with_media, progress=_set):
         hostname_file = os.path.join(card_boot, os.path.basename(system.HOSTNAME_FILE))
         if os.path.exists(hostname_file):
             os.remove(hostname_file)
+        # and its fixed addresses: two players on one address would both be lost (Wi-Fi is kept)
+        _without_fixed_addresses(os.path.join(card_boot, os.path.basename(network.SETTINGS_FILE)))
         unmount(card_boot)
 
         progress(step='Making the media partition', percent=None)
@@ -444,6 +447,23 @@ def clone(card, with_media, progress=_set):
                 pass
         _remove_work(work)
         _restore_automount(usbmount)
+
+
+def _without_fixed_addresses(path):
+    try:
+        with open(path, 'r') as f:
+            settings = network.normalize(json.load(f))
+    except OSError:
+        return
+    except ValueError:
+        # unreadable, so the player doesn't use it either
+        settings = {}
+    settings = network.without_fixed_addresses(settings)
+    if settings:
+        with open(path, 'w') as f:
+            f.write(json.dumps(settings, indent=2, ensure_ascii=False) + '\n')
+    else:
+        os.remove(path)
 
 
 def _remove_work(work):

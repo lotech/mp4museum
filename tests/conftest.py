@@ -21,6 +21,7 @@ APP = REPO / 'v7-beta' / 'boot' / 'mp4m-web'
 sys.path.insert(0, str(APP))
 
 import clone  # noqa: E402
+import network  # noqa: E402
 import system  # noqa: E402
 import updater  # noqa: E402
 import webservice  # noqa: E402
@@ -36,6 +37,8 @@ class FakePi:
         self.commands = []
         self.hostnames = []
         self.read_only = True
+        # network changes waiting to run: (seconds, function); run them with pi.run_later()
+        self.later = []
         # the card the Pi runs from, and a reader without a card
         self.disks = [{'name': 'mmcblk0', 'size': '31914983424', 'type': 'disk', 'tran': None, 'rm': False, 'model': None},
                       {'name': 'sdb', 'size': '0', 'type': 'disk', 'tran': 'usb', 'rm': True, 'model': 'Reader'}]
@@ -52,6 +55,23 @@ class FakePi:
         if cmd[0] == 'lsblk':
             return json.dumps({'blockdevices': self.disks})
         return ''
+
+    def schedule(self, seconds, function):
+        entry = [seconds, function]
+        self.later.append(entry)
+
+        class Timer:
+            def cancel(timer):
+                if entry in self.later:
+                    self.later.remove(entry)
+        return Timer()
+
+    def run_later(self, seconds=None):
+        """Run what network.change() left for later: everything due within seconds (all if None)."""
+        for entry in sorted(self.later, key=lambda e: e[0]):
+            if (seconds is None or entry[0] <= seconds) and entry in self.later:
+                self.later.remove(entry)
+                entry[1]()
 
     def mounts(self):
         return [cmd for cmd in self.commands if cmd[0] == 'mount']
@@ -125,6 +145,33 @@ def pi(tmp_path, monkeypatch):
         monkeypatch.setattr(clone, name, value)
     real = [name for name, value in vars(clone).items()
             if isinstance(value, str) and value.startswith(('/etc', '/proc', '/sys', '/run', '/tmp', '/boot', '/media'))
+            and not value.startswith(str(tmp_path))]
+    assert not real, 'add these to the pi fixture: %s' % real
+
+    # network settings: /etc as on the image, no Wi-Fi interfaces unless a test adds them
+    etc = tmp_path / 'etc'
+    (etc / 'wpa_supplicant').mkdir(parents=True)
+    (etc / 'dhcpcd.conf').write_text('hostname\nclientid\npersistent\nslaac private\n')
+    (etc / 'wpa_supplicant' / 'wpa_supplicant.conf').write_text(network.DEFAULT_WPA_CONF)
+    (etc / 'resolv.conf').write_text('nameserver 192.168.1.1\n')
+    (tmp_path / 'iso3166.tab').write_text('# ISO 3166 alpha-2 country codes\nDE\tGermany\nGB\tBritain (UK)\nUS\tUnited States\n')
+    (tmp_path / 'net').mkdir()
+    monkeypatch.setattr(system, 'NET_PATH', str(tmp_path / 'net'))
+    for name, value in {
+        'SETTINGS_FILE': p.path('mp4m-network.json'),
+        'DHCPCD_CONF': str(etc / 'dhcpcd.conf'),
+        'WPA_CONF_DIR': str(etc / 'wpa_supplicant'),
+        'RESOLV_CONF': str(etc / 'resolv.conf'),
+        'ISO3166_FILE': str(tmp_path / 'iso3166.tab'),
+        'RFKILL_PATH': str(tmp_path / 'rfkill'),
+        '_later': p.schedule,
+        '_pending': {},
+        '_in_use': {'settings': None},
+        '_next_start': {},
+    }.items():
+        monkeypatch.setattr(network, name, value)
+    real = [name for name, value in vars(network).items()
+            if isinstance(value, str) and value.startswith(('/etc', '/usr', '/proc', '/sys', '/run', '/tmp', '/boot', '/media'))
             and not value.startswith(str(tmp_path))]
     assert not real, 'add these to the pi fixture: %s' % real
 

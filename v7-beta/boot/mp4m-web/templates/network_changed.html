@@ -1,0 +1,42 @@
+{# Added 2026 in https://github.com/lotech/mp4museum; licensed under the GNU GPL v3, see LICENSE. -#}
+{% extends "base.html" %}
+{% block title %}{{ hostname }} - Network settings changed - MP4Museum{% endblock %}
+{% block container_class %}login{% endblock %}
+
+{# This address may stop working, so the stylesheet can't be loaded from it #}
+{% block head %}<style>{{ inline_css|safe }}</style>{% endblock %}
+
+{% block content %}
+<h2>Network settings changed</h2>
+<p id="status" class="update-status"><span class="spinner"></span>Trying the new settings…</p>
+<p>Open the player again and choose <strong>Keep</strong> within {{ keep_minutes }} minutes, or it goes back to
+  the previous settings. This page does that by itself if it can; otherwise try:</p>
+<ul>
+  {% for address in addresses %}<li><a href="{{ address }}">{{ address }}</a></li>{% endfor %}
+</ul>
+<p class="hint">At a new address you need to log in again. If the player can't be found, wait {{ keep_minutes }}
+  minutes or reboot it: it goes back to the previous settings. The player's screen shows its address when it starts.</p>
+<script>
+  // the first address where the player's logo loads (static files need no login; another
+  // device there wouldn't have it), after the change has been made
+  const addresses = {{ addresses|tojson }};
+  let found = false;
+  function tryAddresses() {
+    addresses.forEach(address => {
+      const image = new Image();
+      const timer = setTimeout(() => { image.src = ''; }, 3000);
+      image.onload = () => {
+        clearTimeout(timer);
+        if (!found && image.naturalWidth > 0) {
+          found = true;
+          window.location = address;
+        }
+      };
+      image.onerror = () => clearTimeout(timer);
+      image.src = address + 'static/logo.jpg?' + Date.now();
+    });
+    setTimeout(() => { if (!found) tryAddresses(); }, 4000);
+  }
+  setTimeout(tryAddresses, {{ wait * 1000 }});
+</script>
+{% endblock %}

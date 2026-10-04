@@ -79,7 +79,7 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   `webservice.py` (Flask routes), `system.py` (everything that touches the Pi),
   `updater.py` (software updates, also the `mp4m-update` command), `clone.py` (copying the
   player to an SD card in a USB reader: new partitions and disk ID, needs exfat-utils from
-  `install.sh`), `templates/`, `static/`.
+  `install.sh`), `network.py` (fixed addresses and Wi-Fi), `templates/`, `static/`.
   Icons are [Lucide](https://lucide.dev) symbols in `static/icons.svg`, used with the `icon()`
   macro in `templates/_icons.html`; to add one, copy its `<symbol>` from the lucide-static
   package (same version) into the sprite. `test_every_icon_is_in_the_sprite` checks them.
@@ -88,6 +88,17 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   `legacy.raspbian.org`, where Buster's packages moved) if it isn't there.
   `etc/fstab`, `etc/usbmount/usbmount.conf`, `boot/cmdline.txt` etc. are as on the image, for
   reference: nothing installs them, so changing them reaches no device.
+
+### Network settings (`network.py`)
+
+- Kept in `/boot/mp4m-network.json`; without it nothing is changed. The web interface writes
+  them into `/etc/dhcpcd.conf` (a marked block at the end) and `wpa_supplicant.conf` when it
+  starts (`apply_at_start`, in a thread) and on a change, so they need no file outside `/boot`.
+- A change from the page (`network.change`) is applied after `APPLY_DELAY` (the page saying
+  where to find the player is sent first) and only saved to `/boot` by `keep()`; after
+  `KEEP_SECONDS` without it, `undo()` puts the saved settings back. A reboot does the same.
+- Without a Wi-Fi country, Wi-Fi only uses 2.4 GHz channels 1-11 (`freq_list`): the Pi 3 B's
+  firmware would use every channel. Wi-Fi passwords are kept as their WPA key.
 
 ### Things that mustn't be cut off half way
 
@@ -176,18 +187,20 @@ python -m pytest tests
 - `tests/conftest.py`: the `pi` fixture gives each test a simulated Pi 3 B started from its SD
   card with the overlay on (temporary `/boot` and media folders; `mount`, `reboot` etc. stubbed
   and recorded in `pi.commands`, hostname changes in `pi.hostnames`; `pi.read_only`;
-  `pi.disks` is what `lsblk` lists); `client` is a logged-in browser; `github` is a fake
-  GitHub serving a temporary copy of this repository to the updater. The fixture fails if
-  `system` or `clone` has a path constant under `/boot`, `/media`, `/etc`, `/proc`, `/sys`,
-  `/run` or `/tmp` it doesn't replace: add new ones to it.
+  `pi.disks` is what `lsblk` lists; network interfaces are folders in `pi.root / 'net'`; what
+  `network.change` leaves for later runs with `pi.run_later()`); `client` is a logged-in
+  browser; `github` is a fake GitHub serving a temporary copy of this repository to the
+  updater. The fixture fails if `system`, `clone` or `network` has a path constant under
+  `/boot`, `/media`, `/etc`, `/proc`, `/sys`, `/run` or `/tmp` it doesn't replace: add new ones
+  to it.
 - `test_clone.py`: copying to an SD card, on simulated disks (partitions are files and
   folders). Its `Disks` helper behaves like Buster's `sfdisk` (no `--disk-id`; a `label-id` of
   0x80000000 or more gets a random ID), and can keep the old table (`kernel_keeps_old_table`) or
   find the card busy (`busy`).
 - `tests/manual/`: `make_source.sh` and `clone_real_tools.py` clone a card image with the real
   tools (loop devices, sfdisk, mkfs, rsync, FUSE); needs root, not run by pytest.
-- `test_web.py`, `test_storage.py`, `test_updater.py`: the web interface, read-only
-  partitions and file writes, software updates and `mp4m-update`.
+- `test_web.py`, `test_storage.py`, `test_updater.py`, `test_network.py`: the web interface,
+  read-only partitions and file writes, software updates and `mp4m-update`, network settings.
 - `test_player.py` runs the real player through `player_harness.py`: fake `vlc`, `RPi.GPIO`,
   omxplayer and `hostname -I`, and a virtual clock, so minutes of playback take milliseconds.
   The harness changes the player's paths by replacing their text (`paths`): add a new path
