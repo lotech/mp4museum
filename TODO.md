@@ -109,6 +109,7 @@ a network is optional.
 - [x] Tested on a Pi 3 B+: the address and IP show on the logo screen, then the playlist starts without them
 - [ ] Test on the Pi: does the IP address appear when the network comes up during the logo (e.g. boot video off, cold start)?
 - [ ] Announce the web interface over Bonjour/mDNS (`_http._tcp`) so players show up in network browsers
+- [ ] Connect to Wi-Fi from the web interface (System tab): scan for networks, choose one, enter its password; saved in `/boot` (e.g. `wpa_supplicant.conf`, which Raspberry Pi OS copies at boot, or written to `/etc/wpa_supplicant` with the overlay in mind) and applied with `wpa_cli`. Show the Wi-Fi address and signal in Network; the country code is needed (Wi-Fi stays off without it); a Pi 3 B+ also has 5 GHz. Careful: changing Wi-Fi while connected over Wi-Fi drops the page
 - [ ] Offline setup: create a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (there is no Wi-Fi setting yet)
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
 - [ ] "Restore default config.txt" button (the old "Auto" video preset used to do this)
