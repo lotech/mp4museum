@@ -571,6 +571,8 @@ def copy_to_player():
             flash(f"Copying '{entry['name']}' to this player.", "success")
         except FileExistsError:
             flash(f"This player already has a file called '{entry['name']}', or it's being copied.", "error")
+        except system.Busy:
+            flash("A card is being made or an update installed: copy files when it's done.", "error")
     return redirect(url_for('index'))
 
 @app.route('/copy_status')
@@ -934,7 +936,7 @@ def install_update():
     # held until the web interface restarts, so a card can't be started meanwhile
     busy_lock = system.try_busy_lock()
     if busy_lock is None:
-        flash("A card is being made: install the update when it's done.", "error")
+        flash("A card is being made or a file copied: install the update when it's done.", "error")
         return redirect(url_for('index'))
     try:
         summary = updater.update(latest)

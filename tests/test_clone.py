@@ -313,6 +313,15 @@ def test_a_card_in_use_by_the_player_is_let_go(pi, monkeypatch):
     assert len(signals) == 1
 
 
+def test_stops_if_the_player_keeps_the_card(pi, monkeypatch):
+    # the player stuck on a file from the card: it isn't changed
+    monkeypatch.setattr(system, 'get_player_status', lambda: {'file': '/media/usb0/film.mp4', 'pid': 1})
+    monkeypatch.setattr(system, 'signal_player', lambda signum: True)
+    monkeypatch.setattr(clone.time, 'sleep', lambda seconds: None)
+    with pytest.raises(clone.CloneError, match="The player didn't let go of the card"):
+        clone._player_leaves(['/media/usb0'], wait=0)
+
+
 # ----- Starting it (one at a time) ----- #
 @pytest.fixture
 def ready(pi, monkeypatch):

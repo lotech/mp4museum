@@ -179,13 +179,14 @@ def _unlock_mount(fd):
     if fd is not None:
         os.close(fd)
 
-def try_busy_lock():
+def try_busy_lock(shared=False):
     """Held while an update is installed (until the web interface has restarted) or an SD card
-    is made, across processes, so one doesn't stop the other half way. Its file descriptor
-    (close it to let go), or None if the other holds it."""
+    is made, across processes, so one doesn't stop the other half way; shared by the files
+    being copied from USB sticks (several at once). Its file descriptor (close it to let go),
+    or None if something else holds it."""
     fd = os.open(os.path.join(LOCK_DIR, 'mp4m-busy.lock'), os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
     except OSError:
         os.close(fd)
         return None
@@ -1006,17 +1007,31 @@ def _media_has(name):
     except OSError:
         return False
 
+class Busy(Exception):
+    pass
+
 def start_copy(source):
     """Copy a file (from a USB stick) to the media partition in the background. FileExistsError
-    if it has a file of that name, or one is being copied."""
+    if it has a file of that name, or one is being copied; Busy while a card is made or an
+    update installed."""
     name = os.path.basename(source)
+    busy = try_busy_lock(shared=True)
+    if busy is None:
+        raise Busy()
     with _copies_lock:
         if name.lower() in _copies or _media_has(name):
+            os.close(busy)
             raise FileExistsError(name)
         _copies[name.lower()] = source
-    threading.Thread(target=_copy, args=(source,), daemon=True).start()
+    try:
+        threading.Thread(target=_copy, args=(source, busy), daemon=True).start()
+    except BaseException:
+        with _copies_lock:
+            del _copies[name.lower()]
+        os.close(busy)
+        raise
 
-def _copy(source):
+def _copy(source, busy):
     name = os.path.basename(source)
     try:
         copy_to_media(source)
@@ -1031,6 +1046,7 @@ def _copy(source):
     with _copies_lock:
         _copy_results.append(result)
         del _copies[name.lower()]
+    os.close(busy)
 
 def copies_running():
     """The files being copied (their paths on the stick)."""

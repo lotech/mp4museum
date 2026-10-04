@@ -226,7 +226,7 @@ def start(device, with_media, size=None):
     plan(card['size'], root_used, media_used, with_media, source_partitions()[1][0][1])
     busy = system.try_busy_lock()
     if busy is None:
-        raise CloneError("An update is being installed: make the card when it's done.")
+        raise CloneError("An update is being installed or a file copied: make the card when it's done.")
     try:
         with _lock:
             if state['running']:
@@ -461,6 +461,9 @@ def _player_leaves(mount_points, wait=10):
     deadline = time.monotonic() + wait
     while on_card() and time.monotonic() < deadline:
         time.sleep(0.5)
+    if on_card():
+        # the card would be changed while the player has a file on it open
+        raise CloneError("The player didn't let go of the card, so it wasn't changed. Try again.")
     time.sleep(1)
 
 

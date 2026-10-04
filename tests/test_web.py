@@ -1160,6 +1160,27 @@ def test_copy_runs_in_the_background(pi, client, stick, monkeypatch):
     assert client.get('/copy_status').get_json() == {'copying': []}
 
 
+def test_copies_hold_the_lock_cards_and_updates_take(pi, client, stick, monkeypatch):
+    # (shared: several copies can run at once)
+    (stick / 'other.mp4').write_bytes(b'o')
+    go = threading.Event()
+    real = system.copy_to_media
+    monkeypatch.setattr(system, 'copy_to_media', lambda source: (go.wait(5), real(source))[1])
+    copied(client, stick / 'film.mp4', wait=False)
+    copied(client, stick / 'other.mp4', wait=False)
+    assert len(system.copies_running()) == 2
+    assert system.try_busy_lock() is None
+    go.set()
+    copied(client, stick / 'nothing.mp4')
+    lock = system.try_busy_lock()
+    assert lock is not None and sorted(os.listdir(pi.media)) == ['film.mp4', 'other.mp4']
+    # while a card is made or an update installed (another process): refused
+    page = copied(client, stick / 'film.mp4')
+    assert 'A card is being made or an update installed: copy files when it&#39;s done.' in page
+    assert system.copies_running() == []
+    os.close(lock)
+
+
 def test_copy_refuses_to_replace_a_file(pi, client, stick):
     # exFAT doesn't tell upper and lower case apart
     (pi.media / 'FILM.mp4').write_bytes(b'mine')
