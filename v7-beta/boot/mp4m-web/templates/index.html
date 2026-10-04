@@ -462,7 +462,7 @@
             <select name="device" id="clone_device" required>
               <option value="">Choose a card</option>
               {% for card in clone_cards %}
-              <option value="{{ card.device }}|{{ card.size }}" data-name="{{ card.size|size }} {{ card.model }}">{{ card.model }}, {{ card.size|size }} ({{ card.device }})</option>
+              <option value="{{ card.device }}|{{ card.id }}" data-name="{{ card.size|size }} {{ card.model }}">{{ card.model }}, {{ card.size|size }} ({{ card.device }})</option>
               {% endfor %}
             </select>
           </div>

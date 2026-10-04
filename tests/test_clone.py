@@ -19,9 +19,12 @@ import system
 import webservice
 
 SOURCE_ID = '18512e38'
-CARD = {'device': '/dev/sda', 'size': 32 * 1024 ** 3, 'model': 'SD_Transcend'}
-READER = {'name': 'sda', 'size': str(CARD['size']), 'type': 'disk', 'tran': 'usb', 'rm': True,
-          'model': 'SD_Transcend   '}
+# a card in a USB reader (lsblk -J on Buster: numbers as strings), from another player
+READER = {'name': 'sda', 'size': str(32 * 1024 ** 3), 'type': 'disk', 'tran': 'usb', 'rm': True,
+          'model': 'SD_Transcend   ', 'serial': '000000000039', 'ptuuid': '0a1b2c3d', 'uuid': None,
+          'children': [{'name': 'sda1', 'uuid': '4BBD-D3E7'}, {'name': 'sda2', 'uuid': '3122c401-b3c6'},
+                       {'name': 'sda3', 'uuid': '64F2-0A1B'}]}
+CARD = {'device': '/dev/sda', 'size': 32 * 1024 ** 3, 'model': 'SD_Transcend', 'id': clone.card_identity(READER)}
 
 
 def table(disk_id):
@@ -104,6 +107,11 @@ class Disks:
         if cmd[0] == 'umount' and os.path.islink(cmd[-1]):
             os.unlink(cmd[-1])
             os.mkdir(cmd[-1])
+        if cmd[0] == 'umount':
+            with open(clone.PROC_MOUNTS) as f:
+                lines = [line for line in f if line.split()[1].replace('\\040', ' ') != cmd[-1]]
+            with open(clone.PROC_MOUNTS, 'w') as f:
+                f.writelines(lines)
         return self.pi.clone_run(cmd, input) if cmd[0] == 'lsblk' else ''
 
     def copy_tree(self, cmd, target, total, progress):
@@ -348,12 +356,38 @@ def test_start_refuses_anything_but_a_card_in_a_reader(ready, device):
     assert ready == [] and not clone.is_running()
 
 
-def test_start_refuses_a_card_that_has_changed(ready, pi):
-    # the page was loaded with a 32 GB card as /dev/sda; now /dev/sda is a 4 GB stick
-    pi.disks[-1] = dict(READER, size=str(4 * 1024 ** 3), model='USB stick')
+@pytest.mark.parametrize('other', [
+    dict(READER, size=str(4 * 1024 ** 3), model='USB stick'),           # a stick
+    dict(READER, ptuuid='77aa0011', children=[]),                        # another card, same size
+])
+def test_start_refuses_a_card_that_has_changed(ready, pi, other):
+    # the page was loaded with a card as /dev/sda; now /dev/sda is something else
+    pi.disks[-1] = other
     with pytest.raises(clone.CloneError, match="/dev/sda isn't the card that was chosen any more"):
-        clone.start('/dev/sda', False, CARD['size'])
+        clone.start('/dev/sda', False, CARD['id'])
     assert ready == []
+
+
+def test_card_identity_tells_cards_apart():
+    assert clone.card_identity(READER) == clone.card_identity(dict(READER))
+    for change in ({'ptuuid': '77aa0011'}, {'serial': 'X'}, {'size': '1'},
+                   {'children': [{'name': 'sda1', 'uuid': '1111-2222'}]}):
+        assert clone.card_identity(dict(READER, **change)) != clone.card_identity(READER)
+
+
+def test_card_changed_after_starting_isnt_erased(pi, disks):
+    # another card put in the reader after Copy was pressed: checked again just before erasing
+    pi.disks[-1] = dict(READER, ptuuid='77aa0011')
+    with pytest.raises(clone.CloneError, match='The card was changed, so nothing was erased'):
+        clone.clone(CARD, with_media=False)
+    assert disks.sfdisk_input is None and disks.mounted() == []
+
+
+def test_exfat_label_option(pi, monkeypatch):
+    # exfat-utils (Buster) and exfatprogs (newer systems) both have a mkfs.exfat
+    assert clone._mkfs_exfat('/dev/sda3', 'Media') == ['mkfs.exfat', '-n', 'Media', '/dev/sda3']
+    monkeypatch.setattr(clone, 'exfat_usage', lambda tool: 'Usage: mkfs.exfat\n\t-L | --volume-label=label   Set volume label')
+    assert clone._mkfs_exfat('/dev/sda3', 'Media') == ['mkfs.exfat', '-L', 'Media', '/dev/sda3']
 
 
 def test_start_refuses_when_not_started_from_the_sd_card(ready, pi):
@@ -453,7 +487,7 @@ def test_system_tab_asks_for_a_card(client):
 def test_system_tab_offers_the_cards(client, pi):
     pi.disks.append(READER)
     page = client.get('/').get_data(as_text=True)
-    assert '<option value="/dev/sda|34359738368" data-name="32.0 GB SD_Transcend">' in page
+    assert '<option value="/dev/sda|%s" data-name="32.0 GB SD_Transcend">' % CARD['id'] in page
     # nothing chosen until the user chooses
     assert '<select name="device" id="clone_device" required>\n              <option value="">Choose a card</option>' in page
     assert 'id="cloneForm"' in page and 'Leave them out' in page
@@ -467,7 +501,7 @@ def test_system_tab_says_when_exfat_tools_are_missing(client, pi, monkeypatch):
 
 
 def test_copy_from_the_web_interface(client, ready):
-    response = client.post('/clone', data={'device': '/dev/sda|%d' % CARD['size'], 'media': 'without'})
+    response = client.post('/clone', data={'device': '/dev/sda|' + CARD['id'], 'media': 'without'})
     assert response.status_code == 302
     assert ready == [('/dev/sda', False)]
     assert client.get('/clone/status').get_json()['running'] is True

@@ -11,6 +11,7 @@ for it to make from its own serial number.
 Part of https://github.com/lotech/mp4museum (added 2026), a fork of MP4MUSEUM by Julius
 Schmiedel. Licensed under the GNU GPL v3, see LICENSE.
 """
+import hashlib
 import json
 import os
 import random
@@ -68,17 +69,41 @@ def exfat_tool():
     return next((name for name in MKFS_EXFAT if shutil.which(name)), None)
 
 
+def exfat_usage(tool):
+    """What the exFAT tool says about its options."""
+    try:
+        return subprocess.run([tool, '--help'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              universal_newlines=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
+def _mkfs_exfat(device, label):
+    """The command for an exFAT file system: the label is -n with exfat-utils (Buster's), -L
+    with exfatprogs (newer systems), which both have a mkfs.exfat."""
+    tool = exfat_tool()
+    return [tool, '-L' if '--volume-label' in exfat_usage(tool) else '-n', label, device]
+
+
 def used_bytes(path):
     stat = os.statvfs(path)
     return (stat.f_blocks - stat.f_bfree) * stat.f_frsize
 
 
 # ----- What there is ----- #
+def card_identity(disk):
+    """What tells this card apart from another put in the same reader (lsblk's entry): its size,
+    the reader, and the IDs of its partition table and file systems."""
+    ids = [disk.get('size'), disk.get('model'), disk.get('serial'), disk.get('ptuuid')]
+    ids += sorted(str(child.get('uuid')) for child in disk.get('children') or [])
+    return hashlib.sha1(json.dumps([str(value) for value in ids]).encode()).hexdigest()[:16]
+
+
 def list_cards():
-    """SD cards (or other disks) in USB readers: [{'device', 'size', 'model'}]. Never the
+    """SD cards (or other disks) in USB readers: [{'device', 'size', 'model', 'id'}]. Never the
     card the Pi runs from."""
     try:
-        data = json.loads(run(['lsblk', '-J', '-b', '-o', 'NAME,SIZE,TYPE,TRAN,RM,MODEL']))
+        data = json.loads(run(['lsblk', '-J', '-b', '-o', 'NAME,SIZE,TYPE,TRAN,RM,MODEL,SERIAL,PTUUID,UUID']))
     except (CloneError, ValueError):
         return []
     cards = []
@@ -91,7 +116,8 @@ def list_cards():
         # (a reader without a card has size 0)
         if (disk.get('type') == 'disk' and disk.get('tran') == 'usb' and size > 0 and device != SOURCE_DISK
                 and not _in_use_by_system(device)):
-            cards.append({'device': device, 'size': size, 'model': (disk.get('model') or 'USB disk').strip()})
+            cards.append({'device': device, 'size': size, 'model': (disk.get('model') or 'USB disk').strip(),
+                          'id': card_identity(disk)})
     return cards
 
 
@@ -204,8 +230,8 @@ def _set(**changes):
         state.update(changes)
 
 
-def start(device, with_media, size=None):
-    """Start cloning onto device (one of list_cards(); size: the one it had when it was chosen).
+def start(device, with_media, identity=None):
+    """Start cloning onto device (one of list_cards(); identity: its id when it was chosen).
     CloneError if it can't start."""
     reason = unavailable()
     if reason:
@@ -213,7 +239,7 @@ def start(device, with_media, size=None):
     card = next((c for c in list_cards() if c['device'] == device), None)
     if not card:
         raise CloneError("That card isn't in a USB reader any more.")
-    if size is not None and card['size'] != size:
+    if identity is not None and card['id'] != identity:
         # something else has been plugged in since the page was loaded
         raise CloneError(f"{device} isn't the card that was chosen any more. Choose it again.")
     if is_running():
@@ -284,6 +310,12 @@ def clone(card, with_media, progress=_set):
         except (CloneError, ValueError, KeyError):
             pass
 
+        # the card chosen still there (not another one put in meanwhile)? Checked last thing
+        # before it's erased
+        current = next((c for c in list_cards() if c['device'] == device), None)
+        if not current or current['id'] != card['id']:
+            raise CloneError("The card was changed, so nothing was erased. Choose it again.")
+
         progress(step='Making the partitions', percent=None)
         boot, root, media = layout['boot'], layout['root'], layout['media']
         script = (f"label: dos\nlabel-id: 0x{new_id}\nunit: sectors\n\n"
@@ -330,7 +362,7 @@ def clone(card, with_media, progress=_set):
         unmount(card_boot)
 
         progress(step='Making the media partition', percent=None)
-        run([exfat_tool(), '-n', 'Media', partition(device, 3)])
+        run(_mkfs_exfat(partition(device, 3), 'Media'))
         if with_media and media_used:
             progress(step='Copying the media files', percent=0)
             card_media = mount(partition(device, 3), 'card-media')

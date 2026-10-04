@@ -671,9 +671,9 @@ def rename_file():
 @app.route('/clone', methods=['POST'])
 def clone_card():
     try:
-        # "<device>|<size>": the card chosen, as it was when the page was loaded
-        device, _, size = request.form.get('device', '').partition('|')
-        clone.start(device, request.form.get('media') == 'with', int(size) if size.isdigit() else None)
+        # "<device>|<id>": the card chosen, as it was when the page was loaded
+        device, _, identity = request.form.get('device', '').partition('|')
+        clone.start(device, request.form.get('media') == 'with', identity or None)
         flash("Copying this player to the card. It takes a few minutes: leave the card in until it's done.", "success")
     except clone.CloneError as e:
         flash(str(e), "error")
