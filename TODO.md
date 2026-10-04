@@ -100,6 +100,7 @@ a network is optional.
 - [x] Cloning, updates, uploads, copies from USB sticks and reboots share one lock (`system.try_busy_lock`), so none cuts another off half way
 - [x] usbmount is put back if the web interface stops while making a card (`clone.recover`)
 
+- [ ] Make an image file (`.img`) of a player, to write onto cards with Raspberry Pi Imager or balenaEtcher on a computer, or to keep as a backup or a release. Small: only the space used (like Clone to another device, the system partition sized to what it uses and a small media partition that grows to fill the card on first start, e.g. `parted resizepart` + exFAT grown or remade at boot). Options: from the web interface onto a USB stick (`clone.py` already lays out the partitions and changes the disk ID; it would write to a loop device on a file instead of a card), or a script on a computer from a card (like PiShrink). Leave out `hostname.txt`, the password (or keep it, asked), DHCP leases; compress it (`.img.xz`)
 - [ ] Install script to set up v7 on a fresh Raspberry Pi OS, instead of depending on the image (`install.sh` only covers the v7 image so far)
 
 ## 6. Wi-Fi
