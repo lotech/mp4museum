@@ -483,9 +483,9 @@
           {% if port %}
           <form method="post" action="{{ url_for('set_wifi_power') }}"
                 {# (tojson leaves " as it is: in a ' attribute) #}
-                onsubmit='return confirm({{ (("Turn Wi-Fi off? This page uses Wi-Fi, so it loses the player: Wi-Fi comes back on after 5 minutes unless the change is kept from another address (Ethernet)." if page_over_wifi else "Turn Wi-Fi off?") if wifi_on else "Turn Wi-Fi on?")|tojson }})'>
+                onsubmit='return confirm({{ (("Turn Wi-Fi off? This page uses Wi-Fi, so it loses the player: Wi-Fi comes back on after " ~ keep_minutes ~ " minutes unless the change is kept from another address (Ethernet)." if page_over_wifi else "Turn Wi-Fi off?") if wifi_on else "Turn Wi-Fi on?")|tojson }})'>
             <input type="hidden" name="enabled" value="{{ 'off' if wifi_on else 'on' }}">
-            <button type="submit" class="switch{{ ' on' if wifi_on }}" role="switch" aria-checked="{{ 'true' if wifi_on else 'false' }}"
+            <button type="submit" class="switch{{ ' on' if wifi_on }}" role="switch" aria-label="Wi-Fi" aria-checked="{{ 'true' if wifi_on else 'false' }}"
                     title="{{ 'Turn Wi-Fi off' if wifi_on else 'Turn Wi-Fi on' }}"><span class="switch-track"></span><span>{{ 'On' if wifi_on else 'Off' }}</span></button>
           </form>
           {% endif %}

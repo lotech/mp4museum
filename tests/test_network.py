@@ -1100,9 +1100,98 @@ def test_wifi_turned_on_while_a_change_waits_to_be_kept(ports, client):
     wifi_set_up(ports)
     client.post('/network/wifi/power', data={'enabled': 'off'})
     ports.run_later(network.APPLY_DELAY)
-    response = client.post('/network/wifi/power', data={'enabled': 'on'}, environ_base={'werkzeug.socket': Socket('127.0.0.1')})
+    response = client.post('/network/wifi/power', data={'enabled': 'on'})
     assert b'Applying the new settings' in response.data
     assert network.target_settings()['wifi']['enabled'] is True
+
+
+def test_wifi_turned_off_is_tried_first_if_the_addresses_cant_be_read(ports, client, monkeypatch):
+    wifi_set_up(ports)
+    run = ports.run_command
+    monkeypatch.setattr(system, 'run_command',
+                        lambda cmd, timeout=None: (False, 'timed out') if cmd[:2] == ['ip', '-o'] else run(cmd, timeout))
+    client.post('/network/wifi/power', data={'enabled': 'off'}, environ_base={'werkzeug.socket': Socket('192.168.10.248')})
+    assert network.pending() is not None
+
+
+def test_wifi_set_up_by_hand_is_tried_first(ports, client):
+    """Turning Wi-Fi off here replaces networks set up some other way: tried, so they can come back."""
+    with open(network.wpa_conf_path(), 'w') as f:
+        f.write(network.DEFAULT_WPA_CONF + 'network={\n\tssid="Studio"\n}\n')
+    client.post('/network/wifi/power', data={'enabled': 'off'}, environ_base={'werkzeug.socket': Socket('127.0.0.1')})
+    assert network.pending() is not None
+
+
+def test_wifi_already_off(ports, client):
+    wifi_set_up(ports)
+    client.post('/network/wifi/power', data={'enabled': 'off'}, environ_base={'werkzeug.socket': Socket('127.0.0.1')})
+    ports.commands.clear()
+    client.post('/network/wifi/power', data={'enabled': 'off'}, environ_base={'werkzeug.socket': Socket('127.0.0.1')})
+    # (only which address the page came in on)
+    assert commands(ports) == [['ip', '-o', 'addr', 'show']]
+    assert 'Wi-Fi is off already.' in client.get('/').data.decode()
+
+
+def test_wifi_turned_off_but_it_didnt_all_work(ports, client, monkeypatch):
+    wifi_set_up(ports)
+    run = ports.run_command
+    monkeypatch.setattr(system, 'run_command',
+                        lambda cmd, timeout=None: (False, 'no device') if cmd[0] == 'rfkill' else run(cmd, timeout))
+    client.post('/network/wifi/power', data={'enabled': 'off'}, environ_base={'werkzeug.socket': Socket('127.0.0.1')})
+    # saved: the next start tries again
+    assert saved(ports)['wifi']['enabled'] is False
+    assert 'Wi-Fi is set to off, but: ' in client.get('/').data.decode()
+
+
+def test_wifi_turned_off_but_not_saved_goes_back_on(ports, client, monkeypatch):
+    """Saving to /boot failed: what is saved is used again, so the page and the Pi agree."""
+    wifi_set_up(ports)
+    def fail(settings):
+        raise OSError('read-only file system')
+    monkeypatch.setattr(network, '_save', fail)
+    client.post('/network/wifi/power', data={'enabled': 'off'}, environ_base={'werkzeug.socket': Socket('127.0.0.1')})
+    rfkill = [cmd for cmd in commands(ports) if cmd[0] == 'rfkill']
+    assert rfkill == [['rfkill', 'block', 'wifi'], ['rfkill', 'unblock', 'wifi']]
+    page = client.get('/').data.decode()
+    assert 'Failed to turn Wi-Fi off: read-only file system' in page and switch(page) == 'On'
+
+
+def test_page_isnt_held_up_while_wifi_is_turned_off(ports, client, monkeypatch):
+    """The commands run without _lock: the page (and Keep, Undo) read it meanwhile."""
+    import threading
+    wifi_set_up(ports)
+    started, release = threading.Event(), threading.Event()
+    run = ports.run_command
+    def slow(cmd, timeout=None):
+        if cmd[0] == 'rfkill':
+            started.set()
+            release.wait(5)
+        return run(cmd, timeout)
+    monkeypatch.setattr(system, 'run_command', slow)
+    thread = threading.Thread(target=network.apply_and_save, args=({'wifi': {'enabled': False, 'networks': network.read_settings()['wifi']['networks']}},))
+    thread.start()
+    try:
+        assert started.wait(5)
+        read = threading.Thread(target=network.pending)
+        read.start()
+        read.join(1)
+        assert not read.is_alive()
+        # a change can't start meanwhile (it would go back to the settings saved before)
+        with pytest.raises(RuntimeError, match='being turned on or off'):
+            network.change({})
+    finally:
+        release.set()
+        thread.join(5)
+    assert saved(ports)['wifi']['enabled'] is False
+
+
+def test_wifi_switch_after_going_back_failed(ports, client, monkeypatch):
+    wifi_set_up(ports)
+    monkeypatch.setitem(network._rollback, 'problems', ['dhcpcd failed'])
+    monkeypatch.setitem(network._rollback, 'tries', network.ROLLBACK_TRIES)
+    client.post('/network/wifi/power', data={'enabled': 'off'}, environ_base={'werkzeug.socket': Socket('127.0.0.1')})
+    assert "Going back to the previous network settings didn&#39;t work: reboot the player." in client.get('/').data.decode()
+    assert saved(ports)['wifi'].get('enabled', True) is True
 
 
 def test_scan_leaves_wifi_blocked_if_it_isnt_set_up(ports, client):

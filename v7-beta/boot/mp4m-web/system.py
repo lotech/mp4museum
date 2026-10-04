@@ -470,15 +470,18 @@ def _read_interface_file(interface, name):
 
 def interface_addresses(timeout=None):
     """{interface: [('IPv4' or 'IPv6', '192.168.1.120/24'), ...]}"""
-    addresses = {}
     status, output = run_command(['ip', '-o', 'addr', 'show'], timeout=timeout)
-    if status:
-        for line in output.splitlines():
-            # e.g. "2: enxb827eb4e4fd4    inet 192.168.1.120/24 brd 192.168.1.255 scope global ..."
-            parts = line.split()
-            if len(parts) >= 4 and parts[2] in ('inet', 'inet6'):
-                interface = parts[1].split('@')[0]
-                addresses.setdefault(interface, []).append(('IPv4' if parts[2] == 'inet' else 'IPv6', parts[3]))
+    return parse_interface_addresses(output) if status else {}
+
+def parse_interface_addresses(output):
+    """interface_addresses() from what 'ip -o addr show' printed."""
+    addresses = {}
+    for line in output.splitlines():
+        # e.g. "2: enxb827eb4e4fd4    inet 192.168.1.120/24 brd 192.168.1.255 scope global ..."
+        parts = line.split()
+        if len(parts) >= 4 and parts[2] in ('inet', 'inet6'):
+            interface = parts[1].split('@')[0]
+            addresses.setdefault(interface, []).append(('IPv4' if parts[2] == 'inet' else 'IPv6', parts[3]))
     return addresses
 
 # ----- Device ----- #

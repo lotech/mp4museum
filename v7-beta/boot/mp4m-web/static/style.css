@@ -1180,6 +1180,10 @@ select {
   margin-bottom: 0;
 }
 
+#wifi .card-head + p {
+  margin-top: 12px;
+}
+
 #wifi .setting, #wifi .choice-list {
   margin-top: 12px;
 }

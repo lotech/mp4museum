@@ -417,6 +417,8 @@ _pending = {}
 _rollback = {}
 # going back being done now (undo() until its first try is done)
 _rolling_back = [0]
+# settings being applied and saved straight away (apply_and_save)
+_applying_now = [0]
 # counts the changes made: a retry of going back is dropped if one was made since it was planned
 _generation = [0]
 # set once apply_at_start has run (changes wait for it, at most STARTUP_WAIT seconds)
@@ -543,6 +545,9 @@ def change(settings, now_too=()):
     within KEEP_SECONDS. now_too: interfaces to use them on now even if saved for the next start."""
     settings = normalize(settings)
     with _lock:
+        if _applying_now[0]:
+            # (the saved settings, to go back to, are about to change)
+            raise RuntimeError("Wi-Fi is being turned on or off: try again in a moment.")
         _generation[0] += 1
         _stop_rollback()
         previous = _pending['previous'] if _pending else read_settings()
@@ -661,11 +666,7 @@ def save_for_next_start(settings):
     # (held throughout, as in keep(): no change may start being tried meanwhile, or the settings
     # it puts in use would be taken for the ones in use until the next start)
     with _lock:
-        if _pending:
-            raise RuntimeError("Keep or undo the change being tried first.")
-        if _rolling_back[0] or _rollback:
-            # what is in use is still changing back (or didn't all change back)
-            raise RuntimeError("The previous network settings are being put back: try again in a moment.")
+        _refuse_while_changing()
         if _maybe_in_use:
             # applying the settings didn't all work (e.g. at start): which are in use isn't known
             raise RuntimeError("The network settings didn't all apply, so it isn't known which are in use. "
@@ -681,23 +682,52 @@ def save_for_next_start(settings):
                     next_start.pop(name, None)
             _commit(settings, next_start)
 
+def _refuse_while_changing():
+    """RuntimeError while a change waits to be kept, is being undone or applied (hold _lock)."""
+    if _pending:
+        raise RuntimeError("Keep or undo the change being tried first.")
+    if _rollback and _rollback['tries'] >= ROLLBACK_TRIES:
+        raise RuntimeError("Going back to the previous network settings didn't work: reboot the player.")
+    if _rolling_back[0] or _rollback:
+        # what is in use is still changing back (or didn't all change back)
+        raise RuntimeError("The previous network settings are being put back: try again in a moment.")
+    if _applying_now[0]:
+        raise RuntimeError("Wi-Fi is being turned on or off: try again in a moment.")
+
 def apply_and_save(settings):
     """Use settings now and save them, without trying them first: for changes that can't lose the
     page (Wi-Fi turned on, or off while the page isn't reached over Wi-Fi). Returns what went wrong
-    applying them (saved anyway: the next start tries again)."""
+    applying them (saved anyway: the next start tries again). If saving fails, the saved settings
+    are used again and the error raised."""
     settings = normalize(settings)
     if not _started.wait(STARTUP_WAIT):
         raise RuntimeError("The network settings are still being applied after starting: try again in a moment.")
     with _lock:
-        if _pending:
-            raise RuntimeError("Keep or undo the change being tried first.")
-        if _rolling_back[0] or _rollback:
-            raise RuntimeError("The previous network settings are being put back: try again in a moment.")
+        _refuse_while_changing()
         _generation[0] += 1
+        # (change() and save_for_next_start() wait for it: _lock isn't held meanwhile, the page reads it)
+        _applying_now[0] += 1
+    try:
         problems = _use(settings)
-        with _apply_lock:
-            _commit(settings, dict(_next_start))
+        try:
+            with _lock, _apply_lock:
+                _commit(settings, dict(_next_start))
+        except BaseException:
+            _use(read_settings())
+            raise
+    finally:
+        with _lock:
+            _applying_now[0] -= 1
     return problems
+
+def wifi_set_up_elsewhere():
+    """Wi-Fi networks set up some other way than here (by hand, with the overlay off): a change
+    here replaces them, so it is tried first."""
+    if 'wifi' in target_settings():
+        return False
+    interface = (wireless_interfaces() or ['wlan0'])[0]
+    text = _read(wpa_conf_path(interface)) or ''
+    return not text.startswith(WPA_HEADER) and 'network={' in text
 
 def pending():
     """{'seconds': left to keep it, 'problems': [...]} while a change waits to be kept, else None."""
