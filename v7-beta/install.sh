@@ -49,6 +49,24 @@ cp etc/systemd/system/mp4m-webservice.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable mp4m-webservice.service
 
+# Raspberry Pi OS prints "Wi-Fi is currently blocked by rfkill" at every login (on tty1, where
+# the player starts) until a Wi-Fi country is set with raspi-config. Wi-Fi is set up in the web
+# interface instead, so the message only clutters the screen. The script that prints it is
+# replaced by one that does nothing; the original is kept next to it (undo, with the overlay off:
+# sudo mv /etc/profile.d/wifi-check.sh.mp4m-orig /etc/profile.d/wifi-check.sh).
+wifi_check=/etc/profile.d/wifi-check.sh
+# (an earlier version of this script moved it aside with dpkg-divert: undone, it's a conffile;
+# only that diversion, not one made by something else)
+if dpkg-divert --list "$wifi_check" | grep -qF "to $wifi_check.mp4m-off"; then
+    dpkg-divert --quiet --rename --divert "$wifi_check.mp4m-off" --remove "$wifi_check"
+fi
+if [ -e "$wifi_check" ] && ! grep -q 'MP4MUSEUM' "$wifi_check"; then
+    echo "Hiding the 'Wi-Fi is currently blocked by rfkill' message at login"
+    cp -p "$wifi_check" "$wifi_check.mp4m-orig"
+    printf '%s\n' "# Turned off by the MP4MUSEUM install.sh (Wi-Fi is set up in the web interface)." \
+        "# The original is $wifi_check.mp4m-orig" > "$wifi_check"
+fi
+
 if ! command -v mkfs.exfat >/dev/null && ! command -v mkexfatfs >/dev/null; then
     echo "Installing exfat-utils (for copying this player to an SD card, in the web interface)"
     # Buster's packages have moved to legacy.raspbian.org: a list just for this, the Pi's own is left as it is

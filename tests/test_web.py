@@ -343,12 +343,13 @@ def test_network_section_lists_every_interface(pi, client, monkeypatch, tmp_path
     monkeypatch.setattr(system, 'NET_PATH', str(net))
     monkeypatch.setattr(system, 'read_mac', lambda i: (net / i / 'address').read_text().strip())
     monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (True, IP_OUTPUT) if cmd[:2] == ['ip', '-o'] else pi.run_command(cmd))
-    text = system.get_network_status()
-    assert 'enxb827eb4e4fd4 (wired): connected' in text
-    assert 'IPv4 192.168.1.120/24' in text and 'MAC address: b8:27:eb:4e:4f:d4' in text
-    assert 'wlan0 (wireless): not connected' in text and 'No IP address' in text
-    assert '127.0.0.1' not in text and '\nlo ' not in text
-    assert 'Network</h3>' in client.get('/').data.decode()
+    card = client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+    wired = card.split('enxb827eb4e4fd4</span>')[1].split('wlan0</span>')[0]
+    assert '<span class="badge on">Connected</span>' in wired and '192.168.1.120/24' in wired
+    assert 'b8:27:eb:4e:4f:d4' in wired and 'fe80::1234:5678:9abc:def0/64' in wired
+    wireless = card.split('wlan0</span>')[1]
+    assert 'Not connected' in wireless and '<dt>IP address</dt><dd>None</dd>' in wireless
+    assert '127.0.0.1' not in card and 'lo</span>' not in card
 
 
 # ----- Player status and controls ----- #

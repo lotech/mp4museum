@@ -106,13 +106,13 @@ a network is optional.
 
 ## 6. Network and Wi-Fi
 
-Network settings are on the System tab (`network.py`). They're kept in `/boot/mp4m-network.json`
+Network settings are on the Network tab (`network.py`), with the network name. They're kept in `/boot/mp4m-network.json`
 and written into `/etc/dhcpcd.conf` and `/etc/wpa_supplicant/wpa_supplicant.conf` by the web
 interface when it starts (it already writes `/etc/hostname` there), so no service outside
 `/boot` is needed and updates bring it. Without that file nothing changes (DHCP, Wi-Fi blocked
 as on the image).
 
-- [x] Network settings in the web interface (System → Network), for each Ethernet port and Wi-Fi: automatic (DHCP) or a fixed address (address/prefix, router, DNS servers; without DNS servers the router). Applied without a reboot (`dhcpcd -n <interface>`, the old fixed address taken off first)
+- [x] Network settings in the web interface (Network → Ethernet), for each Ethernet port and Wi-Fi: automatic (DHCP) or a fixed address (address/prefix, router, DNS servers; without DNS servers the router). Applied without a reboot (`dhcpcd -n <interface>`, the old fixed address taken off first)
 - [x] A wrong fixed address can't lose the player: a change is applied, but only saved to `/boot` when Keep is chosen on the page (opened again, at the new address if need be) within 5 minutes; otherwise, or after a reboot, the previous settings come back. "Save for next start" saves without trying (for a network the player isn't on yet). Deleting `mp4m-network.json` on a computer goes back to DHCP
 - [x] Show the network in use in the Network card: addresses, router, DNS servers, fixed or automatic (details: the old interface list)
 - [x] Clone to another device leaves fixed addresses out (the new card uses DHCP), keeps Wi-Fi
@@ -121,12 +121,13 @@ as on the image).
 
 - [x] Found out: Buster keeps Wi-Fi soft-blocked by rfkill until a country is set (the image's saved rfkill state; `/var` is in RAM with the overlay, so raspi-config's unblock doesn't last). `/etc/profile.d/wifi-check.sh` (raspberrypi-net-mods) prints "Wi-Fi is currently blocked by rfkill" at login on tty1. `/boot/wpa_supplicant.conf` is moved by `raspberrypi-net-mods.service` with `mv`, which can't work with `/boot` read-only: not used
 - [x] Found out: the Pi 3 B's Wi-Fi firmware (`brcmfmac43430-sdio.txt`, firmware-brcm80211 on Buster) has `ccode=ALL` (every channel) when no country is set, and brcmfmac ignores the world domain (`iw reg set 00`), so "no country" isn't safe by itself
-- [x] Wi-Fi country (System → Wi-Fi): not set by default, and then Wi-Fi only scans and joins on 2.4 GHz channels 1–11 (`freq_list` in `wpa_supplicant.conf`), allowed in every country. A country from the list (tzdata's `iso3166.tab`) sets `country=` and `iw reg set`, for all of its channels and 5 GHz. Wi-Fi is unblocked (`rfkill unblock wifi`) at every start once it's set up in the web interface
+- [x] Wi-Fi country (Network → Wi-Fi): not set by default, and then Wi-Fi only scans and joins on 2.4 GHz channels 1–11 (`freq_list` in `wpa_supplicant.conf`), allowed in every country. A country from the list (tzdata's `iso3166.tab`) sets `country=` and `iw reg set`, for all of its channels and 5 GHz. Wi-Fi is unblocked (`rfkill unblock wifi`) at every start once it's set up in the web interface
 - [x] Connect to a Wi-Fi network: look for networks (`iw dev wlan0 scan`, only channels 1–11 without a country), choose one or type a hidden one's name, its password (or none); several saved, forget one; applied with `wpa_cli reconfigure` (or wpa_supplicant started), tried and kept as above
 - [x] Wi-Fi in its card: network connected to, signal, address (fixed or automatic as above)
 - [x] Wi-Fi passwords aren't kept: the WPA key worked out from it (as `wpa_passphrase`). Names and keys are written in hexadecimal into `wpa_supplicant.conf`. A password written into `mp4m-network.json` by hand (setting up Wi-Fi from a computer) is used, and replaced by its key the next time the settings are saved
 - [x] Turn Wi-Fi off from the web interface (`rfkill block wifi`)
-- [ ] The rfkill message at login still shows on players where Wi-Fi isn't set up (and may show before the web interface unblocks it): hide it with `install.sh` (outside `/boot`), or unblock earlier at boot
+- [x] Network tab in the web interface: network name, Ethernet and Wi-Fi (moved from the System tab); what's in use (addresses, router, DNS, Wi-Fi network and signal, how each port is set) in a card on the right, first on a phone; the Wi-Fi country, set once, in its own card at the bottom
+- [x] The rfkill message at login: `install.sh` replaces `/etc/profile.d/wifi-check.sh` with a script that does nothing (the original kept as `wifi-check.sh.mp4m-orig`; not `dpkg-divert`, which doesn't suit a conffile). Outside `/boot`, so only `install.sh` brings it. Test on the Pi: the message is gone from tty1 at boot
 - [ ] Offline setup: a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (`hostapd`/`dnsmasq` aren't on the image: needs `install.sh`, from `legacy.raspbian.org` like exfat-utils)
 - [ ] Test all of it on a Pi 3 B, a Pi 3 B+ (2.4 and 5 GHz) and a Pi 4, with the overlay on and after a reboot: a fixed address applied and kept; one not kept goes back (and the old address is gone); Wi-Fi joins without a country (channels 1–11) and with one; `iw reg get` after setting the country; scanning while wpa_supplicant scans (busy: `scan dump`); the rfkill message; the logo screen's address with a fixed address and on Wi-Fi only; a change while the page is on Wi-Fi
 

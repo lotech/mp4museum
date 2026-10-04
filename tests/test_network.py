@@ -785,9 +785,125 @@ def test_save_for_the_next_start(ports):
 # ----- The page ----- #
 def test_network_cards(ports, client):
     page = client.get('/').data.decode()
-    assert 'Ethernet</strong> <span class="hint">enxb827eb4e4fd4' in page
+    assert 'Ethernet <span class="hint">enxb827eb4e4fd4</span>' in page
     assert 'Wi-Fi</h3>' in page and 'Not set: channels allowed everywhere' in page
     assert '<option value="GB">Britain (UK)</option>' in page and 'networkBar' not in page
+
+
+def test_network_settings_have_their_own_tab(ports, client):
+    page = client.get('/').data.decode()
+    assert 'data-tab="network" onclick="showTab(\'network\')"' in page
+    network_tab = page.split('<div id="network" class="tab-content">')[1].split('<div id="system"')[0]
+    system_tab = page.split('<div id="system" class="tab-content">')[1]
+    for card in ('Network name</h3>', 'Ethernet</h3>', 'Wi-Fi</h3>'):
+        assert card in network_tab and card not in system_tab
+    assert 'Password</h3>' in system_tab
+    # the Wi-Fi country, set once, is the last setting on the tab
+    assert network_tab.index('id="wifiCountry"') > network_tab.index('Turn Wi-Fi off')
+    assert network_tab.rindex('<section') == network_tab.index('id="wifiCountry"') - len('<section class="card" ')
+
+
+def test_network_in_use_card(ports, client, monkeypatch):
+    """Addresses and settings in use, listed in one card (before the settings, so first on a phone)."""
+    with open(network.SETTINGS_FILE, 'w') as f:
+        json.dump(dict(FIXED, wifi={'country': 'GB', 'networks': [{'ssid': 'Gallery', 'password': 'secret-password'}]}), f)
+    outputs = {
+        ('ip', '-o'): '2: enxb827eb4e4fd4    inet 192.168.1.50/24 brd 192.168.1.255 scope global\n'
+                      '2: enxb827eb4e4fd4    inet6 fe80::1/64 scope link\n'
+                      '3: wlan0    inet 192.168.10.248/24 brd 192.168.10.255 scope global',
+        ('ip', '-4'): 'default via 192.168.1.1 dev enxb827eb4e4fd4 proto static',
+        ('iw', 'dev'): 'Connected to aa:bb:cc:dd:ee:ff (on wlan0)\n\tSSID: Gallery\n\tsignal: -60 dBm',
+    }
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (True, outputs.get(tuple(cmd[:2]), '')))
+    page = client.get('/').data.decode()
+    card = page.split('id="networkStatus">')[1].split('</section>')[0]
+    assert page.index('id="networkStatus"') < page.index('id="ethernet"')
+    assert '<a href="http://192.168.1.50/">192.168.1.50/24</a>' in card and '192.168.10.248/24' in card
+    assert '<dt>Router</dt><dd>192.168.1.1</dd>' in card and 'fe80::1/64' in card
+    assert 'Gallery <span class="hint">(signal -60 dBm)</span>' in card
+    assert '<dt>Wi-Fi country</dt><dd>Britain (UK)</dd>' in card and 'Fixed address' in card
+    assert '<dt>MAC address</dt><dd>b8:27:eb:00:00:01</dd>' in card
+    assert '<dt>DNS servers</dt><dd>192.168.1.1</dd>' in card
+    # connected first (wlan0 is down here)
+    assert card.index('enxb827eb4e4fd4</span>') < card.index('wlan0</span>')
+
+
+def test_network_in_use_card_with_an_address_for_the_next_start(ports, client):
+    """The address in use stays shown as it is until the next start, not as the one saved."""
+    network.apply_at_start()
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    network.keep()
+    other = {'interfaces': {'enxb827eb4e4fd4': dict(FIXED['interfaces']['enxb827eb4e4fd4'], address='192.168.1.60/24')}}
+    network.save_for_next_start(other)
+    card = client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+    assert '<dt>Set to</dt><dd>Fixed address<br><span class="hint">From the next start: 192.168.1.60/24</span>' in card
+
+
+def test_network_in_use_card_shows_what_is_applied(ports, client, monkeypatch):
+    """Not the change being made: while it's applied, and after it went wrong."""
+    def set_to():
+        card = client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+        return card.split('<dt>Set to</dt><dd>')[1].split('</dd>')[0]
+    network.apply_at_start()
+    network.change(FIXED)
+    assert set_to() == 'Changing…'
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[0] != 'dhcpcd', 'timed out'))
+    ports.run_later(network.APPLY_DELAY)
+    assert set_to() == 'Fixed address <span class="hint">(the last change didn\'t all apply)</span>'
+    network.undo()
+    assert set_to().startswith('Automatic (DHCP)')
+
+
+def test_network_in_use_card_shows_the_wifi_country_applied(ports, client, monkeypatch):
+    def country():
+        card = client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+        return card.split('<dt>Wi-Fi country</dt><dd>')[1].split('</dd>')[0]
+    with open(network.SETTINGS_FILE, 'w') as f:
+        json.dump({'wifi': {'country': 'DE', 'networks': []}}, f)
+    network.apply_at_start()
+    assert country() == 'Germany'
+    network.change({'wifi': {'country': 'GB', 'networks': []}})
+    assert country() == 'Changing…'
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[:2] != ['iw', 'reg'], 'failed'))
+    ports.run_later(network.APPLY_DELAY)
+    assert country() == 'Britain (UK) <span class="hint">(the last change didn\'t all apply)</span>'
+    network.undo()
+    assert country().startswith('Germany')
+
+
+def test_network_in_use_card_states_are_for_what_changes(ports, client, monkeypatch):
+    """A change to the Ethernet address doesn't show the Wi-Fi country as changing, nor the other way."""
+    def card():
+        return client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+    wifi = {'country': 'DE', 'networks': []}
+    with open(network.SETTINGS_FILE, 'w') as f:
+        json.dump({'wifi': wifi}, f)
+    network.apply_at_start()
+    network.change({'interfaces': FIXED['interfaces'], 'wifi': wifi})
+    assert '<dt>Wi-Fi country</dt><dd>Germany</dd>' in card() and 'Changing…' in card()
+    network.undo()
+    network.change({'wifi': dict(wifi, country='GB')})
+    assert '<dt>Set to</dt><dd>Automatic (DHCP)</dd>' in card().split('enxb827eb4e4fd4</span>')[1]
+    # applying the address went wrong: only that port is unsure
+    network.undo()
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[0] != 'dhcpcd', 'timed out'))
+    network.change({'interfaces': FIXED['interfaces'], 'wifi': wifi})
+    ports.run_later(network.APPLY_DELAY)
+    assert "didn't all apply" in card().split('enxb827eb4e4fd4</span>')[1]
+    assert '<dt>Wi-Fi country</dt><dd>Germany</dd>' in card()
+
+
+def test_network_in_use_card_wifi_details_belong_to_one_interface(ports, client, monkeypatch):
+    """A second Wi-Fi adapter isn't shown as connected to the first one's network; the country
+    isn't shown when Wi-Fi isn't set up here (the system's own setting isn't known)."""
+    interface(ports, 'wlan1', wireless=True)
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (
+        True, 'Connected to aa:bb (on wlan0)\n\tSSID: Gallery\n\tsignal: -60 dBm' if cmd[:2] == ['iw', 'dev'] else ''))
+    card = client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+    assert card.count('Gallery') == 1 and 'wlan1</span>' in card
+    assert 'Gallery' in card.split('wlan0</span>')[1].split('wlan1</span>')[0]
+    assert 'Wi-Fi country' not in card
 
 
 def test_fixed_address_from_the_page(ports, client):
@@ -986,7 +1102,8 @@ def test_scan_says_when_wifi_couldnt_be_blocked_again(ports, client, monkeypatch
 def test_wifi_off_on_the_image(ports, client):
     blocked(ports)
     page = client.get('/').data.decode()
-    assert 'Off: add a network to turn it on' in page and 'Turn Wi-Fi on' in page
+    assert 'Wi-Fi is off: add a network to turn it on.' in page and 'Turn Wi-Fi on' in page
+    assert '<span class="badge muted">Off</span>' in page
     blocked(ports, soft='0')
     assert 'Turn Wi-Fi off' in client.get('/').data.decode()
 

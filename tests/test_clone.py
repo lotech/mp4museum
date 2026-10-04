@@ -328,6 +328,25 @@ def test_copies_this_player_to_the_card(pi, disks):
     assert pi.commands[-1] == ['sync']
 
 
+def test_the_copy_uses_dhcp_and_keeps_the_wifi(pi, disks):
+    """Fixed addresses (Ethernet and Wi-Fi) would be on two players at once: the copy uses DHCP
+    from the start, also if this player's dhcpcd.conf has them (installed with the overlay off)."""
+    import network
+    root = disks.dev / 'mmcblk0p2.d' / 'etc'
+    (root / 'dhcpcd.conf').write_text('hostname\nslaac private\n\n' + network.dhcpcd_block(
+        {'interfaces': {'eth0': network.static_setting('192.168.1.50/24', '192.168.1.1'),
+                        'wlan0': network.static_setting('192.168.1.51/24', '192.168.1.1')}}))
+    card_boot = disks.dev / 'sda1.d'
+    (card_boot / 'mp4m-network.json').write_text(json.dumps(
+        {'interfaces': {'eth0': {'mode': 'static', 'address': '192.168.1.50/24'},
+                        'wlan0': {'mode': 'static', 'address': '192.168.1.51/24'}},
+         'wifi': {'country': 'NZ', 'networks': [{'ssid': 'moset', 'password': 'secret-password'}]}}))
+    clone.clone(CARD, with_media=False, progress=lambda **changes: None)
+    assert (disks.dev / 'sda2.d' / 'etc' / 'dhcpcd.conf').read_text() == 'hostname\nslaac private\n'
+    assert json.loads((card_boot / 'mp4m-network.json').read_text()) == {'wifi': {
+        'enabled': True, 'country': 'NZ', 'networks': [{'ssid': 'moset', 'psk': network.wifi_psk('moset', 'secret-password')}]}}
+
+
 def test_new_partitions_are_checked_before_anything_is_written(pi, disks):
     # Linux kept the card's old partitions (something still had it open): the new system
     # partition would be formatted where the old one was, past the end of this card

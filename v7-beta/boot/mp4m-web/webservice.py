@@ -184,7 +184,6 @@ def index():
                            gpu_mem_choices=system.gpu_mem_choices(board),
                            gpu_mem_recommended=system.recommended_gpu_mem(board),
                            memory_mb=system.memory_megabytes(),
-                           network_status=system.get_network_status(network_view['addresses']),
                            network=network_view,
                            device_info=system.get_device_info(),
                            display_info=system.get_display_info(),

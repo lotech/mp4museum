@@ -129,8 +129,9 @@ partition block by block.
   `sfdisk` (new disk ID below 0x80000000), read the ID back and write it at byte 440 if
   needed; re-read and check the partitions Linux sees in `/sys/block`; then copy `/boot` block
   by block, `mkfs.ext4` + `rsync` the system from the read-only lower partition (not the
-  overlay), change the disk ID in `fstab` and `cmdline.txt`, drop `hostname.txt` and DHCP
-  leases, `mkfs.exfat` + `rsync --exclude '.*'` the media.
+  overlay), change the disk ID in `fstab` and `cmdline.txt`, drop `hostname.txt`, DHCP
+  leases and fixed addresses (`mp4m-network.json` keeps the Wi-Fi; the address block in
+  `dhcpcd.conf`), `mkfs.exfat` + `rsync --exclude '.*'` the media.
 - usbmount is turned off meanwhile; `/run/mp4m-clone.json` keeps its settings, and
   `clone.recover()` at web interface start puts them back and unmounts leftovers.
   `mp4m-update --recover` (the service's `ExecStartPre`) puts `mp4m-web` back after a power cut

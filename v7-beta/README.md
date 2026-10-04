@@ -113,16 +113,19 @@ Open `http://<network name>.local` in a browser on the same network.
   hashed in `/boot/mp4m-password.txt`; delete that file to reset to the default.
 - **Network name:** each player calls itself `mp4museum-xxxx.local`, where `xxxx` is made
   from the Pi's serial number, so several players can share a network. Change it on the
-  System tab, or put the name in `/boot/hostname.txt` from a computer.
+  Network tab, or put the name in `/boot/hostname.txt` from a computer.
   The name is logged at startup; see `journalctl -u mp4m-webservice`.
-- **Network** (System tab): each Ethernet port and Wi-Fi gets its address automatically (DHCP)
+- **Network in use** (Network tab): the player's address, and for each port and Wi-Fi whether it's
+  connected, its IP addresses, router, Wi-Fi network and signal, how it's set and its MAC address;
+  the DNS servers and the Wi-Fi country.
+- **Addresses** (Network tab): each Ethernet port and Wi-Fi gets its address automatically (DHCP)
   or a fixed one (address/prefix, router, DNS servers). A change is tried straight away: open the
   player again (at the new address if it changed) and choose Keep within 5 minutes, or it goes
   back to the previous settings, as it does after a reboot. *Save for next start* saves without
   trying it, for a network the player isn't on yet. The settings are kept in
   `/boot/mp4m-network.json` and written into `/etc/dhcpcd.conf` and `wpa_supplicant.conf` when
   the web interface starts; delete that file on a computer to go back to DHCP and Wi-Fi off.
-- **Wi-Fi** (System tab): look for networks, add one with its password (several can be saved),
+- **Wi-Fi** (Network tab): look for networks, add one with its password (several can be saved),
   forget one, turn Wi-Fi off. Passwords are kept as their WPA key (as `wpa_passphrase` makes
   it), not as typed. Raspberry Pi OS keeps Wi-Fi blocked until a country is set; here it works
   without one, on 2.4 GHz channels 1–11 only, which every country allows. Choosing the country
@@ -193,7 +196,11 @@ goes back to `master`.
    It installs the web interface to `/boot/mp4m-web` and the player to `/boot/mp4museum.py`
    (an edited player is kept; the new one is saved as `mp4museum.py.new`), the boot video,
    logo and `.bashrc` to `/home/pi`, the `mp4m-webservice` service and the `mp4m-update` command,
-   and exfat-utils if it can (for copying to an SD card; it needs an internet connection).
+   and exfat-utils if it can (for copying to an SD card; it needs an internet connection). It
+   also hides the "Wi-Fi is currently blocked by rfkill" message Raspberry Pi OS prints on the
+   screen at login (Wi-Fi is set up in the web interface instead); to bring it back, with the
+   overlay off: `sudo mv /etc/profile.d/wifi-check.sh.mp4m-orig /etc/profile.d/wifi-check.sh`.
+   This is outside `/boot`, so updates don't bring it: run `install.sh` (again) for it.
 3. Run `sudo raspi-config` again, open **Overlay File System** and answer **Yes**. If it asks
    "Would you like the boot partition to be write-protected?", answer **Yes**; if it says the boot
    partition is already read-only, nothing more is needed. Reboot.
@@ -246,8 +253,9 @@ it says the card is ready, take it out; the next card put in shows up in the lis
   player and web interface), and the system as installed (not what is only in RAM now).
 - **Its own network name:** `hostname.txt` isn't copied, so the new player makes its name from
   its own serial number. Set a name in the web interface once it's running.
-- **No fixed addresses:** two players can't share one, so the card uses DHCP. Wi-Fi networks and
-  the Wi-Fi country are copied.
+- **No fixed addresses:** two players can't share one, so the card uses DHCP, for Ethernet and
+  Wi-Fi, from its first start. Wi-Fi networks (with their passwords) and the Wi-Fi country are
+  copied, so it joins the same Wi-Fi.
 - **Media files:** the media partition's files (not those on USB sticks), copied or left out (an
   empty media partition). Hidden files and folders, such as what a Mac leaves on a card
   (`.Spotlight-V100`, `._…`), aren't copied.

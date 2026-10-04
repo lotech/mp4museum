@@ -410,6 +410,9 @@ def clone(card, with_media, progress=_set):
                    card_root, root_used, progress)
         # its own partition IDs; the source Pi's DHCP lease left behind
         _new_disk_id(os.path.join(card_root, 'etc', 'fstab'), disk_id, new_id)
+        # fixed addresses written into dhcpcd.conf with the overlay off: DHCP from the first start
+        # (the web interface would take them out, but only once it has started)
+        _without_address_block(os.path.join(card_root, 'etc', 'dhcpcd.conf'))
         for lease in _leases(card_root):
             os.remove(lease)
         unmount(card_root)
@@ -447,6 +450,18 @@ def clone(card, with_media, progress=_set):
                 pass
         _remove_work(work)
         _restore_automount(usbmount)
+
+
+def _without_address_block(path):
+    try:
+        with open(path, 'r') as f:
+            text = f.read()
+    except OSError:
+        return
+    base, sections = network.split_dhcpcd_conf(text)
+    if sections:
+        with open(path, 'w') as f:
+            f.write(base.rstrip('\n') + '\n')
 
 
 def _without_fixed_addresses(path):

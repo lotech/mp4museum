@@ -95,6 +95,7 @@
   <button class="tab" data-tab="sound" onclick="showTab('sound')" aria-label="Sound">{{ icon('volume-2') }}<span>Sound</span></button>
   <button class="tab" data-tab="video" onclick="showTab('video')" aria-label="Video">{{ icon('monitor') }}<span>Video</span></button>
   <button class="tab" data-tab="script" onclick="showTab('script')" aria-label="Script">{{ icon('code') }}<span>Script</span></button>
+  <button class="tab" data-tab="network" onclick="showTab('network')" aria-label="Network">{{ icon('network') }}<span>Network</span></button>
   <button class="tab" data-tab="system" onclick="showTab('system')" aria-label="System">{{ icon('settings') }}<span>System</span></button>
 </nav>
 
@@ -393,10 +394,52 @@
   </section>
 </div>
 
-{# ----- System ----- #}
-<div id="system" class="tab-content">
-  <div class="grid-2">
-    <div class="stack">
+{# ----- Network ----- #}
+<div id="network" class="tab-content">
+  <div class="network-layout">
+    {# what is in use: first on a phone, on the right on a wider screen #}
+    <section class="card network-status" id="networkStatus">
+      <h3>{{ icon('network') }}Network in use</h3>
+      <dl class="device-info">
+        <dt>Address</dt><dd><a href="http://{{ hostname }}.local/">http://{{ hostname }}.local</a></dd>
+        {% if network.dns %}<dt>DNS servers</dt><dd>{{ network.dns|join(', ') }}</dd>{% endif %}
+        {% set applied = network.wifi_in_use %}
+        {% if network.wifi_interface and (applied.managed or applied.state == 'changing') %}<dt>Wi-Fi country</dt><dd>
+          {%- if applied.state == 'changing' %}Changing…
+          {%- else %}{{ applied.country_name or applied.country if applied.country else 'Not set: channels 1–11 only' }}
+          {%- if applied.state == 'unsure' %} <span class="hint">(the last change didn't all apply)</span>{% endif %}{% endif %}</dd>{% endif %}
+      </dl>
+      {# the ones connected first #}
+      {% for port in network.interfaces|sort(attribute='connected', reverse=True) %}
+      {% set wireless = port.kind == 'wireless' %}
+      {# (Wi-Fi network, signal and on/off are the first Wi-Fi interface's: the one set up here) #}
+      {% set wifi_port = network.wifi_interface and port.name == network.wifi_interface.name %}
+      {% set off = wifi_port and (network.wifi_in_use.managed and not network.wifi_in_use.enabled or network.wifi.blocked) %}
+      <div class="status-port">
+        <h4>{{ icon('wifi' if wireless else 'ethernet-port') }}{{ port.label }} <span class="hint">{{ port.name }}</span>
+          {% if port.state == 'absent' %}<span class="badge muted">Not plugged in</span>
+          {% elif off %}<span class="badge muted">Off</span>
+          {% elif port.connected %}<span class="badge on">Connected</span>
+          {% else %}<span class="badge muted">Not connected</span>{% endif %}</h4>
+        <dl class="device-info">
+          {% if wifi_port and network.wifi.ssid %}
+          <dt>Wi-Fi network</dt><dd>{{ network.wifi.ssid }}{% if network.wifi.signal is not none %} <span class="hint">(signal {{ network.wifi.signal }} dBm)</span>{% endif %}</dd>
+          {% endif %}
+          <dt>IP address</dt><dd>{% for address in port.addresses %}<a href="http://{{ address.split('/')[0] }}/">{{ address }}</a>{% if not loop.last %}<br>{% endif %}{% else %}None{% endfor %}</dd>
+          {% if port.router %}<dt>Router</dt><dd>{{ port.router }}</dd>{% endif %}
+          <dt>Set to</dt><dd>{% if port.using_state == 'changing' %}Changing…{% else %}{{ 'Fixed address' if port.using.mode == 'static' else 'Automatic (DHCP)' }}
+            {%- if port.using_state == 'unsure' %} <span class="hint">(the last change didn't all apply)</span>{% endif %}{% endif %}
+            {%- if port.next_start %}<br><span class="hint">From the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic (DHCP)' }}</span>{% endif %}</dd>
+          {% if port.ipv6 %}<dt>IPv6</dt><dd>{{ port.ipv6|join('<br>'|safe) }}</dd>{% endif %}
+          {% if port.mac %}<dt>MAC address</dt><dd>{{ port.mac }}</dd>{% endif %}
+        </dl>
+      </div>
+      {% else %}
+      <p class="current">No network ports found.</p>
+      {% endfor %}
+    </section>
+
+    <div class="stack network-settings">
       <section class="card">
         <h3>{{ icon('tag') }}Network name</h3>
         <p class="current">This player is at <strong>http://{{ hostname }}.local</strong></p>
@@ -412,33 +455,123 @@
           {% if hostname_is_default %}This is the default name, made from the Pi's serial number.{% endif %}</p>
       </section>
 
-      <section class="card" id="network">
-        <h3>{{ icon('ethernet-port') }}Network</h3>
+      <section class="card" id="ethernet">
+        <h3>{{ icon('ethernet-port') }}Ethernet</h3>
         {% if not network.available %}
         <p class="hint">This system doesn't use dhcpcd, so addresses can't be set here.</p>
         {% endif %}
         {% for port in network.wired %}
         <div class="network-port">
-          <p class="current"><strong>{{ port.label }}</strong> <span class="hint">{{ port.name }}</span><br>
-            {% if port.state == 'absent' %}Not plugged in
-            {%- elif port.addresses %}{{ port.addresses|join(', ') }}{% if port.router %}, router {{ port.router }}{% endif %}
-            {%- else %}Not connected{% endif %}
-            {%- if port.next_start %}. From the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic' }}
-            {%- else %} ({{ 'fixed address' if port.setting.mode == 'static' else 'automatic' }}){% endif %}</p>
+          {% if network.wired|length > 1 %}<p class="current"><strong>{{ port.name }}</strong></p>{% endif %}
+          {% if port.next_start %}<p class="hint">Saved for the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic (DHCP)' }}.</p>{% endif %}
           {% if network.available %}{{ address_form(port) }}{% endif %}
         </div>
         {% else %}
         <p class="current">No Ethernet port found.</p>
         {% endfor %}
-        {% if network.dns %}<p class="hint">DNS servers in use: {{ network.dns|join(', ') }}</p>{% endif %}
         <p class="hint">Changes are tried first: open the player again and choose Keep within 5 minutes, or it goes
-          back to the previous settings. Clone to another device leaves fixed addresses out.</p>
-        <details>
-          <summary>Details</summary>
-          <pre>{{ network_status }}</pre>
-        </details>
+          back to the previous settings. A copy made with Clone to another device uses automatic addresses (DHCP).</p>
       </section>
 
+      <section class="card" id="wifi" data-scan-url="{{ url_for('scan_wifi') }}">
+        <h3>{{ icon('wifi') }}Wi-Fi</h3>
+        {% set wifi = network.wifi %}
+        {% set port = network.wifi_interface %}
+        {% if not port %}
+        <p class="current">This Pi has no Wi-Fi.</p>
+        {% else %}
+        {% if wifi.managed and not wifi.enabled %}<p class="current">Wi-Fi is off.</p>
+        {% elif wifi.blocked %}<p class="current">Wi-Fi is off: add a network to turn it on.</p>{% endif %}
+
+        {% if wifi.networks %}
+        <ul class="choice-list">
+          {% for saved in wifi.networks %}
+          <li{% if saved.ssid == wifi.ssid %} class="current"{% endif %}>
+            <div><strong>{{ saved.ssid }}</strong>
+              <div class="hint">{{ 'Password saved' if saved.psk else 'No password' }}{% if saved.hidden %}, hidden network{% endif %}</div></div>
+            <form method="post" action="{{ url_for('forget_wifi_network') }}"
+                  onsubmit="return confirm('Forget this Wi-Fi network?')">
+              <input type="hidden" name="ssid" value="{{ saved.ssid }}">
+              <button type="submit" class="button small ghost">Forget</button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+
+        <form method="post" action="{{ url_for('add_wifi_network') }}" class="setting wifi-form">
+          <label for="wifi_ssid">Add a network</label>
+          <div class="input-row">
+            <input type="text" name="ssid" id="wifi_ssid" list="wifiNetworks" placeholder="Network name" required
+                   maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button type="button" class="button ghost" id="wifiScan" onclick="scanWifi()">{{ icon('refresh-cw') }}<span>Look for networks</span></button>
+          </div>
+          <datalist id="wifiNetworks"></datalist>
+          <p class="hint" id="wifiScanResult" hidden></p>
+          <label for="wifi_password">Password</label>
+          <div class="input-row">
+            <input type="password" name="password" id="wifi_password" maxlength="64" autocomplete="off">
+          </div>
+          <div class="checkbox-row">
+            <label><input type="checkbox" name="open" value="1"> No password</label>
+            <label><input type="checkbox" name="hidden" value="1"> Hidden network</label>
+          </div>
+          <div><button type="submit" class="button">Add</button></div>
+        </form>
+
+        {% if network.available %}
+        <details class="wifi-address"{% if port.setting.mode == 'static' %} open{% endif %}>
+          <summary>Wi-Fi address: {{ 'fixed' if port.using.mode == 'static' else 'automatic (DHCP)' }}{% if port.next_start %}
+            (from the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic' }}){% endif %}</summary>
+          {{ address_form(port) }}
+        </details>
+        {% endif %}
+
+        {# not set up here: on or off as the system has it (the image: off) #}
+        {% set wifi_on = wifi.enabled if wifi.managed else not wifi.blocked %}
+        <form method="post" action="{{ url_for('set_wifi_power') }}" class="setting"
+              {% if wifi_on %}onsubmit="return confirm('Turn Wi-Fi off? If this page uses Wi-Fi, it loses the player.')"{% endif %}>
+          <input type="hidden" name="enabled" value="{{ 'off' if wifi_on else 'on' }}">
+          <button type="submit" class="button ghost">{{ icon('power') }}<span>{{ 'Turn Wi-Fi off' if wifi_on else 'Turn Wi-Fi on' }}</span></button>
+        </form>
+        <p class="hint">Passwords are kept as Wi-Fi keys, not as typed. Clone to another device copies the Wi-Fi networks.</p>
+        {% endif %}
+      </section>
+
+      {% if network.wifi_interface %}
+      {# set once where the player is, then hardly needed again #}
+      <section class="card" id="wifiCountry">
+        <h3>{{ icon('wifi') }}Wi-Fi country</h3>
+        {% set wifi = network.wifi %}
+        <form method="post" action="{{ url_for('set_wifi_country') }}" class="setting">
+          <label for="wifi_country" class="visually-hidden">Wi-Fi country</label>
+          <div class="input-row">
+            {% if network.countries %}
+            <select name="country" id="wifi_country">
+              <option value=""{% if not wifi.country %} selected{% endif %}>Not set: channels allowed everywhere</option>
+              {% for code, name in network.countries %}
+              <option value="{{ code }}"{% if code == wifi.country %} selected{% endif %}>{{ name }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <input type="text" name="country" id="wifi_country" value="{{ wifi.country }}" maxlength="2" class="narrow"
+                   placeholder="GB" pattern="[A-Za-z]{2}" title="Two letters, e.g. GB, US, DE">
+            {% endif %}
+            <button type="submit" class="button">Save</button>
+          </div>
+        </form>
+        <p class="hint">Without a country, Wi-Fi only uses 2.4 GHz channels 1–11, which every country allows.
+          Choose where the player is to use all of that country's channels, including 5 GHz networks.</p>
+      </section>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# ----- System ----- #}
+<div id="system" class="tab-content">
+  <div class="grid-2">
+    <div class="stack">
       <section class="card">
         <h3>{{ icon('power') }}Start-up</h3>
         <div class="stack-settings">
@@ -496,93 +629,6 @@
           <dt>{{ label }}</dt><dd>{{ value }}</dd>
           {% endfor %}
         </dl>
-      </section>
-
-      <section class="card" id="wifi" data-scan-url="{{ url_for('scan_wifi') }}">
-        <h3>{{ icon('wifi') }}Wi-Fi</h3>
-        {% set wifi = network.wifi %}
-        {% set port = network.wifi_interface %}
-        {% if not port %}
-        <p class="current">This Pi has no Wi-Fi.</p>
-        {% else %}
-        <p class="current">
-          {%- if wifi.managed and not wifi.enabled %}Off
-          {%- elif wifi.ssid %}Connected to <strong>{{ wifi.ssid }}</strong>{% if wifi.signal is not none %} (signal {{ wifi.signal }} dBm){% endif %}{% if port.addresses %}: {{ port.addresses|join(', ') }}{% endif %}
-          {%- elif wifi.blocked %}Off: add a network to turn it on
-          {%- else %}Not connected{% endif %}</p>
-
-        {% if wifi.networks %}
-        <ul class="choice-list">
-          {% for saved in wifi.networks %}
-          <li{% if saved.ssid == wifi.ssid %} class="current"{% endif %}>
-            <div><strong>{{ saved.ssid }}</strong>
-              <div class="hint">{{ 'Password saved' if saved.psk else 'No password' }}{% if saved.hidden %}, hidden network{% endif %}</div></div>
-            <form method="post" action="{{ url_for('forget_wifi_network') }}"
-                  onsubmit="return confirm('Forget this Wi-Fi network?')">
-              <input type="hidden" name="ssid" value="{{ saved.ssid }}">
-              <button type="submit" class="button small ghost">Forget</button>
-            </form>
-          </li>
-          {% endfor %}
-        </ul>
-        {% endif %}
-
-        <form method="post" action="{{ url_for('add_wifi_network') }}" class="setting wifi-form">
-          <label for="wifi_ssid">Add a network</label>
-          <div class="input-row">
-            <input type="text" name="ssid" id="wifi_ssid" list="wifiNetworks" placeholder="Network name" required
-                   maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false">
-            <button type="button" class="button ghost" id="wifiScan" onclick="scanWifi()">{{ icon('refresh-cw') }}<span>Look for networks</span></button>
-          </div>
-          <datalist id="wifiNetworks"></datalist>
-          <p class="hint" id="wifiScanResult" hidden></p>
-          <label for="wifi_password">Password</label>
-          <div class="input-row">
-            <input type="password" name="password" id="wifi_password" maxlength="64" autocomplete="off">
-          </div>
-          <div class="checkbox-row">
-            <label><input type="checkbox" name="open" value="1"> No password</label>
-            <label><input type="checkbox" name="hidden" value="1"> Hidden network</label>
-          </div>
-          <div><button type="submit" class="button">Add</button></div>
-        </form>
-
-        <form method="post" action="{{ url_for('set_wifi_country') }}" class="setting">
-          <label for="wifi_country">Country</label>
-          <div class="input-row">
-            {% if network.countries %}
-            <select name="country" id="wifi_country">
-              <option value=""{% if not wifi.country %} selected{% endif %}>Not set: channels allowed everywhere</option>
-              {% for code, name in network.countries %}
-              <option value="{{ code }}"{% if code == wifi.country %} selected{% endif %}>{{ name }}</option>
-              {% endfor %}
-            </select>
-            {% else %}
-            <input type="text" name="country" id="wifi_country" value="{{ wifi.country }}" maxlength="2" class="narrow"
-                   placeholder="GB" pattern="[A-Za-z]{2}" title="Two letters, e.g. GB, US, DE">
-            {% endif %}
-            <button type="submit" class="button">Save</button>
-          </div>
-        </form>
-        <p class="hint">Without a country, Wi-Fi only uses 2.4 GHz channels 1–11, which every country allows.
-          Choose where the player is to use all of that country's channels, including 5 GHz networks.</p>
-
-        {% if network.available %}
-        <details class="wifi-address"{% if port.setting.mode == 'static' %} open{% endif %}>
-          <summary>Wi-Fi address: {{ 'fixed' if port.setting.mode == 'static' else 'automatic (DHCP)' }}</summary>
-          {{ address_form(port) }}
-        </details>
-        {% endif %}
-
-        {# not set up here: on or off as the system has it (the image: off) #}
-        {% set wifi_on = wifi.enabled if wifi.managed else not wifi.blocked %}
-        <form method="post" action="{{ url_for('set_wifi_power') }}" class="setting"
-              {% if wifi_on %}onsubmit="return confirm('Turn Wi-Fi off? If this page uses Wi-Fi, it loses the player.')"{% endif %}>
-          <input type="hidden" name="enabled" value="{{ 'off' if wifi_on else 'on' }}">
-          <button type="submit" class="button ghost">{{ icon('power') }}<span>{{ 'Turn Wi-Fi off' if wifi_on else 'Turn Wi-Fi on' }}</span></button>
-        </form>
-        <p class="hint">Passwords are kept as Wi-Fi keys, not as typed. Clone to another device copies the Wi-Fi networks.</p>
-        {% endif %}
       </section>
 
       <section class="card">

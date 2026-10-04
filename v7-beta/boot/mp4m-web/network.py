@@ -1,4 +1,4 @@
-"""Network settings for the MP4MUSEUM web interface (System tab): a fixed address or DHCP for
+"""Network settings for the MP4MUSEUM web interface (Network tab): a fixed address or DHCP for
 each Ethernet port and Wi-Fi, the Wi-Fi networks to join and the Wi-Fi country.
 
 Part of https://github.com/lotech/mp4museum (added 2026), a fork of MP4MUSEUM by Julius
@@ -850,7 +850,7 @@ def dns_servers():
             if line.startswith('nameserver') and len(line.split()) > 1]
 
 def view():
-    """What the Network and Wi-Fi cards show."""
+    """What the Network tab shows: the network in use and the settings."""
     settings = target_settings()
     addresses = system.interface_addresses(COMMAND_TIMEOUT)
     in_use = routers()
@@ -859,6 +859,22 @@ def view():
     next_start = next_start_interfaces()
     # set up for an adapter that isn't plugged in now
     names = present + [name for name in sorted(settings.get('interfaces') or {}) if name not in present]
+    dhcp = {'mode': 'dhcp', 'address': '', 'router': '', 'dns': []}
+    # applied (with what waits for the next start left out), not what the page is changing to
+    applied_settings = _in_use['settings'] if _in_use['settings'] is not None else read_settings()
+    applied = applied_settings.get('interfaces') or {}
+    with _lock:
+        being_applied = _pending['settings'] if _pending and not _pending['finished'] else None
+    maybe = list(_maybe_in_use)
+
+    def using_state(part):
+        """'changing' if a change being applied changes this part (part: settings -> its value),
+        'unsure' if applying went wrong where it differs, else None."""
+        if being_applied is not None and part(being_applied) != part(applied_settings):
+            return 'changing'
+        if any(part(other) != part(applied_settings) for other in maybe):
+            return 'unsure'
+        return None
     interfaces = []
     for name in names:
         kind = 'wireless' if name in wireless else 'wired'
@@ -867,22 +883,34 @@ def view():
             'name': name, 'kind': kind, 'label': 'Wi-Fi' if kind == 'wireless' else 'Ethernet',
             'state': state or 'unknown', 'connected': state == 'up',
             'addresses': [address for family, address in addresses.get(name, []) if family == 'IPv4'],
+            'ipv6': [address for family, address in addresses.get(name, []) if family == 'IPv6'],
+            'mac': system.read_mac(name) if name in present else '',
             'router': in_use.get(name), 'next_start': name in next_start,
-            'setting': (settings.get('interfaces') or {}).get(name) or {'mode': 'dhcp', 'address': '', 'router': '', 'dns': []},
+            'setting': (settings.get('interfaces') or {}).get(name) or dhcp,
+            # in use now; 'changing' while a change is being applied, 'unsure' if applying went wrong
+            'using': applied.get(name) or dhcp,
+            'using_state': using_state(lambda s, name=name: (s.get('interfaces') or {}).get(name)),
         })
     wifi = settings.get('wifi') or {'enabled': True, 'country': '', 'networks': []}
     interface = wireless[0] if wireless else None
     ssid, signal = _wifi_link(interface) if interface else (None, None)
+    country_names = countries()
     return {
         'available': os.path.exists(DHCPCD_CONF),
         'interfaces': interfaces,
         'wired': [i for i in interfaces if i['kind'] == 'wired'],
         'wifi_interface': next((i for i in interfaces if i['name'] == interface), None),
         'wifi': dict(wifi, managed='wifi' in settings, blocked=wifi_blocked() if interface else False,
-                     ssid=ssid, signal=signal),
+                     ssid=ssid, signal=signal,
+                     country_name=dict(country_names).get(wifi['country'], wifi['country'])),
+        # Wi-Fi as applied (the Wi-Fi card shows the settings, which may be being changed)
+        'wifi_in_use': {'managed': 'wifi' in applied_settings, 'state': using_state(lambda s: s.get('wifi')),
+                        'enabled': (applied_settings.get('wifi') or {}).get('enabled', True),
+                        'country': (applied_settings.get('wifi') or {}).get('country', ''),
+                        'country_name': dict(country_names).get((applied_settings.get('wifi') or {}).get('country', ''), '')},
         'addresses': addresses,
         'dns': dns_servers(),
-        'countries': countries(),
+        'countries': country_names,
         'pending': pending(),
         'rollback': rollback(),
     }
