@@ -348,7 +348,7 @@ def test_network_section_lists_every_interface(pi, client, monkeypatch, tmp_path
     assert 'IPv4 192.168.1.120/24' in text and 'MAC address: b8:27:eb:4e:4f:d4' in text
     assert 'wlan0 (wireless): not connected' in text and 'No IP address' in text
     assert '127.0.0.1' not in text and '\nlo ' not in text
-    assert 'Network</h3>' in client.get('/').data.decode()
+    assert 'Ethernet</h3>' in client.get('/').data.decode()
 
 
 # ----- Player status and controls ----- #

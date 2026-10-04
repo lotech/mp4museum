@@ -113,16 +113,16 @@ Open `http://<network name>.local` in a browser on the same network.
   hashed in `/boot/mp4m-password.txt`; delete that file to reset to the default.
 - **Network name:** each player calls itself `mp4museum-xxxx.local`, where `xxxx` is made
   from the Pi's serial number, so several players can share a network. Change it on the
-  System tab, or put the name in `/boot/hostname.txt` from a computer.
+  Network tab, or put the name in `/boot/hostname.txt` from a computer.
   The name is logged at startup; see `journalctl -u mp4m-webservice`.
-- **Network** (System tab): each Ethernet port and Wi-Fi gets its address automatically (DHCP)
+- **Addresses** (Network tab): each Ethernet port and Wi-Fi gets its address automatically (DHCP)
   or a fixed one (address/prefix, router, DNS servers). A change is tried straight away: open the
   player again (at the new address if it changed) and choose Keep within 5 minutes, or it goes
   back to the previous settings, as it does after a reboot. *Save for next start* saves without
   trying it, for a network the player isn't on yet. The settings are kept in
   `/boot/mp4m-network.json` and written into `/etc/dhcpcd.conf` and `wpa_supplicant.conf` when
   the web interface starts; delete that file on a computer to go back to DHCP and Wi-Fi off.
-- **Wi-Fi** (System tab): look for networks, add one with its password (several can be saved),
+- **Wi-Fi** (Network tab): look for networks, add one with its password (several can be saved),
   forget one, turn Wi-Fi off. Passwords are kept as their WPA key (as `wpa_passphrase` makes
   it), not as typed. Raspberry Pi OS keeps Wi-Fi blocked until a country is set; here it works
   without one, on 2.4 GHz channels 1–11 only, which every country allows. Choosing the country

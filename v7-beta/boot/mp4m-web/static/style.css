@@ -1118,7 +1118,7 @@ select {
   border-top: 1px solid var(--border);
 }
 
-#network .address-form, #wifi .setting, #wifi .choice-list, .wifi-address {
+#ethernet .address-form, #wifi .setting, #wifi .choice-list, .wifi-address {
   margin-top: 14px;
 }
 

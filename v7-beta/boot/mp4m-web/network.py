@@ -1,4 +1,4 @@
-"""Network settings for the MP4MUSEUM web interface (System tab): a fixed address or DHCP for
+"""Network settings for the MP4MUSEUM web interface (Network tab): a fixed address or DHCP for
 each Ethernet port and Wi-Fi, the Wi-Fi networks to join and the Wi-Fi country.
 
 Part of https://github.com/lotech/mp4museum (added 2026), a fork of MP4MUSEUM by Julius

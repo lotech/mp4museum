@@ -95,6 +95,7 @@
   <button class="tab" data-tab="sound" onclick="showTab('sound')" aria-label="Sound">{{ icon('volume-2') }}<span>Sound</span></button>
   <button class="tab" data-tab="video" onclick="showTab('video')" aria-label="Video">{{ icon('monitor') }}<span>Video</span></button>
   <button class="tab" data-tab="script" onclick="showTab('script')" aria-label="Script">{{ icon('code') }}<span>Script</span></button>
+  <button class="tab" data-tab="network" onclick="showTab('network')" aria-label="Network">{{ icon('network') }}<span>Network</span></button>
   <button class="tab" data-tab="system" onclick="showTab('system')" aria-label="System">{{ icon('settings') }}<span>System</span></button>
 </nav>
 
@@ -393,8 +394,8 @@
   </section>
 </div>
 
-{# ----- System ----- #}
-<div id="system" class="tab-content">
+{# ----- Network ----- #}
+<div id="network" class="tab-content">
   <div class="grid-2">
     <div class="stack">
       <section class="card">
@@ -412,8 +413,8 @@
           {% if hostname_is_default %}This is the default name, made from the Pi's serial number.{% endif %}</p>
       </section>
 
-      <section class="card" id="network">
-        <h3>{{ icon('ethernet-port') }}Network</h3>
+      <section class="card" id="ethernet">
+        <h3>{{ icon('ethernet-port') }}Ethernet</h3>
         {% if not network.available %}
         <p class="hint">This system doesn't use dhcpcd, so addresses can't be set here.</p>
         {% endif %}
@@ -438,66 +439,9 @@
           <pre>{{ network_status }}</pre>
         </details>
       </section>
-
-      <section class="card">
-        <h3>{{ icon('power') }}Start-up</h3>
-        <div class="stack-settings">
-          <form method="post" action="{{ url_for('set_boot_video_plays') }}" class="setting">
-            <label for="boot_video_plays">{{ icon('film') }}Boot video at start-up</label>
-            <div class="input-row">
-              <select name="boot_video_plays" id="boot_video_plays">
-                <option value="1"{% if boot_video_plays == 1 %} selected{% endif %}>Play once (default)</option>
-                <option value="2"{% if boot_video_plays == 2 %} selected{% endif %}>Play twice</option>
-                <option value="0"{% if boot_video_plays == 0 %} selected{% endif %}>Don't play</option>
-              </select>
-              <button type="submit" class="button">Save</button>
-            </div>
-          </form>
-          <form method="post" action="{{ url_for('set_show_address') }}" class="setting">
-            <label for="show_address">{{ icon('tag') }}Show network address on boot</label>
-            <div class="input-row">
-              <select name="show_address" id="show_address">
-                <option value="yes"{% if show_address %} selected{% endif %}>Show (default)</option>
-                <option value="no"{% if not show_address %} selected{% endif %}>Don't show</option>
-              </select>
-              <button type="submit" class="button">Save</button>
-            </div>
-          </form>
-          {% if not start_up_settings %}
-          <p class="hint">The player script on this Pi was edited before these two settings existed, so it doesn't
-            use them. Updates keep an edited script and save the new one as /boot/mp4museum.py.new.</p>
-          {% endif %}
-        </div>
-      </section>
-
-      <section class="card">
-        <h3>{{ icon('key-round') }}Password</h3>
-        {% if using_default_password %}
-        <p class="current">The password is still the default (mp4museum).</p>
-        {% endif %}
-        <form method="post" action="{{ url_for('set_password') }}" class="password-form">
-          <label for="current_password">Current password</label>
-          <input type="password" name="current_password" id="current_password" required autocomplete="current-password">
-          <label for="new_password">New password</label>
-          <input type="password" name="new_password" id="new_password" required autocomplete="new-password">
-          <label for="confirm_password">New password again</label>
-          <input type="password" name="confirm_password" id="confirm_password" required autocomplete="new-password">
-          <div><button type="submit" class="button">Change password</button></div>
-        </form>
-        <p class="hint">Forgot it? Delete mp4m-password.txt from the SD card's boot partition to reset it to the default.</p>
-      </section>
     </div>
 
     <div class="stack">
-      <section class="card">
-        <h3>{{ icon('circuit-board') }}Device</h3>
-        <dl class="device-info">
-          {% for label, value in device_info %}
-          <dt>{{ label }}</dt><dd>{{ value }}</dd>
-          {% endfor %}
-        </dl>
-      </section>
-
       <section class="card" id="wifi" data-scan-url="{{ url_for('scan_wifi') }}">
         <h3>{{ icon('wifi') }}Wi-Fi</h3>
         {% set wifi = network.wifi %}
@@ -583,6 +527,72 @@
         </form>
         <p class="hint">Passwords are kept as Wi-Fi keys, not as typed. Clone to another device copies the Wi-Fi networks.</p>
         {% endif %}
+      </section>
+    </div>
+  </div>
+</div>
+
+{# ----- System ----- #}
+<div id="system" class="tab-content">
+  <div class="grid-2">
+    <div class="stack">
+      <section class="card">
+        <h3>{{ icon('power') }}Start-up</h3>
+        <div class="stack-settings">
+          <form method="post" action="{{ url_for('set_boot_video_plays') }}" class="setting">
+            <label for="boot_video_plays">{{ icon('film') }}Boot video at start-up</label>
+            <div class="input-row">
+              <select name="boot_video_plays" id="boot_video_plays">
+                <option value="1"{% if boot_video_plays == 1 %} selected{% endif %}>Play once (default)</option>
+                <option value="2"{% if boot_video_plays == 2 %} selected{% endif %}>Play twice</option>
+                <option value="0"{% if boot_video_plays == 0 %} selected{% endif %}>Don't play</option>
+              </select>
+              <button type="submit" class="button">Save</button>
+            </div>
+          </form>
+          <form method="post" action="{{ url_for('set_show_address') }}" class="setting">
+            <label for="show_address">{{ icon('tag') }}Show network address on boot</label>
+            <div class="input-row">
+              <select name="show_address" id="show_address">
+                <option value="yes"{% if show_address %} selected{% endif %}>Show (default)</option>
+                <option value="no"{% if not show_address %} selected{% endif %}>Don't show</option>
+              </select>
+              <button type="submit" class="button">Save</button>
+            </div>
+          </form>
+          {% if not start_up_settings %}
+          <p class="hint">The player script on this Pi was edited before these two settings existed, so it doesn't
+            use them. Updates keep an edited script and save the new one as /boot/mp4museum.py.new.</p>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>{{ icon('key-round') }}Password</h3>
+        {% if using_default_password %}
+        <p class="current">The password is still the default (mp4museum).</p>
+        {% endif %}
+        <form method="post" action="{{ url_for('set_password') }}" class="password-form">
+          <label for="current_password">Current password</label>
+          <input type="password" name="current_password" id="current_password" required autocomplete="current-password">
+          <label for="new_password">New password</label>
+          <input type="password" name="new_password" id="new_password" required autocomplete="new-password">
+          <label for="confirm_password">New password again</label>
+          <input type="password" name="confirm_password" id="confirm_password" required autocomplete="new-password">
+          <div><button type="submit" class="button">Change password</button></div>
+        </form>
+        <p class="hint">Forgot it? Delete mp4m-password.txt from the SD card's boot partition to reset it to the default.</p>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="card">
+        <h3>{{ icon('circuit-board') }}Device</h3>
+        <dl class="device-info">
+          {% for label, value in device_info %}
+          <dt>{{ label }}</dt><dd>{{ value }}</dd>
+          {% endfor %}
+        </dl>
       </section>
 
       <section class="card">

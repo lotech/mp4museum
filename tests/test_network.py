@@ -790,6 +790,16 @@ def test_network_cards(ports, client):
     assert '<option value="GB">Britain (UK)</option>' in page and 'networkBar' not in page
 
 
+def test_network_settings_have_their_own_tab(ports, client):
+    page = client.get('/').data.decode()
+    assert 'data-tab="network" onclick="showTab(\'network\')"' in page
+    network_tab = page.split('<div id="network" class="tab-content">')[1].split('<div id="system"')[0]
+    system_tab = page.split('<div id="system" class="tab-content">')[1]
+    for card in ('Network name</h3>', 'Ethernet</h3>', 'Wi-Fi</h3>'):
+        assert card in network_tab and card not in system_tab
+    assert 'Password</h3>' in system_tab
+
+
 def test_fixed_address_from_the_page(ports, client):
     r = client.post('/network/address', data={'interface': 'enxb827eb4e4fd4', 'mode': 'static',
                                               'address': '192.168.1.50', 'router': '192.168.1.1', 'when': 'now'},
