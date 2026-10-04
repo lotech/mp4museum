@@ -17,7 +17,7 @@ The player is meant to run offline. A network is optional and only needed for th
 | Path | Purpose |
 |---|---|
 | `boot/mp4museum.py` | Player: plays the media files in `/media/*/` in order, GPIO pause (pin 11) and next/previous/back to the start (pin 13), sync mode with omxplayer-sync |
-| `boot/mp4m-web/` | Web interface (Flask, port 80, runs as root): `webservice.py` (routes), `system.py` (partitions, config.txt, network name, password), `updater.py` (software update), `clone.py` (cloning the player to an SD card), `templates/`, `static/`. On the boot partition so it can be updated without turning off the overlay |
+| `boot/mp4m-web/` | Web interface (Flask, port 80, runs as root): `webservice.py` (routes), `system.py` (partitions, config.txt, network name, password), `updater.py` (software update), `clone.py` (cloning the player to an SD card), `network.py` (fixed addresses, Wi-Fi), `templates/`, `static/`. On the boot partition so it can be updated without turning off the overlay |
 | `etc/systemd/system/mp4m-webservice.service` | Starts the web interface at boot |
 | `usr/local/bin/mp4m-update` | The `sudo mp4m-update` command |
 | `home/pi/.bashrc` | Autostart on tty1: runs `/boot/mp4museum.py`, and again if it stops by itself |
@@ -115,6 +115,21 @@ Open `http://<network name>.local` in a browser on the same network.
   from the Pi's serial number, so several players can share a network. Change it on the
   System tab, or put the name in `/boot/hostname.txt` from a computer.
   The name is logged at startup; see `journalctl -u mp4m-webservice`.
+- **Network** (System tab): each Ethernet port and Wi-Fi gets its address automatically (DHCP)
+  or a fixed one (address/prefix, router, DNS servers). A change is tried straight away: open the
+  player again (at the new address if it changed) and choose Keep within 5 minutes, or it goes
+  back to the previous settings, as it does after a reboot. *Save for next start* saves without
+  trying it, for a network the player isn't on yet. The settings are kept in
+  `/boot/mp4m-network.json` and written into `/etc/dhcpcd.conf` and `wpa_supplicant.conf` when
+  the web interface starts; delete that file on a computer to go back to DHCP and Wi-Fi off.
+- **Wi-Fi** (System tab): look for networks, add one with its password (several can be saved),
+  forget one, turn Wi-Fi off. Passwords are kept as their WPA key (as `wpa_passphrase` makes
+  it), not as typed. Raspberry Pi OS keeps Wi-Fi blocked until a country is set; here it works
+  without one, on 2.4 GHz channels 1–11 only, which every country allows. Choosing the country
+  allows all of its channels, including 5 GHz. To set Wi-Fi up from a computer before the first
+  start, put this in `mp4m-network.json` on the boot partition (the password is replaced by its
+  key the next time the settings are saved in the web interface):
+  `{"wifi": {"country": "GB", "networks": [{"ssid": "Gallery", "password": "the password"}]}}`
 - **Read-only storage:** `/boot` and `/media/internal` stay read-only, and are only made
   writable while the web interface saves something.
 - **Video presets** only change the video lines in `/boot/config.txt`; other settings are kept.
@@ -128,7 +143,7 @@ Open `http://<network name>.local` in a browser on the same network.
   long it has been running and its serial number.
 
 Files the web interface may create in `/boot`: `mp4m-password.txt`, `hostname.txt`, `alsa.txt`,
-`mp4m-player.txt`, `mp4m-disabled.txt`, `mp4museum.py.new`. `mp4m-update.txt` is only read. It
+`mp4m-player.txt`, `mp4m-disabled.txt`, `mp4m-network.json`, `mp4museum.py.new`. `mp4m-update.txt` is only read. It
 also changes `config.txt` (Video tab) and `mp4museum.py` (Script tab, updates), and updates
 replace `mp4m-web/` (through `mp4m-web.new` and `mp4m-web.old`). Uploads and copies are written
 to the media partition as hidden `.upload-…` files first.
@@ -231,6 +246,8 @@ it says the card is ready, take it out; the next card put in shows up in the lis
   player and web interface), and the system as installed (not what is only in RAM now).
 - **Its own network name:** `hostname.txt` isn't copied, so the new player makes its name from
   its own serial number. Set a name in the web interface once it's running.
+- **No fixed addresses:** two players can't share one, so the card uses DHCP. Wi-Fi networks and
+  the Wi-Fi country are copied.
 - **Media files:** the media partition's files (not those on USB sticks), copied or left out (an
   empty media partition). Hidden files and folders, such as what a Mac leaves on a card
   (`.Spotlight-V100`, `._…`), aren't copied.

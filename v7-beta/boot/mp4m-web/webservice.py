@@ -6,7 +6,8 @@
 # modified 2026 in https://github.com/lotech/mp4museum (see git history):
 # split into modules and templates, login, per-player network name, read-only
 # partitions restored after writes, video presets that keep config.txt, player
-# controls and playlist, background update check
+# controls and playlist, background update check, network settings
+import copy
 import os
 import re
 import signal
@@ -20,6 +21,7 @@ from datetime import timedelta
 from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, g
 
 import clone
+import network
 import system
 import updater
 
@@ -158,6 +160,7 @@ def index():
     current_mode_key, current_mode = system.get_current_video_mode(config_text)
     free_space = system.get_free_space() if is_available else 0
     board = system.board_memory_megabytes()
+    network_view = network.view()
     # how the copies from USB sticks that have finished went
     for category, message in system.take_copy_results():
         flash(message, category)
@@ -181,7 +184,8 @@ def index():
                            gpu_mem_choices=system.gpu_mem_choices(board),
                            gpu_mem_recommended=system.recommended_gpu_mem(board),
                            memory_mb=system.memory_megabytes(),
-                           network_status=system.get_network_status(),
+                           network_status=system.get_network_status(network_view['addresses']),
+                           network=network_view,
                            device_info=system.get_device_info(),
                            display_info=system.get_display_info(),
                            current_sound_card=system.get_current_sound_card(),
@@ -877,6 +881,152 @@ def set_hostname():
     return redirect(url_for('index'))
 
 
+# ----- Network settings ----- #
+def wifi_settings(settings):
+    """The Wi-Fi part of settings, to change (made if Wi-Fi wasn't set up)."""
+    return settings.setdefault('wifi', {'enabled': True, 'country': '', 'networks': []})
+
+def try_network_change(settings, later=False, now_too=()):
+    """Use the changed settings: tried now and kept if the page is opened again (see
+    network.change), or saved for the next start. now_too: interfaces to use them on now even if
+    they were saved for the next start."""
+    now_too = set(now_too) & network.next_start_interfaces() if not later else set()
+    if network.normalize(settings) == network.target_settings() and not now_too and network.all_applied():
+        flash("Nothing changed.", "info")
+        return redirect(url_for('index'))
+    try:
+        if later:
+            network.save_for_next_start(settings)
+            flash("Saved. The player uses the new network settings from the next start.", "success")
+            return redirect(url_for('index'))
+        network.change(settings, now_too=now_too)
+    except Exception as e:
+        flash(f"Failed to change the network settings: {e}", "error")
+        return redirect(url_for('index'))
+    # where the player may be found afterwards: here, its name, a fixed address
+    addresses = [request.host_url, f"http://{socket.gethostname()}.local/"]
+    for setting in (network.normalize(settings).get('interfaces') or {}).values():
+        addresses.append(f"http://{setting['address'].split('/')[0]}/")
+    try:
+        with open(os.path.join(app.static_folder, 'style.css'), 'r') as f:
+            inline_css = f.read()
+    except OSError:
+        inline_css = ''
+    return render_template('network_changed.html', addresses=list(dict.fromkeys(addresses)),
+                           keep_minutes=network.KEEP_SECONDS // 60, wait=network.APPLY_DELAY + 6,
+                           inline_css=inline_css)
+
+@app.route('/network/address', methods=['POST'])
+def set_network_address():
+    name = request.form.get('interface', '')
+    if not network.INTERFACE_RE.match(name):
+        flash("Choose a network port.", "error")
+        return redirect(url_for('index'))
+    settings = copy.deepcopy(network.target_settings())
+    interfaces = settings.setdefault('interfaces', {})
+    if request.form.get('mode') == 'static':
+        try:
+            interfaces[name] = network.static_setting(request.form.get('address'), request.form.get('router'),
+                                                      request.form.get('dns'))
+        except ValueError as e:
+            flash(str(e), "error")
+            return redirect(url_for('index'))
+        # one network, two ports (the player would answer on both with the same address)
+        for other, setting in interfaces.items():
+            if other != name and setting['address'].split('/')[0] == interfaces[name]['address'].split('/')[0]:
+                flash(f"{other} has that address already.", "error")
+                return redirect(url_for('index'))
+    else:
+        interfaces.pop(name, None)
+    return try_network_change(settings, later=request.form.get('when') == 'later', now_too=[name])
+
+@app.route('/network/wifi/add', methods=['POST'])
+def add_wifi_network():
+    settings = copy.deepcopy(network.target_settings())
+    wifi = wifi_settings(settings)
+    ssid = request.form.get('ssid', '').strip('\r\n')
+    # (No password ticked: whatever is left in the field, or a browser filled in, isn't used)
+    password = request.form.get('password', '') if request.form.get('open') != '1' else ''
+    saved = next((n for n in wifi['networks'] if n['ssid'] == ssid), None)
+    try:
+        if not ssid.strip():
+            raise ValueError("Enter the Wi-Fi network's name.")
+        if not password and saved and saved.get('psk') and request.form.get('open') != '1':
+            # changed without typing the password again: the saved one stays
+            new = network.wifi_network(ssid, psk=saved['psk'], hidden=request.form.get('hidden') == '1')
+        else:
+            if not password and request.form.get('open') != '1':
+                raise ValueError("Enter the Wi-Fi password, or tick 'No password' for an open network.")
+            new = network.wifi_network(ssid, password=password, hidden=request.form.get('hidden') == '1')
+    except ValueError as e:
+        flash(str(e), "error")
+        return redirect(url_for('index'))
+    if not saved and len(wifi['networks']) >= network.MAX_WIFI_NETWORKS:
+        flash(f"Up to {network.MAX_WIFI_NETWORKS} Wi-Fi networks can be saved: forget one first.", "error")
+        return redirect(url_for('index'))
+    wifi['networks'] = [n for n in wifi['networks'] if n['ssid'] != ssid] + [new]
+    wifi['enabled'] = True
+    return try_network_change(settings)
+
+@app.route('/network/wifi/forget', methods=['POST'])
+def forget_wifi_network():
+    settings = copy.deepcopy(network.target_settings())
+    wifi = wifi_settings(settings)
+    ssid = request.form.get('ssid', '')
+    if not any(n['ssid'] == ssid for n in wifi['networks']):
+        flash("That Wi-Fi network isn't saved.", "error")
+        return redirect(url_for('index'))
+    wifi['networks'] = [n for n in wifi['networks'] if n['ssid'] != ssid]
+    return try_network_change(settings)
+
+@app.route('/network/wifi/country', methods=['POST'])
+def set_wifi_country():
+    country = request.form.get('country', '').strip().upper()
+    known = [code for code, name in network.countries()]
+    if country and (not network.COUNTRY_RE.match(country) or known and country not in known):
+        flash("Choose the country from the list.", "error")
+        return redirect(url_for('index'))
+    settings = copy.deepcopy(network.target_settings())
+    wifi_settings(settings)['country'] = country
+    return try_network_change(settings)
+
+@app.route('/network/wifi/power', methods=['POST'])
+def set_wifi_power():
+    settings = copy.deepcopy(network.target_settings())
+    wifi_settings(settings)['enabled'] = request.form.get('enabled') == 'on'
+    return try_network_change(settings)
+
+@app.route('/network/scan')
+def scan_wifi():
+    try:
+        return {'networks': network.scan()}
+    except ValueError as e:
+        return {'networks': [], 'error': str(e)}, 409
+
+@app.route('/network/keep', methods=['POST'])
+def keep_network():
+    try:
+        if network.keep():
+            flash("The new network settings are kept.", "success")
+        else:
+            flash("There was no change to keep: the player went back to the previous network settings.", "error")
+    except network.NotApplied as e:
+        if e.args:
+            flash(f"The new network settings didn't work ({'; '.join(e.args[0])}), so they can't be kept. "
+                  "Undo, or change them.", "error")
+        else:
+            flash("The new network settings are still being applied: try Keep again in a moment.", "error")
+    except Exception as e:
+        flash(f"Failed to save the network settings: {e}", "error")
+    return redirect(url_for('index'))
+
+@app.route('/network/undo', methods=['POST'])
+def undo_network():
+    if network.undo():
+        flash("Back to the previous network settings.", "success")
+    return redirect(url_for('index'))
+
+
 # ----- Software update ----- #
 # The page checks for updates by itself when it is opened, at most this often (seconds),
 # and quietly: a player without internet just doesn't show one
@@ -1128,5 +1278,8 @@ if __name__ == '__main__':
         print(f"Network name: {name}.local", flush=True)
     else:
         print(f"Failed to set network name {name}: {output}", flush=True)
+    # Fixed addresses and Wi-Fi from /boot/mp4m-network.json (in a thread: a command that hangs
+    # mustn't keep the web interface from starting)
+    threading.Thread(target=network.apply_at_start, daemon=True).start()
     # Run on all available IPs on port 80
     app.run(host='0.0.0.0', port=80, debug=False)

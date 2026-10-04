@@ -28,6 +28,8 @@ This fork copies the v7 beta files off a running install and develops them furth
   card, and file names are checked.
 - **Login** with a password (default `mp4museum`), changeable in the web interface.
 - **A network name per player** (`mp4museum-xxxx.local`), so several players can share a network.
+- **Network settings:** a fixed address or DHCP for Ethernet and Wi-Fi, Wi-Fi networks and the
+  Wi-Fi country (safe channels until one is chosen). Changes go back by themselves unless kept.
 - **A new web interface design:** a player with Previous, Pause/Resume, Next and Rewind and how
   far the file has got; a playlist that fills the window, to start, rename, download, delete or
   switch off any file; uploads with progress; messages that don't push the page around; and an

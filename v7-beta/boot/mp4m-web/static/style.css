@@ -1105,6 +1105,49 @@ select {
   margin-right: 6px;
 }
 
+/* ----- Network ----- */
+.network-bar {
+  background: #3a2f17;
+  border-color: #6b5420;
+  color: #ffe3a8;
+}
+
+.network-port + .network-port {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+#network .address-form, #wifi .setting, #wifi .choice-list, .wifi-address {
+  margin-top: 14px;
+}
+
+.address-fields {
+  display: grid;
+  max-width: 340px;
+  margin-top: 12px;
+}
+
+.address-fields label {
+  margin: 8px 0 6px;
+}
+
+.address-form .button-row, .wifi-form > div:last-child {
+  margin-top: 12px;
+}
+
+.checkbox-row {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.checkbox-row label {
+  margin: 0;
+  font-weight: normal;
+}
+
 /* how making an SD card went */
 .result-box {
   display: flex;
