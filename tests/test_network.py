@@ -414,6 +414,44 @@ def test_running_out_doesnt_undo_a_newer_change(ports):
     assert network.undo() and network.pending() is None
 
 
+def test_going_back_is_tried_again_if_it_fails(ports, client, monkeypatch):
+    """dhcpcd fails as the previous settings come back: tried again, and the page says so."""
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    failing = {'dhcpcd': True}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        return (False, 'timed out') if cmd[0] == 'dhcpcd' and failing['dhcpcd'] else (True, '')
+    monkeypatch.setattr(system, 'run_command', run)
+    ports.commands.clear()
+    network.undo()
+    assert network.rollback() == {'problems': ['dhcpcd -n enxb827eb4e4fd4: timed out'], 'retrying': True}
+    assert "Couldn't go back to the previous network settings" in client.get('/').data.decode()
+    # tried again: dhcpcd.conf has the previous settings already, the commands are run again
+    ports.commands.clear()
+    ports.run_later(network.ROLLBACK_RETRY)
+    assert ['dhcpcd', '-n', 'enxb827eb4e4fd4'] in ports.commands
+    assert ['ip', 'addr', 'del', '192.168.1.50/24', 'dev', 'enxb827eb4e4fd4'] in ports.commands
+    failing['dhcpcd'] = False
+    ports.run_later(network.ROLLBACK_RETRY)
+    assert network.rollback() is None and ports.later == []
+
+
+def test_going_back_gives_up_and_a_new_change_stops_it(ports, monkeypatch):
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[0] != 'dhcpcd', 'failed'))
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    network.undo()
+    while ports.later:
+        ports.run_later()
+    assert network.rollback() == {'problems': ['dhcpcd -n enxb827eb4e4fd4: failed'], 'retrying': False}
+    assert ports.later == []
+    network.undo()          # nothing waiting
+    network.change(FIXED)
+    assert network.rollback() is None
+
+
 def test_save_for_the_next_start(ports):
     network.save_for_next_start(FIXED)
     assert saved(ports) == FIXED and commands(ports) == [] and 'ip_address' not in dhcpcd(ports)

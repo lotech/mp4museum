@@ -96,7 +96,9 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   starts (`apply_at_start`, in a thread) and on a change, so they need no file outside `/boot`.
 - A change from the page (`network.change`) is applied after `APPLY_DELAY` (the page saying
   where to find the player is sent first) and only saved to `/boot` by `keep()`; after
-  `KEEP_SECONDS` without it, `undo()` puts the saved settings back. A reboot does the same.
+  `KEEP_SECONDS` without it, `undo()` puts the saved settings back (tried again if a command
+  fails, `ROLLBACK_TRIES`; the page then says to reboot). A reboot does the same. Network
+  commands stop after `COMMAND_TIMEOUT`.
   *Save for next start* saves without using it: those interfaces are listed in `/run`
   (`NEXT_START_FILE`), so a restart of the web interface (updates) doesn't use them yet.
 - Without a Wi-Fi country, Wi-Fi only uses 2.4 GHz channels 1-11 (`freq_list`): the Pi 3 B's

@@ -54,6 +54,9 @@ APPLY_DELAY = 2
 MAX_WIFI_NETWORKS = 10
 # seconds before a network command is stopped (a scan takes a few)
 COMMAND_TIMEOUT = 30
+# going back to the previous settings is tried this many times, this many seconds apart
+ROLLBACK_TRIES = 3
+ROLLBACK_RETRY = 30
 
 INTERFACE_RE = re.compile(r'^[A-Za-z0-9_.-]{1,15}$')
 COUNTRY_RE = re.compile(r'^[A-Z]{2}$')
@@ -293,8 +296,10 @@ def _run(cmd, problems):
         problems.append(f"{' '.join(cmd)}: {output or 'failed'}")
     return ok, output
 
-def _apply(settings, at_start=False):
-    """Write the settings into /etc and use them now. Returns what went wrong (a list of lines)."""
+def _apply(settings, at_start=False, again=None):
+    """Write the settings into /etc and use them now. Returns what went wrong (a list of lines).
+    again: settings that may still be partly in use (an attempt to go back to these failed), so
+    what differs is done again even if /etc has these already."""
     problems = []
     current = _read(DHCPCD_CONF)
     if current is None:
@@ -302,6 +307,8 @@ def _apply(settings, at_start=False):
             problems.append(f"{DHCPCD_CONF} not found: fixed addresses need dhcpcd.")
     else:
         base, old = split_dhcpcd_conf(current)
+        if again is not None:
+            old = split_dhcpcd_conf(dhcpcd_block(again))[1]
         block = dhcpcd_block(settings)
         if block:
             text = base.rstrip('\n') + '\n\n' + block
@@ -352,7 +359,8 @@ def _apply(settings, at_start=False):
             pass
     else:
         text = current
-    if interface and text != current or interface and wifi and at_start:
+    again_wifi = again is not None and wifi and again.get('wifi') != wifi
+    if interface and (text != current or wifi and at_start or again_wifi):
         if wifi and not wifi['enabled'] or not wifi and block:
             _run(['rfkill', 'block', 'wifi'], problems)
         else:
@@ -390,6 +398,10 @@ _apply_lock = threading.Lock()
 # put in use), finished (in use), changed (anything other than the saved settings has been used
 # since), problems, and the timers
 _pending = {}
+# going back to the previous settings that failed: problems, tries, and the timer to try again
+_rollback = {}
+# counts the changes made: a retry of going back is dropped if one was made since it was planned
+_generation = [0]
 # the settings in /etc now (None: not known yet, the saved ones)
 _in_use = {'settings': None}
 # interfaces saved with an address for the next start (Save for next start): {name: the setting
@@ -403,11 +415,14 @@ def _later(seconds, function):
     timer.start()
     return timer
 
-def _use(settings, at_start=False, now_too=()):
+def _use(settings, at_start=False, now_too=(), again=None, generation=None):
     """Apply settings, but an interface saved for the next start keeps what it uses until then,
     unless these settings change it or it is in now_too (Apply chosen for it). Returns what went
-    wrong."""
+    wrong. again: see _apply. generation: nothing is done (None returned) if a change has been
+    made since that one (_generation)."""
     with _apply_lock:
+        if generation is not None and generation != _generation[0]:
+            return None
         if at_start:
             _next_start.clear()
             # the web interface started again, not the Pi: still for the next start
@@ -425,7 +440,7 @@ def _use(settings, at_start=False, now_too=()):
             now.pop('interfaces', None)
             if interfaces:
                 now['interfaces'] = interfaces
-        problems = _apply(now, at_start=at_start or _in_use['settings'] is None)
+        problems = _apply(now, at_start=at_start or _in_use['settings'] is None, again=again)
         _in_use['settings'] = now
         return problems
 
@@ -484,6 +499,8 @@ def change(settings, now_too=()):
     within KEEP_SECONDS. now_too: interfaces to use them on now even if saved for the next start."""
     settings = normalize(settings)
     with _lock:
+        _generation[0] += 1
+        _stop_rollback()
         previous = _pending['previous'] if _pending else read_settings()
         changed = bool(_pending) and _pending['changed']
         now_too = set(now_too) | (_pending['now_too'] if _pending else set())
@@ -548,9 +565,36 @@ def undo(token=None):
         changed = _pending['changed']
         previous = _pending['previous']
         _pending.clear()
+        generation = _generation[0]
     if changed:
-        _use(previous)
+        _roll_back(previous, _in_use['settings'], 1, generation)
     return True
+
+def _roll_back(previous, tried, tries, generation):
+    """Use the previous settings again; if that fails, try again (tried: what may still be in use)."""
+    problems = _use(previous, again=tried if tries > 1 else None, generation=generation)
+    with _lock:
+        if problems is None or generation != _generation[0]:
+            # a change made since
+            return
+        _stop_rollback()
+        if problems:
+            print(f"Network settings: going back to the previous ones failed (try {tries} of {ROLLBACK_TRIES})", flush=True)
+            _rollback.update(problems=problems, tries=tries)
+            if tries < ROLLBACK_TRIES:
+                _rollback['timer'] = _later(ROLLBACK_RETRY, lambda: _roll_back(previous, tried, tries + 1, generation))
+
+def _stop_rollback():
+    if _rollback.get('timer'):
+        _rollback['timer'].cancel()
+    _rollback.clear()
+
+def rollback():
+    """{'problems', 'retrying'} if going back to the previous settings failed, else None."""
+    with _lock:
+        if not _rollback:
+            return None
+        return {'problems': list(_rollback['problems']), 'retrying': _rollback['tries'] < ROLLBACK_TRIES}
 
 def save_for_next_start(settings):
     """Save settings to /boot without using them now (for a network the player isn't on yet)."""
@@ -751,4 +795,5 @@ def view():
         'dns': dns_servers(),
         'countries': countries(),
         'pending': pending(),
+        'rollback': rollback(),
     }

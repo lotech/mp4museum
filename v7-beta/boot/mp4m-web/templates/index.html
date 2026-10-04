@@ -47,6 +47,13 @@
   </form>
   <button type="button" class="icon-button" onclick="hideUpdateBar()" title="Hide until the page is opened again" aria-label="Hide">{{ icon('x') }}</button>
 </div>
+{% if network.rollback %}
+<div class="update-bar network-bar" role="alert">
+  {{ icon('triangle-alert') }}
+  <span class="update-text">Couldn't go back to the previous network settings ({{ network.rollback.problems|join('; ') }}).
+    {% if network.rollback.retrying %}Trying again. {% endif %}Rebooting the player uses the saved settings.</span>
+</div>
+{% endif %}
 {% if network.pending %}
 <div id="networkBar" class="update-bar network-bar" data-seconds="{{ network.pending.seconds }}">
   {{ icon('network') }}

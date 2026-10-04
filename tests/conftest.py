@@ -170,6 +170,8 @@ def pi(tmp_path, monkeypatch):
         '_pending': {},
         '_in_use': {'settings': None},
         '_next_start': {},
+        '_rollback': {},
+        '_generation': [0],
     }.items():
         monkeypatch.setattr(network, name, value)
     real = [name for name, value in vars(network).items()
