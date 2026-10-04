@@ -516,26 +516,6 @@
           <div><button type="submit" class="button">Add</button></div>
         </form>
 
-        <form method="post" action="{{ url_for('set_wifi_country') }}" class="setting">
-          <label for="wifi_country">Country</label>
-          <div class="input-row">
-            {% if network.countries %}
-            <select name="country" id="wifi_country">
-              <option value=""{% if not wifi.country %} selected{% endif %}>Not set: channels allowed everywhere</option>
-              {% for code, name in network.countries %}
-              <option value="{{ code }}"{% if code == wifi.country %} selected{% endif %}>{{ name }}</option>
-              {% endfor %}
-            </select>
-            {% else %}
-            <input type="text" name="country" id="wifi_country" value="{{ wifi.country }}" maxlength="2" class="narrow"
-                   placeholder="GB" pattern="[A-Za-z]{2}" title="Two letters, e.g. GB, US, DE">
-            {% endif %}
-            <button type="submit" class="button">Save</button>
-          </div>
-        </form>
-        <p class="hint">Without a country, Wi-Fi only uses 2.4 GHz channels 1–11, which every country allows.
-          Choose where the player is to use all of that country's channels, including 5 GHz networks.</p>
-
         {% if network.available %}
         <details class="wifi-address"{% if port.setting.mode == 'static' %} open{% endif %}>
           <summary>Wi-Fi address: {{ 'fixed' if port.setting.mode == 'static' else 'automatic (DHCP)' }}</summary>
@@ -553,6 +533,33 @@
         <p class="hint">Passwords are kept as Wi-Fi keys, not as typed. Clone to another device copies the Wi-Fi networks.</p>
         {% endif %}
       </section>
+
+      {% if network.wifi_interface %}
+      {# set once where the player is, then hardly needed again #}
+      <section class="card" id="wifiCountry">
+        <h3>{{ icon('wifi') }}Wi-Fi country</h3>
+        {% set wifi = network.wifi %}
+        <form method="post" action="{{ url_for('set_wifi_country') }}" class="setting">
+          <label for="wifi_country" class="visually-hidden">Wi-Fi country</label>
+          <div class="input-row">
+            {% if network.countries %}
+            <select name="country" id="wifi_country">
+              <option value=""{% if not wifi.country %} selected{% endif %}>Not set: channels allowed everywhere</option>
+              {% for code, name in network.countries %}
+              <option value="{{ code }}"{% if code == wifi.country %} selected{% endif %}>{{ name }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <input type="text" name="country" id="wifi_country" value="{{ wifi.country }}" maxlength="2" class="narrow"
+                   placeholder="GB" pattern="[A-Za-z]{2}" title="Two letters, e.g. GB, US, DE">
+            {% endif %}
+            <button type="submit" class="button">Save</button>
+          </div>
+        </form>
+        <p class="hint">Without a country, Wi-Fi only uses 2.4 GHz channels 1–11, which every country allows.
+          Choose where the player is to use all of that country's channels, including 5 GHz networks.</p>
+      </section>
+      {% endif %}
     </div>
   </div>
 </div>

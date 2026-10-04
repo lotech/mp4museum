@@ -798,6 +798,9 @@ def test_network_settings_have_their_own_tab(ports, client):
     for card in ('Network name</h3>', 'Ethernet</h3>', 'Wi-Fi</h3>'):
         assert card in network_tab and card not in system_tab
     assert 'Password</h3>' in system_tab
+    # the Wi-Fi country, set once, is the last setting on the tab
+    assert network_tab.index('id="wifiCountry"') > network_tab.index('Turn Wi-Fi off')
+    assert network_tab.rindex('<section') == network_tab.index('id="wifiCountry"') - len('<section class="card" ')
 
 
 def test_network_in_use_card(ports, client, monkeypatch):
