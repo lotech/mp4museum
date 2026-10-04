@@ -10,6 +10,13 @@ part() { # image, number -> a loop device on that partition
   read start size <<<$(sfdisk -J "$1" | python3 -c "import json,sys; p=[x for x in json.load(sys.stdin)['partitiontable']['partitions'] if x['node'].endswith('$2')][0]; print(p['start'], p['size'])")
   losetup -f --show -o $((start*512)) --sizelimit $((size*512)) "$1"
 }
+P1=; P2=; P3=
+cleanup() { # also when a step fails: nothing left mounted or attached
+  mountpoint -q m 2>/dev/null && umount m
+  for p in "$P1" "$P2" "$P3"; do [ -n "$p" ] && losetup -d "$p" 2>/dev/null; done
+  return 0
+}
+trap cleanup EXIT
 P1=$(part source.img 1); P2=$(part source.img 2); P3=$(part source.img 3)
 mkfs.vfat -n boot "$P1" >/dev/null; mkfs.ext4 -q -F -L rootfs "$P2"; mkfs.exfat -L Media "$P3" >/dev/null
 mkdir -p m
@@ -26,5 +33,4 @@ mount.exfat-fuse "$P3" m
 head -c 30M /dev/urandom > m/clip-loop.mp4; head -c 5M /dev/urandom > 'm/02 Artist statement.mp3'
 mkdir -p m/.Spotlight-V100; echo mac > m/.Spotlight-V100/store; touch m/.upload-abc
 umount m; sleep 0.5
-losetup -d "$P1" "$P2" "$P3"
 echo ok

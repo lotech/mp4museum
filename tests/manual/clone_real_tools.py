@@ -80,12 +80,18 @@ clone.ROOT_MIN, clone.ROOT_ROOM = 48 * 1024 ** 2, 16 * 1024 ** 2
 clone.USBMOUNT_CONF = os.path.join(HERE, 'usbmount.conf')
 with open(clone.USBMOUNT_CONF, 'w') as f:
     f.write('ENABLED=1\nMOUNTPOINTS="/media/usb0"\n')
-media = os.path.join(HERE, 'srcmedia')
-os.makedirs(media, exist_ok=True)
-real_run(['mount.exfat-fuse', '-o', 'ro', part(clone.SOURCE_DISK, 3), media])
-system.MEDIA_PATH = media
-system.LOCK_DIR = os.path.join(HERE, 'locks')
-os.makedirs(system.LOCK_DIR, exist_ok=True)
+def unmount(path):
+    if os.path.ismount(path):
+        subprocess.run(['umount', path])
+        time.sleep(.3)
+
+
+def detach_all():
+    for device in loops.values():
+        subprocess.run(['losetup', '-d', device])
+    loops.clear()
+
+
 steps = []
 
 
@@ -96,36 +102,37 @@ def progress(**changes):
         steps.append(changes['step'])
 
 
+media = os.path.join(HERE, 'srcmedia')
+check = os.path.join(HERE, 'check')
+system.LOCK_DIR = os.path.join(HERE, 'locks')
+for folder in (media, check, system.LOCK_DIR):
+    os.makedirs(folder, exist_ok=True)
+system.MEDIA_PATH = media
 card = {'device': os.path.join(HERE, 'target.img'), 'size': target_size, 'id': 'x'}
 clone.list_cards = lambda: [card]
+# (also when the clone fails: nothing left mounted or attached)
 try:
+    real_run(['mount.exfat-fuse', '-o', 'ro', part(clone.SOURCE_DISK, 3), media])
     clone.clone(card, with_media, progress=progress)
     print('steps:', steps)
 finally:
-    subprocess.run(['umount', media])
-    time.sleep(.3)
+    unmount(media)
+    detach_all()
 
 print(subprocess.run(['sfdisk', '-d', 'target.img'], stdout=subprocess.PIPE, universal_newlines=True).stdout)
-for device in loops.values():
-    subprocess.run(['losetup', '-d', device])
-loops.clear()
-check = os.path.join(HERE, 'check')
-os.makedirs(check, exist_ok=True)
-real_run(['fusefat', '-o', 'ro', part('target.img', 1), check])
-with open(os.path.join(check, 'cmdline.txt')) as f:
-    print('boot:', sorted(os.listdir(check)), '|', f.read().strip())
-real_run(['umount', check])
-time.sleep(.3)
-real_run(['mount', '-o', 'ro', part('target.img', 2), check])
-with open(os.path.join(check, 'etc', 'fstab')) as f:
-    print('fstab:', f.read().replace('\n', ' | '))
-print('dhcpcd5:', sorted(os.listdir(os.path.join(check, 'var', 'lib', 'dhcpcd5'))))
-real_run(['umount', check])
-time.sleep(.3)
-real_run(['mount.exfat-fuse', '-o', 'ro', part('target.img', 3), check])
-print('media:', sorted(os.listdir(check)), shutil.disk_usage(check).total // 1024 ** 2, 'MB')
-real_run(['umount', check])
-time.sleep(.3)
-for device in loops.values():
-    subprocess.run(['losetup', '-d', device])
+try:
+    real_run(['fusefat', '-o', 'ro', part('target.img', 1), check])
+    with open(os.path.join(check, 'cmdline.txt')) as f:
+        print('boot:', sorted(os.listdir(check)), '|', f.read().strip())
+    unmount(check)
+    real_run(['mount', '-o', 'ro', part('target.img', 2), check])
+    with open(os.path.join(check, 'etc', 'fstab')) as f:
+        print('fstab:', f.read().replace('\n', ' | '))
+    print('dhcpcd5:', sorted(os.listdir(os.path.join(check, 'var', 'lib', 'dhcpcd5'))))
+    unmount(check)
+    real_run(['mount.exfat-fuse', '-o', 'ro', part('target.img', 3), check])
+    print('media:', sorted(os.listdir(check)), shutil.disk_usage(check).total // 1024 ** 2, 'MB')
+finally:
+    unmount(check)
+    detach_all()
 print('work folders left:', [name for name in os.listdir(HERE) if name.startswith(clone.WORK_PREFIX)])
