@@ -1228,6 +1228,13 @@ def test_copy_and_upload_rename_under_one_lock(pi, client, stick, monkeypatch):
     client.post('/upload', data={'file': (io.BytesIO(b'up'), 'upload.mp4')}, content_type='multipart/form-data')
     assert (pi.media / 'upload.mp4').read_bytes() == b'up'
     assert renamed == [True, True]
+    # and a rename in the web interface (to the name a copy is about to use)
+    held = []
+    real_rename = os.rename
+    monkeypatch.setattr(system.os, 'rename', lambda src, dst: (held.append(system.media_rename_lock.locked()),
+                                                               real_rename(src, dst)))
+    client.post('/rename', data={'filename': 'upload.mp4', 'new_name': 'renamed.mp4'})
+    assert held == [True] and (pi.media / 'renamed.mp4').exists()
 
 
 @pytest.mark.parametrize('name', ['b.mp4', '../usb0/film.mp4', '/etc/passwd'])

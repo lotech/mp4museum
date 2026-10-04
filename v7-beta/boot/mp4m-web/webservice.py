@@ -614,7 +614,6 @@ def switch_file():
     return redirect(url_for('index'))
 
 
-_rename_lock = threading.Lock()
 
 @app.route('/rename', methods=['POST'])
 def rename_file():
@@ -631,8 +630,9 @@ def rename_file():
         return redirect(url_for('index'))
     old_path = os.path.join(system.MEDIA_PATH, filename)
     new_path = os.path.join(system.MEDIA_PATH, new_name)
-    # one at a time, so two renames to the same name can't overwrite a file
-    with _rename_lock:
+    # one at a time, and not while an upload or a copy from a USB stick is renamed into place,
+    # so none can overwrite a file another has just put there
+    with system.media_rename_lock:
         if not os.path.isfile(old_path):
             flash("File not found.", "error")
             return redirect(url_for('index'))

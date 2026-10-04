@@ -995,7 +995,8 @@ def remove_stale_uploads():
         except OSError:
             pass
 
-# Held while a finished upload or copy is renamed into place on the media partition
+# Held while a file is renamed on the media partition, or a finished upload or copy renamed
+# into place
 media_rename_lock = threading.Lock()
 
 # Files being copied from USB sticks (lower-case names: exFAT doesn't tell case apart), and how
