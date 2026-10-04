@@ -18,7 +18,9 @@ cleanup() { # also when a step fails: nothing left mounted or attached
 }
 trap cleanup EXIT
 P1=$(part source.img 1); P2=$(part source.img 2); P3=$(part source.img 3)
-mkfs.vfat -n boot "$P1" >/dev/null; mkfs.ext4 -q -F -L rootfs "$P2"; mkfs.exfat -L Media "$P3" >/dev/null
+# the exFAT label is -n with exfat-utils (Buster's), -L with exfatprogs: as clone._mkfs_exfat()
+if mkfs.exfat --help 2>&1 | grep -q -- --volume-label; then exfat_label=-L; else exfat_label=-n; fi
+mkfs.vfat -n boot "$P1" >/dev/null; mkfs.ext4 -q -F -L rootfs "$P2"; mkfs.exfat $exfat_label Media "$P3" >/dev/null
 mkdir -p m
 fusefat -o rw+ "$P1" m
 printf 'console=tty1 root=PARTUUID=18512e38-02 rootfstype=ext4 boot=overlay\n' > m/cmdline.txt
