@@ -460,7 +460,7 @@
         <p class="hint">{{ clone_unavailable }}</p>
         {% else %}
         {# the cards are listed again by the page's script as they're put in and taken out #}
-        <p class="current" id="cloneNoCard" {% if clone_cards %}hidden{% endif %}>Plug a USB SD card reader with a card into the Pi.</p>
+        <p class="current" id="cloneNoCard" {% if clone_cards or clone_state.running %}hidden{% endif %}>Plug a USB SD card reader with a card into the Pi.</p>
         <form method="post" action="{{ url_for('clone_card') }}" class="setting" id="cloneForm"
               {% if clone_state.running or not clone_cards %}hidden{% endif %} onsubmit="return confirmClone(this)">
           <label for="clone_device">Card</label>

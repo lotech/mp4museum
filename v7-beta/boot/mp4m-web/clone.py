@@ -18,6 +18,7 @@ import random
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import tempfile
 import threading
@@ -248,6 +249,15 @@ def start(device, with_media, identity=None):
     card = next((c for c in list_cards() if c['device'] == device), None)
     if not card:
         raise CloneError("That card isn't in a USB reader any more.")
+    try:
+        with open(os.path.join(SYS_BLOCK, os.path.basename(device), 'queue', 'logical_block_size'), 'r') as f:
+            sector = int(f.read())
+    except (OSError, ValueError):
+        sector = SECTOR
+    if sector != SECTOR:
+        # the partitions are planned in 512-byte sectors
+        raise CloneError("This card reader can't be used for copying (its sectors aren't 512 bytes). "
+                         "Try another reader.")
     if identity is not None and card['id'] != identity:
         # something else has been plugged in since the page was loaded
         raise CloneError(f"{device} isn't the card that was chosen any more. Choose it again.")
@@ -293,7 +303,9 @@ def clone(card, with_media, progress=_set):
     layout = plan(card['size'], root_used, media_used, with_media, parts[0][1])
     new_id = disk_id
     while new_id == disk_id:
-        new_id = '%08x' % random.randrange(1, 2 ** 32)
+        # below 0x80000000: Buster's sfdisk (util-linux 2.33) reads label-id as a signed number on
+        # the Pi's 32-bit system, and quietly picks a random ID for one that doesn't fit
+        new_id = '%08x' % random.randrange(1, 2 ** 31)
     work = tempfile.mkdtemp(prefix=WORK_PREFIX, dir=TEMP_DIR)
     usbmount = _stop_automount()
     mounted = []
@@ -339,9 +351,10 @@ def clone(card, with_media, progress=_set):
             # e.g. a file on it still open: sfdisk leaves the card as it was
             raise CloneError(f"The card is in use, so it wasn't changed. Take it out, put it back in and "
                              f"try again. ({e})")
-        # Buster's sfdisk (util-linux 2.33) gives a new table a random disk ID, whatever label-id
-        # says: set it on its own, and make sure it's the one cmdline.txt and fstab will name
-        run(['sfdisk', '--disk-id', device, '0x' + new_id])
+        # the disk ID cmdline.txt and fstab will name, or the card won't start: written into the
+        # partition table itself if sfdisk didn't use it (its --disk-id came after Buster's)
+        if _disk_id(device) != new_id:
+            write_disk_id(device, new_id)
         if _disk_id(device) != new_id:
             raise CloneError("The card's partitions didn't get their new ID, so nothing was copied to it. "
                              "Take it out, put it back in and try again.")
@@ -443,12 +456,24 @@ def _disk_id(device):
         return None
 
 
+def write_disk_id(device, disk_id):
+    """Put a disk ID into a DOS partition table (the 4 bytes at 440, little-endian)."""
+    with open(device, 'r+b') as f:
+        f.seek(440)
+        f.write(struct.pack('<I', int(disk_id, 16)))
+        f.flush()
+        os.fsync(f.fileno())
+
+
 def _reread_partitions(device, message, tries=10):
     """Have Linux read the card's partition table again. It only can once nothing has the card
     open, so this also shows it's free; tried for a while, then CloneError(message)."""
     for attempt in range(tries):
         try:
             run(['blockdev', '--rereadpt', device])
+            # udev looks at the partitions it finds (opening them): done before going on, or
+            # sfdisk would find the card in use
+            run(['udevadm', 'settle'])
             return
         except CloneError:
             if attempt == tries - 1:

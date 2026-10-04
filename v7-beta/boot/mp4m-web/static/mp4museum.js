@@ -534,10 +534,11 @@ function confirmClone(form) {
   return confirm('Erase everything on the ' + card + ' card and copy this player to it?');
 }
 
-function showCards(cards) {
-  // the cards in USB readers now: one taken out goes, the next one put in comes
+function showCards(cards, running) {
+  // the cards in USB readers now: one taken out goes, the next one put in comes. (While one is
+  // being made it isn't listed: it's in use.)
   const select = document.getElementById('clone_device');
-  if (!select || !cards) {
+  if (!select || !cards || running) {
     return;
   }
   const values = cards.map(card => card.value);
@@ -561,7 +562,7 @@ function showCards(cards) {
 function showClone(state) {
   const running = state.running;
   document.getElementById('cloneProgress').hidden = !running;
-  const anyCard = showCards(state.cards);
+  const anyCard = showCards(state.cards, running);
   const form = document.getElementById('cloneForm');
   if (form) form.hidden = running || anyCard === false;
   document.getElementById('cloneStep').textContent = state.step + '…';
@@ -586,18 +587,31 @@ function showClone(state) {
 }
 
 function followClone() {
-  // often while a card is made; otherwise every few seconds while the System tab is open, for
+  // often while a card is made; otherwise every few seconds while the System tab is shown, for
   // cards put in and taken out
   const card = document.getElementById('clone');
-  if (!card.offsetParent) {
+  if (!card.offsetParent || document.hidden) {
     setTimeout(followClone, 3000);
     return;
   }
   fetch(card.dataset.statusUrl, {headers: {'X-Requested-With': 'fetch'}, cache: 'no-store'})
-    .then(response => response.ok ? response.json() : null)
+    .then(response => {
+      if (response.status === 401) {
+        // logged out: the login page
+        location.reload();
+        return null;
+      }
+      return response.ok ? response.json() : undefined;
+    })
     .then(state => {
-      if (state) {
-        setTimeout(followClone, showClone(state) ? 1500 : 3000);
+      if (state === undefined) {
+        setTimeout(followClone, 5000);
+      } else if (state) {
+        const running = showClone(state);
+        // (no card list when copying isn't available: nothing to follow then)
+        if (running || document.getElementById('clone_device')) {
+          setTimeout(followClone, running ? 1500 : 3000);
+        }
       }
     })
     .catch(() => setTimeout(followClone, 5000));

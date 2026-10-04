@@ -51,7 +51,8 @@ class Disks:
         self.busy = 0                   # times blockdev --rereadpt finds the card in use
         self.new_table = None
         self.kernel_keeps_old_table = False
-        self.disk_id_ignored = False
+        self.disk_id_ignored = False     # the ID written into the table doesn't take
+        self.label_id_ignored = False    # sfdisk doesn't use the script's label-id
         # what Linux sees: the card's old partitions (a 31.9 GB card's image, past this card's end)
         self.sys = tmp_path / 'sys-block' / 'sda'
         self.write_sys([(8192, 524288), (19081216, 41504768), (532480, 18548736)])
@@ -86,6 +87,12 @@ class Disks:
         monkeypatch.setattr(clone, 'partition', self.partition)
         monkeypatch.setattr(clone, '_copy_tree', self.copy_tree)
         monkeypatch.setattr(clone, '_player_leaves', lambda mount_points: None)
+        monkeypatch.setattr(clone, 'write_disk_id', self.write_disk_id)
+
+    def write_disk_id(self, device, disk_id):
+        self.pi.commands.append(['write_disk_id', device, disk_id])
+        if not self.disk_id_ignored:
+            self.card_id = disk_id
 
     def write_sys(self, partitions):
         self.sys.mkdir(parents=True, exist_ok=True)
@@ -119,13 +126,14 @@ class Disks:
             raise clone.CloneError(cmd[0] + ': failed')
         if cmd[0] == 'sfdisk' and cmd[1] == '-J':
             return table(SOURCE_ID if cmd[2] == clone.SOURCE_DISK else self.card_id)
-        if cmd[0] == 'sfdisk' and cmd[1] == '--disk-id':
-            if not self.disk_id_ignored:
-                self.card_id = cmd[3][2:]
-            return ''
+        if cmd[0] == 'sfdisk' and cmd[1].startswith('--') and cmd[1] not in ('--wipe',):
+            # Buster's sfdisk (2.33) has no --disk-id
+            raise clone.CloneError("sfdisk: unrecognized option '%s'" % cmd[1])
         if cmd[0] == 'sfdisk':
-            # as Buster's sfdisk does: a random disk ID, not the script's label-id
-            self.card_id = '9af45d4d'
+            # as Buster's sfdisk does on the Pi's 32-bit system: label-id is read as a signed
+            # number, and one that doesn't fit gets a random disk ID
+            label_id = int(input.split('label-id: 0x')[1][:8], 16)
+            self.card_id = '9af45d4d' if label_id >= 2 ** 31 or self.label_id_ignored else '%08x' % label_id
             self.sfdisk_input = input
             with open(clone.USBMOUNT_CONF) as f:
                 self.automount_while_partitioning = f.read()
@@ -248,8 +256,9 @@ def test_copies_this_player_to_the_card(pi, disks):
     # boot partition: copied as it is, then given the new ID and no network name
     assert (disks.dev / 'sda1').read_bytes() == (disks.dev / 'mmcblk0p1').read_bytes()
     assert 'root=PARTUUID=%s-02 ' % new_id in (disks.dev / 'sda1.d' / 'cmdline.txt').read_text()
-    # the card's partition table has that ID too (Buster's sfdisk ignores label-id: it's set apart)
-    assert ['sfdisk', '--disk-id', '/dev/sda', '0x' + new_id] in pi.commands and disks.card_id == new_id
+    # the card's partition table has that ID too: below 0x80000000, which Buster's sfdisk takes
+    assert disks.card_id == new_id and int(new_id, 16) < 2 ** 31
+    assert not [cmd for cmd in pi.commands if cmd[0] == 'write_disk_id']
     assert not (disks.dev / 'sda1.d' / 'hostname.txt').exists()
     # system: a new ext4 partition with the files, its fstab changed, no DHCP lease
     assert ['mkfs.ext4', '-F', '-q', '-L', 'rootfs', disks.partition('/dev/sda', 2)] in pi.commands
@@ -280,9 +289,26 @@ def test_new_partitions_are_checked_before_anything_is_written(pi, disks):
     assert disks.mounted() == []
 
 
+def test_disk_id_written_into_the_table_if_sfdisk_didnt_use_it(pi, disks):
+    disks.label_id_ignored = True
+    clone.clone(CARD, with_media=False)
+    new_id = disks.sfdisk_input.split('label-id: 0x')[1][:8]
+    assert ['write_disk_id', '/dev/sda', new_id] in pi.commands and disks.card_id == new_id
+    assert 'root=PARTUUID=%s-02 ' % new_id in (disks.dev / 'sda1.d' / 'cmdline.txt').read_text()
+
+
+def test_write_disk_id(tmp_path):
+    # a DOS partition table's disk ID: 4 bytes at 440, little-endian
+    disk = tmp_path / 'disk'
+    disk.write_bytes(b'\0' * 1024)
+    clone.write_disk_id(str(disk), '1a2b3c4d')
+    data = disk.read_bytes()
+    assert data[440:444] == bytes([0x4d, 0x3c, 0x2b, 0x1a]) and data.count(0) == 1020
+
+
 def test_stops_if_the_card_doesnt_get_its_new_id(pi, disks):
     # cmdline.txt and fstab would name partitions the card doesn't have: it wouldn't start
-    disks.disk_id_ignored = True
+    disks.label_id_ignored = disks.disk_id_ignored = True
     with pytest.raises(clone.CloneError, match="The card's partitions didn't get their new ID"):
         clone.clone(CARD, with_media=False)
     assert not [cmd for cmd in pi.commands if cmd[0].startswith('mkfs')]
@@ -294,9 +320,12 @@ def test_waits_until_nothing_holds_the_card(pi, disks, monkeypatch):
     disks.busy = 3
     clone.clone(CARD, with_media=False)
     assert ['mkfs.ext4', '-F', '-q', '-L', 'rootfs', disks.partition('/dev/sda', 2)] in pi.commands
-    # it read the table once the card was free, before and after changing it
+    # it read the table once the card was free, before and after changing it, and let udev
+    # finish with the partitions it found (it opens them: sfdisk would find the card in use)
     sfdisk = pi.commands.index(next(cmd for cmd in pi.commands if cmd[0] == 'sfdisk' and '-J' not in cmd))
-    assert ['blockdev', '--rereadpt', '/dev/sda'] in pi.commands[:sfdisk]
+    before = pi.commands[:sfdisk]
+    reread = len(before) - 1 - before[::-1].index(['blockdev', '--rereadpt', '/dev/sda'])
+    assert before[reread + 1] == ['udevadm', 'settle']
     assert ['blockdev', '--rereadpt', '/dev/sda'] in pi.commands[sfdisk:]
 
 
@@ -520,6 +549,16 @@ def test_start_refuses_with_the_overlay_off(ready):
     assert ready == []
 
 
+def test_start_refuses_a_reader_without_512_byte_sectors(ready):
+    folder = os.path.join(clone.SYS_BLOCK, 'sda', 'queue')
+    os.makedirs(folder)
+    with open(os.path.join(folder, 'logical_block_size'), 'w') as f:
+        f.write('4096\n')
+    with pytest.raises(clone.CloneError, match="This card reader can't be used for copying"):
+        clone.start('/dev/sda', False)
+    assert ready == []
+
+
 def test_start_refuses_without_exfat_tools(ready, monkeypatch):
     monkeypatch.setattr(clone, 'exfat_tool', lambda: None)
     with pytest.raises(clone.CloneError, match='needs exfat-utils'):
@@ -628,6 +667,14 @@ def test_status_lists_the_cards_for_the_page(client, pi):
         {'value': '/dev/sda|' + CARD['id'], 'name': '32.0 GB SD_Transcend', 'label': 'SD_Transcend, 32.0 GB (/dev/sda)'}]
     page = client.get('/').get_data(as_text=True)
     assert 'id="cloneNoCard" hidden' in page and 'id="cloneResult" class="result-box"' in page
+
+
+def test_no_plug_in_hint_while_a_card_is_made(client, pi, ready):
+    # the card being made isn't listed (it's in use), but it's there
+    clone.start('/dev/sda', False)
+    pi.disks.remove(READER)
+    page = client.get('/').get_data(as_text=True)
+    assert 'id="cloneNoCard" hidden' in page
 
 
 def test_system_tab_without_cards_has_the_form_hidden(client):
