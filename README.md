@@ -49,7 +49,7 @@ This fork copies the v7 beta files off a running install and develops them furth
 - **The player's address on the logo screen** at start-up (can be turned off).
 - **Clone a player to another SD card** in a USB card reader, with or without the media files.
 
-The player is meant to run offline; a network is only needed for the web interface.
+The player is meant to run offline; a network is only needed for the web interface. It is not recommended to expose this to the internet as security is basic and designed to hinder, not stop a determined attacker.
 See [`v7-beta/README.md`](v7-beta/README.md) for the files, how to try them on a Pi and how
 to install them, and [`TODO.md`](TODO.md) for what's planned.
 
