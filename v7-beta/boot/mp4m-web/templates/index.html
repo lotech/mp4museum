@@ -59,7 +59,9 @@
   {{ icon('network') }}
   <span class="update-text">New network settings{% if not network.pending.applied %} (being applied){% endif %}.
     {% if network.pending.problems %}They didn't work, so they can't be kept: the previous ones come back in
-    {%- else %}Keep them? Otherwise the previous ones come back in{% endif %} <strong id="networkSeconds">{{ network.pending.seconds // 60 }}:{{ '%02d' % (network.pending.seconds % 60) }}</strong>{% if network.pending.problems %}
+    {%- else %}{% if network.pending.applied and network.pending.wifi_changed and network.wifi.managed and network.wifi.enabled
+    and network.wifi.networks and network.wifi_interface and not network.wifi.ssid %}<span class="update-note">Wi-Fi
+    isn't connected to a network (yet).</span> {% endif %}Keep them? Otherwise the previous ones come back in{% endif %} <strong id="networkSeconds">{{ network.pending.seconds // 60 }}:{{ '%02d' % (network.pending.seconds % 60) }}</strong>{% if network.pending.problems %}
     <span class="update-note">Problems: {{ network.pending.problems|join('; ') }}</span>{% endif %}</span>
   <form method="post" action="{{ url_for('undo_network') }}"><button type="submit" class="button small ghost">Undo</button></form>
   {% if not network.pending.problems %}

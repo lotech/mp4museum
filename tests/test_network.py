@@ -720,6 +720,25 @@ def test_scan_uses_the_country_in_use(ports, client, monkeypatch):
     assert next(cmd for cmd in ports.commands if cmd[:4] == ['iw', 'dev', 'wlan0', 'scan']) == ['iw', 'dev', 'wlan0', 'scan']
 
 
+def test_scan_after_wifi_was_turned_off(ports, client):
+    """Wi-Fi turned off by a change applied after the page asked: no scan, and not unblocked."""
+    blocked(ports)
+    network.change({'wifi': {'enabled': False, 'networks': []}})
+    ports.run_later(network.APPLY_DELAY)
+    # (the page still had it on)
+    network._pending['settings'] = {'wifi': {'enabled': True, 'country': '', 'networks': []}}
+    ports.commands.clear()
+    assert client.get('/network/scan').status_code == 409
+    assert ['rfkill', 'unblock', 'wifi'] not in ports.commands
+
+
+def test_keep_bar_says_when_wifi_isnt_connected(ports, client):
+    network.change({'wifi': {'networks': [{'ssid': 'Gallery', 'password': 'secret-password'}]}})
+    ports.run_later(network.APPLY_DELAY)
+    page = client.get('/').data.decode()
+    assert "isn't connected to a network (yet)" in page and 'network/keep' in page
+
+
 def test_wifi_off_on_the_image(ports, client):
     blocked(ports)
     page = client.get('/').data.decode()

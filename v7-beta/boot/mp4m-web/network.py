@@ -642,7 +642,10 @@ def pending():
         if not _pending:
             return None
         return {'seconds': max(0, int(_pending['deadline'] - time.monotonic())),
-                'problems': list(_pending['problems']), 'applied': _pending['finished']}
+                'problems': list(_pending['problems']), 'applied': _pending['finished'],
+                # (the page warns if Wi-Fi isn't connected: joining a network takes a moment, and
+                # one not in range can be saved on purpose, so it doesn't stop Keep)
+                'wifi_changed': _pending['settings'].get('wifi') != _pending['previous'].get('wifi')}
 
 
 # ----- What the page shows ----- #
@@ -722,6 +725,9 @@ def scan():
     with _apply_lock:
         # the country in use (a change setting one may not be applied yet)
         in_use = (_in_use['settings'] or read_settings()).get('wifi')
+        if in_use and not in_use['enabled']:
+            # turned off by a change applied since the page asked
+            raise ValueError("Wi-Fi is off. Turn it on to look for networks.")
         country = in_use['country'] if in_use else ''
         frequencies = [] if country else ['freq'] + [str(f) for f in SAFE_FREQUENCIES]
         blocked = wifi_blocked()
@@ -734,8 +740,8 @@ def scan():
                 # e.g. busy: wpa_supplicant is scanning; its last results are there
                 ok, output = _command(['iw', 'dev', interface, 'scan', 'dump'])
         finally:
-            # (what is in use now, not what the page had: no apply ran meanwhile)
-            if blocked and not (_in_use['settings'] or read_settings()).get('wifi'):
+            # Wi-Fi not set up here, or off (no apply ran meanwhile)
+            if blocked and not (in_use and in_use['enabled']):
                 _command(['rfkill', 'block', 'wifi'])
     if not ok:
         raise ValueError(f"Couldn't look for networks: {output}")
