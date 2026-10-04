@@ -603,6 +603,21 @@ def test_copy_from_the_web_interface(client, ready):
     assert 'Copying this player to the card' in client.get('/').get_data(as_text=True)
 
 
+def test_status_lists_the_cards_for_the_page(client, pi):
+    # cards put in and taken out show up without reloading the page
+    assert client.get('/clone/status').get_json()['cards'] == []
+    pi.disks.append(READER)
+    assert client.get('/clone/status').get_json()['cards'] == [
+        {'value': '/dev/sda|' + CARD['id'], 'name': '32.0 GB SD_Transcend', 'label': 'SD_Transcend, 32.0 GB (/dev/sda)'}]
+    page = client.get('/').get_data(as_text=True)
+    assert 'id="cloneNoCard" hidden' in page and 'id="cloneResult" class="result-box"' in page
+
+
+def test_system_tab_without_cards_has_the_form_hidden(client):
+    page = client.get('/').get_data(as_text=True)
+    assert '<p class="current" id="cloneNoCard" >' in page and 'id="cloneForm"\n              hidden' in page
+
+
 def test_copy_refused_is_said(client, ready):
     client.post('/clone', data={'device': '/dev/sdb', 'media': 'with'}, follow_redirects=False)
     assert "That card isn&#39;t in a USB reader any more." in client.get('/').get_data(as_text=True)

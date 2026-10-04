@@ -86,7 +86,8 @@ a network is optional.
 - [x] Copy a player to an SD card in a USB reader (System tab), with or without the media files; the card gets new partition IDs and makes its own network name. Needs exfat-utils (`install.sh`). Tested on files standing in for the cards, not on the Pi
 - [x] Copy a file from a USB stick to the player (button on the stick's rows in the playlist)
 - [ ] Test on the Pi: copying a large file from a USB stick (time, the page while it copies)
-- [ ] Test on the Pi: copying with and without the media files, a card that already had MP4MUSEUM on it, the copy starting in another Pi (network name, password, settings, files), the player playing a file from the card while it's erased, and the exfat-utils install from `legacy.raspbian.org`
+- [x] Tested on a Pi 3 B+: exfat-utils installed by `install.sh` from `legacy.raspbian.org`; a card that had MP4MUSEUM on it (from a bigger card's image) was copied with the media files. The first try failed: Linux still used the card's old partitions and formatted past its end. The new partitions are now checked before anything is formatted
+- [ ] Test on the Pi: the copied card starting in another Pi (network name, password, settings, files), copying without the media files, the player playing a file from the card while it's erased
 
 - [ ] Install script to set up v7 on a fresh Raspberry Pi OS, instead of depending on the image (`install.sh` only covers the v7 image so far)
 

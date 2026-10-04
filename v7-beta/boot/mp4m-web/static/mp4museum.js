@@ -348,6 +348,13 @@ function checkForUpdate() {
       const commit = document.createElement('strong');
       commit.textContent = answer.update.commit;
       text.append(commit, ' (' + answer.update.date + ') ' + (answer.update.message || ''));
+      if (answer.update.note) {
+        // e.g. from another branch than the installed version
+        const note = document.createElement('span');
+        note.className = 'update-note';
+        note.textContent = ' ' + answer.update.note;
+        text.append(note);
+      }
       bar.hidden = false;
       fitPlaylist();
     })
@@ -527,34 +534,70 @@ function confirmClone(form) {
   return confirm('Erase everything on the ' + card + ' card and copy this player to it?');
 }
 
+function showCards(cards) {
+  // the cards in USB readers now: one taken out goes, the next one put in comes
+  const select = document.getElementById('clone_device');
+  if (!select || !cards) {
+    return;
+  }
+  const values = cards.map(card => card.value);
+  const shown = Array.from(select.options).slice(1).map(option => option.value);
+  if (values.join('\n') !== shown.join('\n')) {
+    const chosen = select.value;
+    while (select.options.length > 1) {
+      select.remove(1);
+    }
+    cards.forEach(card => {
+      const option = new Option(card.label, card.value);
+      option.dataset.name = card.name;
+      select.add(option);
+    });
+    select.value = values.includes(chosen) ? chosen : '';
+  }
+  document.getElementById('cloneNoCard').hidden = cards.length > 0;
+  return cards.length > 0;
+}
+
 function showClone(state) {
   const running = state.running;
   document.getElementById('cloneProgress').hidden = !running;
+  const anyCard = showCards(state.cards);
   const form = document.getElementById('cloneForm');
-  if (form) form.hidden = running;
+  if (form) form.hidden = running || anyCard === false;
   document.getElementById('cloneStep').textContent = state.step + '…';
   const bar = document.getElementById('cloneBar');
   bar.parentElement.classList.toggle('indeterminate', state.percent === null);
   bar.style.width = state.percent === null ? '' : state.percent + '%';
   const result = document.getElementById('cloneResult');
   // (said for a while after it finished)
-  result.hidden = !(state.recent && (state.done || state.error));
+  result.hidden = running || !(state.recent && (state.done || state.error));
+  result.classList.toggle('done', !!state.done);
+  result.classList.toggle('failed', !state.done);
   if (state.done) {
-    result.textContent = 'Done: the card can be taken out and put in another Pi.' + (state.same_id_before
-      ? ' Reboot this Pi once too: the card had the same partition IDs as this one before.' : '');
+    document.getElementById('cloneResultTitle').textContent = 'Done: the card is ready.';
+    document.getElementById('cloneResultText').textContent =
+      'Take it out and put it in another Pi. To make another, put the next card in and choose it below.' +
+      (state.same_id_before ? ' Reboot this player once too: the card had the same partition IDs as this one before.' : '');
   } else if (state.error) {
-    result.textContent = "The card couldn't be made: " + state.error;
+    document.getElementById('cloneResultTitle').textContent = "The card couldn't be made.";
+    document.getElementById('cloneResultText').textContent = state.error;
   }
   return running;
 }
 
 function followClone() {
+  // often while a card is made; otherwise every few seconds while the System tab is open, for
+  // cards put in and taken out
   const card = document.getElementById('clone');
+  if (!card.offsetParent) {
+    setTimeout(followClone, 3000);
+    return;
+  }
   fetch(card.dataset.statusUrl, {headers: {'X-Requested-With': 'fetch'}, cache: 'no-store'})
     .then(response => response.ok ? response.json() : null)
     .then(state => {
-      if (state && showClone(state)) {
-        setTimeout(followClone, 1500);
+      if (state) {
+        setTimeout(followClone, showClone(state) ? 1500 : 3000);
       }
     })
     .catch(() => setTimeout(followClone, 5000));

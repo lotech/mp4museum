@@ -332,11 +332,18 @@ def test_web_partial_failure_not_called_nothing_changed(client, github, monkeypa
 
 def test_web_points_out_branch_switch_and_older_versions(client, github):
     updater.update()
+    # installed from a branch (sudo mp4m-update --branch dev): master's version is offered, and
+    # the update bar and the Software update card say it means leaving the branch
     webservice.RUNNING_VERSION = dict(installed(), branch='dev')
     github.release('fff5555')
-    assert b'switches from branch dev to master' in client.post('/check_update', follow_redirects=True).data
+    page = client.post('/check_update', follow_redirects=True).data.decode()
+    note = 'Installing it switches from branch dev to master, replacing the version installed from dev.'
+    assert '<span class="update-note">' + note + '</span>' in page
+    assert 'warning-text' in page and page.count(note) == 2 and 'class="toast ' not in page
+    r = client.post('/check_update', data={'auto': '1'}, headers={'X-Requested-With': 'fetch'}).get_json()
+    assert r['update']['note'] == note
     webservice.RUNNING_VERSION = dict(installed(), date='2027-01-01T00:00:00Z')
-    assert b'older than the installed version' in client.post('/check_update', follow_redirects=True).data
+    assert b'It is older than the installed version.' in client.post('/check_update', follow_redirects=True).data
 
 
 def test_version_endpoint(pi, client):
@@ -475,7 +482,7 @@ def test_page_checks_for_updates_by_itself(pi, client, github):
     assert github.api_calls == 0
     webservice._auto_check['time'] -= webservice.AUTO_CHECK_INTERVAL
     r = client.post('/check_update', data={'auto': '1'}, headers=fetch).get_json()
-    assert r == {'update': {'commit': 'bbb1111', 'date': '2026-10-04', 'message': 'Even newer'}}
+    assert r == {'update': {'commit': 'bbb1111', 'date': '2026-10-04', 'message': 'Even newer', 'note': None}}
     assert github.api_calls == 1
     # the bar's Install button works with what the check found
     assert b'Update available' in client.get('/').data

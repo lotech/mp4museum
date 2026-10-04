@@ -175,6 +175,8 @@ Once installed, a player can update itself from GitHub, as long as it has an int
   The web interface restarts with the new version and offers to reboot.
 - **Over SSH:** `sudo mp4m-update` checks, asks before installing, and offers to reboot.
   `sudo mp4m-update --check` only checks; `--help` lists the other options.
+  `sudo mp4m-update --branch <name>` installs a branch to try it. Updates are still looked for
+  on the usual branch, and the update bar says that installing one leaves the branch.
 
 An update replaces the web interface in `/boot/mp4m-web`, and the player script
 `/boot/mp4museum.py` unless it has been edited on that player. In that case the edited
@@ -199,7 +201,8 @@ branch=master
 
 To set up another Pi the same way, put an SD card in a USB card reader and plug it into the
 player. System → Copy to an SD card lists the card; choose whether to copy the media files,
-then Copy. It takes a few minutes, plus about a minute per GB of media.
+then Copy. It takes a few minutes, plus about a minute per GB of media. When it says the card is
+ready, take it out; the next card put in shows up in the list.
 
 - **The card is erased**, also if it already has MP4MUSEUM on it.
 - **It gets this player:** the boot partition as it is (settings, password, `config.txt`, the
