@@ -1086,6 +1086,67 @@ select {
   }
 }
 
+/* what the update bar and the Software update card add about an update that isn't simply newer */
+.update-note {
+  color: #ffd58a;
+}
+
+.warning-text {
+  color: var(--paused);
+}
+
+.warning-text .icon {
+  vertical-align: -3px;
+  margin-right: 6px;
+}
+
+/* how making an SD card went */
+.result-box {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-small);
+  border: 1px solid;
+}
+
+.result-box strong {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.result-box > .icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+}
+
+.result-box.done {
+  background: rgba(61, 220, 151, 0.1);
+  border-color: rgba(61, 220, 151, 0.5);
+}
+
+.result-box.done > .icon {
+  color: var(--playing);
+}
+
+.result-box.failed {
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.5);
+}
+
+.result-box.failed > .icon {
+  color: var(--danger);
+}
+
+.result-box.done .result-failed,
+.result-box.failed .result-done {
+  display: none;
+}
+
 .update-bar .icon-button {
   color: #9fb4e0;
 }

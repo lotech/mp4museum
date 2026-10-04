@@ -9,7 +9,7 @@
 <div id="updateBar" class="update-bar" data-check-url="{{ url_for('check_update') }}" {% if not update_ready %}hidden{% endif %}>
   {{ icon('cloud-download') }}
   <span id="updateText" class="update-text">
-    {%- if update_ready %}Update available: <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}) {{ update_available.message }}{% endif -%}
+    {%- if update_ready %}Update available: <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}) {{ update_available.message }}{% if update_note %} <span class="update-note">{{ update_note }}</span>{% endif %}{% endif -%}
   </span>
   <form method="post" action="{{ url_for('install_update') }}"
         onsubmit="return confirm('Install the update? The web interface restarts afterwards.')">
@@ -429,6 +429,7 @@
         <p class="current">Installed: <strong>{% if installed.commit == 'local' %}local copy{% else %}{{ (installed.commit or 'unknown')[:7] }}{% endif %}</strong>{% if installed.date %} ({{ installed.date[:10] }}{% if installed.branch %}, branch {{ installed.branch }}{% endif %}){% endif %}</p>
         {% if update_ready %}
         <p>New version <strong>{{ update_available.commit[:7] }}</strong> ({{ update_available.date[:10] }}): {{ update_available.message }}</p>
+        {% if update_note %}<p class="hint warning-text">{{ icon('triangle-alert') }}{{ update_note }}</p>{% endif %}
         {% endif %}
         <div class="button-row">
           {% if update_ready %}
@@ -451,12 +452,17 @@
           <div class="progress indeterminate"><div id="cloneBar" class="progress-fill"></div></div>
           <p class="hint">Leave the card in until it's done. Rebooting and updates wait until then.</p>
         </div>
-        <p id="cloneResult" class="current" hidden></p>
+        <div id="cloneResult" class="result-box" role="status" hidden>
+          {{ icon('circle-check', 'result-done') }}{{ icon('circle-alert', 'result-failed') }}
+          <div><strong id="cloneResultTitle"></strong><span id="cloneResultText"></span></div>
+        </div>
         {% if clone_unavailable %}
         <p class="hint">{{ clone_unavailable }}</p>
-        {% elif clone_cards %}
+        {% else %}
+        {# the cards are listed again by the page's script as they're put in and taken out #}
+        <p class="current" id="cloneNoCard" {% if clone_cards or clone_state.running %}hidden{% endif %}>Plug a USB SD card reader with a card into the Pi.</p>
         <form method="post" action="{{ url_for('clone_card') }}" class="setting" id="cloneForm"
-              {% if clone_state.running %}hidden{% endif %} onsubmit="return confirmClone(this)">
+              {% if clone_state.running or not clone_cards %}hidden{% endif %} onsubmit="return confirmClone(this)">
           <label for="clone_device">Card</label>
           <div class="input-row">
             <select name="device" id="clone_device" required>
@@ -475,8 +481,6 @@
             <button type="submit" class="button">Copy</button>
           </div>
         </form>
-        {% else %}
-        <p class="current">Plug a USB SD card reader with a card into the Pi, then reload this page.</p>
         {% endif %}
         <p class="hint">The card is erased, then gets this player: its settings, software and password, and a network name
           of its own. A few minutes, plus about a minute per GB of media.</p>

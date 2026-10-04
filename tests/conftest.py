@@ -118,6 +118,7 @@ def pi(tmp_path, monkeypatch):
         'partition': lambda disk, number: str(tmp_path / 'dev' / ('%s-%d' % (os.path.basename(disk), number))),
         'run': p.clone_run,
         'exfat_tool': lambda: 'mkfs.exfat',
+        'write_disk_id': lambda device, disk_id: p.commands.append(['write_disk_id', device, disk_id]),
         'exfat_usage': lambda tool: 'Usage: mkexfatfs [-i volume-id] [-n label] ...',     # exfat-utils
         'state': dict(clone.state, running=False, done=False, error=None),
     }.items():

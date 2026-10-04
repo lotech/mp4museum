@@ -18,6 +18,7 @@ import random
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import tempfile
 import threading
@@ -248,6 +249,15 @@ def start(device, with_media, identity=None):
     card = next((c for c in list_cards() if c['device'] == device), None)
     if not card:
         raise CloneError("That card isn't in a USB reader any more.")
+    try:
+        with open(os.path.join(SYS_BLOCK, os.path.basename(device), 'queue', 'logical_block_size'), 'r') as f:
+            sector = int(f.read())
+    except (OSError, ValueError):
+        sector = SECTOR
+    if sector != SECTOR:
+        # the partitions are planned in 512-byte sectors
+        raise CloneError("This card reader can't be used for copying (its sectors aren't 512 bytes). "
+                         "Try another reader.")
     if identity is not None and card['id'] != identity:
         # something else has been plugged in since the page was loaded
         raise CloneError(f"{device} isn't the card that was chosen any more. Choose it again.")
@@ -293,7 +303,9 @@ def clone(card, with_media, progress=_set):
     layout = plan(card['size'], root_used, media_used, with_media, parts[0][1])
     new_id = disk_id
     while new_id == disk_id:
-        new_id = '%08x' % random.randrange(1, 2 ** 32)
+        # below 0x80000000: Buster's sfdisk (util-linux 2.33) reads label-id as a signed number on
+        # the Pi's 32-bit system, and quietly picks a random ID for one that doesn't fit
+        new_id = '%08x' % random.randrange(1, 2 ** 31)
     work = tempfile.mkdtemp(prefix=WORK_PREFIX, dir=TEMP_DIR)
     usbmount = _stop_automount()
     mounted = []
@@ -313,11 +325,9 @@ def clone(card, with_media, progress=_set):
         _unmount_card(device)
         # a card with this player's image on it had the same partition IDs as this one: while it
         # was plugged in the Pi couldn't tell its own partitions from the card's
-        try:
-            old_id = '%08x' % int(json.loads(run(['sfdisk', '-J', device]))['partitiontable']['id'], 16)
+        old_id = _disk_id(device)
+        if old_id:
             progress(same_id_before=old_id == disk_id)
-        except (CloneError, ValueError, KeyError):
-            pass
 
         # the card chosen still there (not another one put in meanwhile)? Checked last thing
         # before it's erased
@@ -326,6 +336,10 @@ def clone(card, with_media, progress=_set):
             raise CloneError("The card was changed, so nothing was erased. Choose it again.")
 
         progress(step='Making the partitions', percent=None)
+        # nothing may hold the card open (e.g. exFAT's helper, a moment after it's unmounted), or
+        # Linux keeps using its old partitions and the new ones are written over the wrong places
+        _reread_partitions(device, "The card is still in use, so it wasn't changed. Take it out, put it "
+                                   "back in and try again.")
         boot, root, media = layout['boot'], layout['root'], layout['media']
         script = (f"label: dos\nlabel-id: 0x{new_id}\nunit: sectors\n\n"
                   f"start={boot[0]}, size={boot[1]}, type=c\n"
@@ -337,9 +351,18 @@ def clone(card, with_media, progress=_set):
             # e.g. a file on it still open: sfdisk leaves the card as it was
             raise CloneError(f"The card is in use, so it wasn't changed. Take it out, put it back in and "
                              f"try again. ({e})")
-        run(['partprobe', device])
+        # the disk ID cmdline.txt and fstab will name, or the card won't start: written into the
+        # partition table itself if sfdisk didn't use it (its --disk-id came after Buster's)
+        if _disk_id(device) != new_id:
+            write_disk_id(device, new_id)
+        if _disk_id(device) != new_id:
+            raise CloneError("The card's partitions didn't get their new ID, so nothing was copied to it. "
+                             "Take it out, put it back in and try again.")
+        _reread_partitions(device, "The Pi didn't take in the card's new partitions, so nothing was copied "
+                                   "to it. Take it out, put it back in and try again.")
         run(['udevadm', 'settle'])
         _unmount_card(device)
+        _check_partitions(device, layout)
 
         progress(step='Copying the boot partition', percent=0)
         # (settings aren't saved meanwhile, so the copy isn't half old, half new)
@@ -423,6 +446,62 @@ def recover():
         if name.startswith(WORK_PREFIX):
             _remove_work(os.path.join(TEMP_DIR, name))
     _restore_automount(saved.get('usbmount'))
+
+
+def _disk_id(device):
+    """The disk ID in the card's partition table (8 hex digits), or None."""
+    try:
+        return '%08x' % int(json.loads(run(['sfdisk', '-J', device]))['partitiontable']['id'], 16)
+    except (CloneError, ValueError, KeyError, TypeError):
+        return None
+
+
+def write_disk_id(device, disk_id):
+    """Put a disk ID into a DOS partition table (the 4 bytes at 440, little-endian)."""
+    with open(device, 'r+b') as f:
+        f.seek(440)
+        f.write(struct.pack('<I', int(disk_id, 16)))
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _reread_partitions(device, message, tries=10):
+    """Have Linux read the card's partition table again. It only can once nothing has the card
+    open, so this also shows it's free; tried for a while, then CloneError(message)."""
+    for attempt in range(tries):
+        try:
+            run(['blockdev', '--rereadpt', device])
+            # udev looks at the partitions it finds (opening them): done before going on, or
+            # sfdisk would find the card in use
+            run(['udevadm', 'settle'])
+            return
+        except CloneError:
+            if attempt == tries - 1:
+                raise CloneError(message)
+            time.sleep(1)
+
+
+def _check_partitions(device, layout):
+    """Whether Linux sees the partitions just made (start and size, in sectors), so nothing is
+    formatted where the old ones were. CloneError if not."""
+    disk = os.path.join(SYS_BLOCK, os.path.basename(device))
+
+    def sectors(*path):
+        with open(os.path.join(disk, *path), 'r') as f:
+            return int(f.read())
+    try:
+        end = sectors('size')
+        seen = [(sectors(os.path.basename(partition(device, n)), 'start'),
+                 sectors(os.path.basename(partition(device, n)), 'size')) for n in (1, 2, 3)]
+    except (OSError, ValueError):
+        seen = None
+    expected = [layout['boot'], layout['root'], (layout['media'][0], None)]
+    if (not seen or any(start != want[0] or (want[1] is not None and size != want[1])
+                        for (start, size), want in zip(seen, expected))
+            # the media partition runs to the end of the card (sfdisk may stop it a little short)
+            or not end - ALIGN <= seen[2][0] + seen[2][1] <= end):
+        raise CloneError("The Pi didn't take in the card's new partitions, so nothing was copied to it. "
+                         "Take it out, put it back in and try again.")
 
 
 def _new_disk_id(path, old_id, new_id):

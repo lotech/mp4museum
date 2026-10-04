@@ -192,6 +192,7 @@ def index():
                            installed=RUNNING_VERSION,
                            update_config=updater.read_config(),
                            update_available=session.get('update'),
+                           update_note=update_note(session.get('update')),
                            image_duration=system.get_image_duration(),
                            loop_player=system.get_loop_player(),
                            boot_video_plays=system.get_boot_video_plays(),
@@ -685,7 +686,13 @@ def clone_card():
 
 @app.route('/clone/status')
 def clone_status():
-    return clone.get_state()
+    status = clone.get_state()
+    # the cards in USB readers now, for the page's list
+    status['cards'] = [{'value': f"{card['device']}|{card['id']}",
+                        'name': f"{system.format_size(card['size'])} {card['model']}",
+                        'label': f"{card['model']}, {system.format_size(card['size'])} ({card['device']})"}
+                       for card in clone.list_cards()]
+    return status
 
 
 # ----- Reboot ----- #
@@ -905,21 +912,29 @@ def check_for_update(auto):
         return update_answer(found)
     if not found:
         flash("The software is up to date.", "success")
-    else:
-        # the update bar shows it; a message only for what the bar doesn't say
-        installed_branch = RUNNING_VERSION.get('branch')
-        if installed_branch and installed_branch != config['branch']:
-            flash(f"Installing this update switches from branch {installed_branch} to {config['branch']}.", "warning")
-        elif RUNNING_VERSION.get('date') and latest['date'] < RUNNING_VERSION['date']:
-            flash("This update is older than the installed version.", "warning")
+    # (an update found: the update bar and the Software update card show it)
     return redirect(url_for('index'))
+
+def update_note(latest):
+    """What the update bar and the Software update card say about an update that isn't simply
+    newer: one from another branch (e.g. after sudo mp4m-update --branch, the updates offered
+    are still the configured branch's), or an older version."""
+    if not latest:
+        return None
+    installed_branch = RUNNING_VERSION.get('branch')
+    if installed_branch and latest.get('branch') and installed_branch != latest['branch']:
+        return (f"Installing it switches from branch {installed_branch} to {latest['branch']}, "
+                f"replacing the version installed from {installed_branch}.")
+    if RUNNING_VERSION.get('date') and latest.get('date') and latest['date'] < RUNNING_VERSION['date']:
+        return "It is older than the installed version."
+    return None
 
 def update_answer(latest):
     """JSON for the page's update bar."""
     if latest and latest['commit'] != RUNNING_VERSION.get('commit'):
         session['update'] = latest
         return {'update': {'commit': latest['commit'][:7], 'date': latest['date'][:10],
-                           'message': latest.get('message', '')}}
+                           'message': latest.get('message', ''), 'note': update_note(latest)}}
     session.pop('update', None)
     return {'update': None}
 
@@ -937,6 +952,8 @@ def find_update(config, latest):
     if latest['commit'] == RUNNING_VERSION.get('commit'):
         session.pop('update', None)
         return None
+    # (which branch it's from: the page says when that isn't the installed version's)
+    latest = dict(latest, branch=config['branch'])
     session['update'] = latest
     return latest
 
