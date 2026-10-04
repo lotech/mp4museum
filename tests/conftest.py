@@ -7,6 +7,7 @@ Updater tests get a fake GitHub that serves a temporary copy of this repository.
 Part of https://github.com/lotech/mp4museum. Licensed under the GNU GPL v3, see LICENSE.
 """
 import io
+import json
 import os
 import shutil
 import sys
@@ -19,6 +20,7 @@ REPO = Path(__file__).resolve().parents[1]
 APP = REPO / 'v7-beta' / 'boot' / 'mp4m-web'
 sys.path.insert(0, str(APP))
 
+import clone  # noqa: E402
 import system  # noqa: E402
 import updater  # noqa: E402
 import webservice  # noqa: E402
@@ -34,12 +36,22 @@ class FakePi:
         self.commands = []
         self.hostnames = []
         self.read_only = True
+        # the card the Pi runs from, and a reader without a card
+        self.disks = [{'name': 'mmcblk0', 'size': '31914983424', 'type': 'disk', 'tran': None, 'rm': False, 'model': None},
+                      {'name': 'sdb', 'size': '0', 'type': 'disk', 'tran': 'usb', 'rm': True, 'model': 'Reader'}]
 
     def run_command(self, cmd):
         self.commands.append(list(cmd))
         if cmd[0] == 'aplay':
             return True, 'card 0: Headphones\ncard 1: vc4hdmi'
         return True, ''
+
+    def clone_run(self, cmd, input=None):
+        """clone.run: lsblk lists self.disks (cards in USB readers); the rest is recorded."""
+        self.commands.append(list(cmd))
+        if cmd[0] == 'lsblk':
+            return json.dumps({'blockdevices': self.disks})
+        return ''
 
     def mounts(self):
         return [cmd for cmd in self.commands if cmd[0] == 'mount']
@@ -83,7 +95,7 @@ def pi(tmp_path, monkeypatch):
         monkeypatch.setattr(system, name, value)
     # a path added to system.py and not here would be the real one: tests must not touch it
     real = [name for name, value in vars(system).items()
-            if isinstance(value, str) and value.startswith(('/boot', '/media'))]
+            if isinstance(value, str) and value.startswith(('/boot', '/media', '/run'))]
     assert not real, 'add these to the pi fixture: %s' % real
     monkeypatch.setattr(system, 'run_command', p.run_command)
     monkeypatch.setattr(system, 'is_read_only', lambda mount_point: p.read_only)
@@ -91,12 +103,37 @@ def pi(tmp_path, monkeypatch):
     monkeypatch.setattr(system, 'apply_hostname', lambda name: (p.hostnames.append(name), (True, ''))[1])
     monkeypatch.setattr(system, '_mount_states', {})
 
+    (tmp_path / 'usbmount.conf').write_text('ENABLED=1\nMOUNTPOINTS="/media/usb0"\n')
+    # started from its SD card, with the overlay on
+    (tmp_path / 'mounts').write_text(f'overlay / overlay rw 0 0\n/dev/mmcblk0p2 /lower ext4 ro 0 0\n'
+                                     f'/dev/mmcblk0p1 {p.boot} vfat ro 0 0\n/dev/mmcblk0p3 {p.media} exfat ro 0 0\n')
+    (tmp_path / 'cmdline').write_text('console=tty1 root=PARTUUID=18512e38-02 rootfstype=ext4 boot=overlay quiet\n')
+    for name, value in {
+        'USBMOUNT_CONF': str(tmp_path / 'usbmount.conf'),
+        'PROC_MOUNTS': str(tmp_path / 'mounts'),
+        'PROC_CMDLINE': str(tmp_path / 'cmdline'),
+        'SYS_BLOCK': str(tmp_path / 'sys-block'),
+        'MARKER': str(tmp_path / 'mp4m-clone.json'),
+        'TEMP_DIR': str(tmp_path),
+        'partition': lambda disk, number: str(tmp_path / 'dev' / ('%s-%d' % (os.path.basename(disk), number))),
+        'run': p.clone_run,
+        'exfat_tool': lambda: 'mkfs.exfat',
+        'exfat_usage': lambda tool: 'Usage: mkexfatfs [-i volume-id] [-n label] ...',     # exfat-utils
+        'state': dict(clone.state, running=False, done=False, error=None),
+    }.items():
+        monkeypatch.setattr(clone, name, value)
+    real = [name for name, value in vars(clone).items()
+            if isinstance(value, str) and value.startswith(('/etc', '/proc', '/sys', '/run', '/tmp', '/boot', '/media'))
+            and not value.startswith(str(tmp_path))]
+    assert not real, 'add these to the pi fixture: %s' % real
+
     monkeypatch.setattr(updater, 'APP_DIR', p.path('mp4m-web'))
     monkeypatch.setattr(updater, 'UPDATE_CONFIG_FILE', p.path('mp4m-update.txt'))
     monkeypatch.setattr(updater, 'SYSTEM_FILES', {})
     monkeypatch.setattr(updater, '_differs_from_local_copy', {})
 
     monkeypatch.setattr(webservice, 'RUNNING_VERSION', {})
+    monkeypatch.setattr(webservice, '_reboot_lock', {'fd': None})
     monkeypatch.setattr(webservice, '_auto_check', {'time': None, 'ok': False, 'latest': None})
     monkeypatch.setattr(webservice.app, 'secret_key', 'test')
     monkeypatch.delenv('INVOCATION_ID', raising=False)

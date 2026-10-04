@@ -5,12 +5,18 @@ Part of https://github.com/lotech/mp4museum. Licensed under the GNU GPL v3, see 
 import io
 import json
 import os
+import shutil
 import signal
 import threading
 import time
+from pathlib import Path
+
+import pytest
 
 import system
 import webservice
+
+REPO_PLAYER = Path(__file__).resolve().parents[1] / 'v7-beta' / 'boot' / 'mp4museum.py'
 
 
 def upload(client, name, data=b'video data', **kwargs):
@@ -436,14 +442,17 @@ def test_status_for_the_player_card(client, monkeypatch):
 def test_playlist_shows_what_the_player_plays(pi, client):
     usb = pi.media.parent / 'usb0'
     usb.mkdir()
-    for path in (pi.media / 'b.mp4', pi.media / 'a-loop.mov', pi.media / 'notes', pi.media / '.hidden.mp4',
-                 usb / 'z.jpg'):
+    for path in (pi.media / 'b.mp4', pi.media / 'a-loop.mov', pi.media / 'notes', pi.media / 'notes.txt',
+                 pi.media / '.hidden.mp4', usb / 'z.jpg', usb / 'LICENCE.broadcom', usb / 'config.txt'):
         path.write_bytes(b'x' * 2048)
     names = [(e['name'], e['folder'], e['plays'], e['internal']) for e in system.get_playlist()]
+    # other files on the media partition are listed (to delete them), not those on USB sticks
+    # (an SD card in a reader has a Pi's boot files)
     assert names == [('a-loop.mov', 'internal', True, True), ('b.mp4', 'internal', True, True),
-                     ('notes', 'internal', False, True), ('z.jpg', 'usb0', True, False)]
+                     ('notes', 'internal', False, True), ('notes.txt', 'internal', False, True),
+                     ('z.jpg', 'usb0', True, False)]
     html = client.get('/').data.decode()
-    assert 'z.jpg' in html and 'usb0' in html and 'not played: no extension' in html
+    assert 'z.jpg' in html and 'usb0' in html and 'not played: not a media file' in html
     # files on USB sticks can be played but not deleted or downloaded here
     assert 'download/z.jpg' not in html and 'download/b.mp4' in html
 
@@ -1086,6 +1095,20 @@ def test_disabled_list_from_windows_and_deleting(pi, client, monkeypatch):
     assert b'deleted successfully' in r and b'Failed to delete' not in r and b"Couldn&#39;t take it off" in r
 
 
+def test_reboot_waits_for_a_card_copy_or_update(pi, client):
+    # one started (here: by another process) holds the lock: no reboot
+    other = system.try_busy_lock()
+    r = client.post('/reboot', headers={'X-Requested-With': 'fetch'})
+    assert r.status_code == 409 and b'reboot when it' in r.data and ['reboot'] not in pi.commands
+    os.close(other)
+    # and a reboot under way holds it, so none can start before it; it can be asked for again
+    assert client.post('/reboot', headers={'X-Requested-With': 'fetch'}).status_code == 200
+    assert ['reboot'] in pi.commands and system.try_busy_lock() is None
+    assert client.post('/reboot', headers={'X-Requested-With': 'fetch'}).status_code == 200
+    assert pi.commands.count(['reboot']) == 2
+    os.close(webservice._reboot_lock['fd'])
+
+
 def test_reboot_from_the_page_says_when_it_failed(pi, client, monkeypatch):
     fetch = {'X-Requested-With': 'fetch'}
     r = client.post('/reboot', headers=fetch)
@@ -1095,3 +1118,175 @@ def test_reboot_from_the_page_says_when_it_failed(pi, client, monkeypatch):
     r = client.post('/reboot', headers=fetch)
     assert r.status_code == 500 and r.data == b'Failed to reboot: not allowed'
     assert b'Failed to reboot: not allowed' in client.post('/reboot', follow_redirects=True).data
+
+
+# ----- Copying a file from a USB stick ----- #
+@pytest.fixture
+def stick(pi, monkeypatch):
+    usb = pi.media.parent / 'usb0'
+    usb.mkdir()
+    (usb / 'film.mp4').write_bytes(b'f' * 5000)
+    monkeypatch.setattr(system, '_copies', {})
+    monkeypatch.setattr(system, '_copy_results', [])
+    return usb
+
+
+def copied(client, path, wait=True):
+    """Copy from the web interface, wait until it's done; the page then."""
+    r = client.post('/copy_to_player', data={'file': str(path)}, follow_redirects=True)
+    deadline = time.monotonic() + 5
+    while wait and system.copies_running() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return r.data.decode() + client.get('/').data.decode()
+
+
+def test_copy_a_file_from_a_usb_stick(pi, client, stick):
+    html = client.get('/').data.decode()
+    assert 'Copy film.mp4 to this player' in html
+    assert 'Copy b.mp4' not in html
+    page = copied(client, stick / 'film.mp4')
+    assert "Copying &#39;film.mp4&#39; to this player." in page
+    assert "&#39;film.mp4&#39; copied to this player" in page
+    assert (pi.media / 'film.mp4').read_bytes() == b'f' * 5000
+    # written under a temporary name, then renamed: nothing else left behind
+    assert sorted(os.listdir(pi.media)) == ['film.mp4']
+    assert pi.mounts()[-2:] == [['mount', '-o', 'remount,rw', str(pi.media)], ['mount', '-o', 'remount,ro', str(pi.media)]]
+    # said once
+    assert 'copied to this player' not in client.get('/').data.decode()
+
+
+def test_copy_runs_in_the_background(pi, client, stick, monkeypatch):
+    go = threading.Event()
+    real = system.copy_to_media
+    monkeypatch.setattr(system, 'copy_to_media', lambda source: (go.wait(5), real(source))[1])
+    html = copied(client, stick / 'film.mp4', wait=False)
+    assert 'Copying film.mp4 to this player' in html and 'data-copying' in html
+    assert client.get('/copy_status').get_json() == {'copying': [str(stick / 'film.mp4')]}
+    # a second copy of the same file, a reboot or an update meanwhile: refused
+    assert 'or it&#39;s being copied' in copied(client, stick / 'film.mp4', wait=False)
+    r = client.post('/reboot', headers={'X-Requested-With': 'fetch'})
+    assert r.status_code == 409 and b'A file is being copied' in r.data
+    client.post('/install_update')
+    assert "A file is being copied to this player: install the update when it&#39;s done." in client.get('/').data.decode()
+    assert ['reboot'] not in pi.commands
+    go.set()
+    assert 'copied to this player' in copied(client, stick / 'nothing.mp4')
+    assert client.get('/copy_status').get_json() == {'copying': []}
+
+
+def test_copies_hold_the_lock_cards_and_updates_take(pi, client, stick, monkeypatch):
+    # (shared: several copies can run at once)
+    (stick / 'other.mp4').write_bytes(b'o')
+    go = threading.Event()
+    real = system.copy_to_media
+    monkeypatch.setattr(system, 'copy_to_media', lambda source: (go.wait(5), real(source))[1])
+    copied(client, stick / 'film.mp4', wait=False)
+    copied(client, stick / 'other.mp4', wait=False)
+    assert len(system.copies_running()) == 2
+    assert system.try_busy_lock() is None
+    go.set()
+    copied(client, stick / 'nothing.mp4')
+    lock = system.try_busy_lock()
+    assert lock is not None and sorted(os.listdir(pi.media)) == ['film.mp4', 'other.mp4']
+    # while a card is made or an update installed (another process): refused
+    page = copied(client, stick / 'film.mp4')
+    assert 'A card is being made or an update installed: copy files when it&#39;s done.' in page
+    assert system.copies_running() == []
+    os.close(lock)
+
+
+def test_copy_refuses_to_replace_a_file(pi, client, stick):
+    # exFAT doesn't tell upper and lower case apart
+    (pi.media / 'FILM.mp4').write_bytes(b'mine')
+    assert 'This player already has a file called' in copied(client, stick / 'film.mp4')
+    assert (pi.media / 'FILM.mp4').read_bytes() == b'mine' and os.listdir(pi.media) == ['FILM.mp4']
+
+
+def test_a_file_uploaded_meanwhile_is_kept(pi, stick, monkeypatch):
+    real = shutil.copyfileobj
+
+    def upload_meanwhile(src, dst, length):
+        real(src, dst, length)
+        (pi.media / 'film.mp4').write_bytes(b'uploaded')
+    monkeypatch.setattr(system.shutil, 'copyfileobj', upload_meanwhile)
+    with pytest.raises(FileExistsError):
+        system.copy_to_media(str(stick / 'film.mp4'))
+    assert os.listdir(pi.media) == ['film.mp4'] and (pi.media / 'film.mp4').read_bytes() == b'uploaded'
+
+
+def test_copy_and_upload_rename_under_one_lock(pi, client, stick, monkeypatch):
+    # the copy checks for the name and renames in one go: an upload of the same name finishing
+    # meanwhile waits, so it isn't overwritten
+    renamed = []
+    real = os.replace
+
+    def replace(src, dst):
+        renamed.append(system.media_rename_lock.locked())
+        real(src, dst)
+    monkeypatch.setattr(system.os, 'replace', replace)
+    system.copy_to_media(str(stick / 'film.mp4'))
+    client.post('/upload', data={'file': (io.BytesIO(b'up'), 'upload.mp4')}, content_type='multipart/form-data')
+    assert (pi.media / 'upload.mp4').read_bytes() == b'up'
+    assert renamed == [True, True]
+    # and a rename in the web interface (to the name a copy is about to use)
+    held = []
+    real_rename = os.rename
+    monkeypatch.setattr(system.os, 'rename', lambda src, dst: (held.append(system.media_rename_lock.locked()),
+                                                               real_rename(src, dst)))
+    client.post('/rename', data={'filename': 'upload.mp4', 'new_name': 'renamed.mp4'})
+    assert held == [True] and (pi.media / 'renamed.mp4').exists()
+
+
+@pytest.mark.parametrize('name', ['b.mp4', '../usb0/film.mp4', '/etc/passwd'])
+def test_copy_only_from_usb_sticks(pi, client, stick, name):
+    (pi.media / 'b.mp4').write_bytes(b'b')
+    path = name if name.startswith('/') else str(pi.media / name)
+    assert "That file isn&#39;t on a USB stick any more." in copied(client, path)
+    assert sorted(os.listdir(pi.media)) == ['b.mp4']
+
+
+def test_copy_refuses_links_and_names_exfat_cant_store(pi, client, stick, tmp_path):
+    secret = tmp_path / 'secret.txt'
+    secret.write_text('secret')
+    os.symlink(str(secret), str(stick / 'x.mp4'))
+    (stick / 'a:b.mp4').write_bytes(b'x')
+    assert "&#39;x.mp4&#39; is a link, not a file." in copied(client, stick / 'x.mp4')
+    assert "characters in its name the player can&#39;t store" in copied(client, stick / 'a:b.mp4')
+    # and the copy itself never follows a link
+    with pytest.raises(OSError):
+        system.copy_to_media(str(stick / 'x.mp4'))
+    assert os.listdir(pi.media) == []
+
+
+def test_copy_without_space_leaves_nothing(pi, client, stick, monkeypatch):
+    monkeypatch.setattr(system, 'get_free_space', lambda: 1000)
+    assert 'Not enough space to copy' in copied(client, stick / 'film.mp4')
+    assert os.listdir(pi.media) == []
+
+
+def test_copy_that_fails_part_way_leaves_nothing(pi, client, stick, monkeypatch):
+    def broken(src, dst, length):
+        dst.write(b'half')
+        raise OSError(5, 'Input/output error')
+    monkeypatch.setattr(system.shutil, 'copyfileobj', broken)
+    assert 'Input/output error' in copied(client, stick / 'film.mp4')
+    assert os.listdir(pi.media) == []
+
+
+def test_media_types_are_the_same_in_the_player(pi):
+    import ast
+    tree = ast.parse((REPO_PLAYER).read_text())
+    player = next(node.value for node in tree.body if isinstance(node, ast.Assign)
+                  and getattr(node.targets[0], 'id', None) == 'MEDIA_TYPES')
+    assert set(ast.literal_eval(player)) == set(system.VIDEO_TYPES + system.IMAGE_TYPES + system.AUDIO_TYPES)
+
+
+def test_playlist_for_a_player_edited_before_media_types(pi, client):
+    # it plays every file with an extension: the playlist shows them
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write('# edited\nMEDIA_FILES = "/media/*/*.*"\n')
+    usb = pi.media.parent / 'usb0'
+    usb.mkdir()
+    (usb / 'config.txt').write_text('x')
+    (pi.media / 'notes.txt').write_text('x')
+    assert [(e['name'], e['plays']) for e in system.get_playlist()] == [('notes.txt', True), ('config.txt', True)]

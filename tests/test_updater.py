@@ -256,7 +256,9 @@ def test_web_check_and_install(pi, client, github):
     github.release('bbb1111', '2026-10-04T00:00:00Z', 'Even newer')
     github.api_calls = 0
     r = client.post('/check_update', follow_redirects=True)
-    assert b'An update is available: bbb1111' in r.data and b'Install Update' in r.data and b'Even newer' in r.data
+    assert b'Update available: <strong>bbb1111</strong>' in r.data and b'Even newer' in r.data
+    # the update bar says it: no message on top of it
+    assert b'class="toast ' not in r.data
     r = client.post('/install_update')
     assert b'Update installed' in r.data and b'Installed version bbb1111' in r.data
     assert installed()['commit'] == github.latest['commit']
@@ -267,8 +269,13 @@ def test_web_check_and_install(pi, client, github):
 
 def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     monkeypatch.setenv('INVOCATION_ID', 'x')
+    held = []
+    real_lock = system.try_busy_lock
+    monkeypatch.setattr(system, 'try_busy_lock', lambda: held.append(real_lock()) or held[-1])
     client.post('/check_update')
     r = client.post('/install_update')
+    # no card can be started until the web interface has restarted
+    assert real_lock() is None
     assert ['systemd-run', '--on-active=2', 'systemctl', 'restart', 'mp4m-webservice'] in pi.commands
     assert b'waitForNewVersion' in r.data
     # one page: it says the web interface is restarting, then offers the reboot itself (not on
@@ -286,6 +293,9 @@ def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     # tried again after a failure: that attempt is waited for
     assert page.index('stopWaiting = false;') < page.index("fetch('/reboot', {method: 'POST'")
 
+    # (the restart lets go of the lock)
+    os.close(held[0])
+
     # if the restart can't be scheduled, the page doesn't pretend it is restarting: the reboot
     # is offered straight away
     monkeypatch.setattr(system, 'run_command',
@@ -296,6 +306,10 @@ def test_web_install_restarts_the_service(pi, client, github, monkeypatch):
     page = r.data.decode()
     assert 'Update installed' in page and 'waitForNewVersion' not in page and 'Restarting' not in page
     assert 'id="rebootButtons" class="button-row" >' in page and 'confirm_reboot' not in page
+    # not restarting: a card can be made
+    lock = real_lock()
+    assert lock is not None
+    os.close(lock)
     client.post('/reboot')
     assert ['reboot'] in pi.commands
 
@@ -347,7 +361,7 @@ def test_local_copy_with_outdated_files_outside_boot_is_offered(pi, client, gith
     boot_video = pi.path('installed-boot-video.mp4')
     open(boot_video, 'w').write('older boot video')
     monkeypatch.setattr(updater, 'SYSTEM_FILES', {'v7-beta/home/pi/mp4museum-boot.mp4': boot_video})
-    assert b'An update is available' in client.post('/check_update', follow_redirects=True).data
+    assert b'Update available: <strong>' in client.post('/check_update', follow_redirects=True).data
     assert installed()['commit'] == 'local'
     r = client.post('/install_update')
     assert b'install.sh' in r.data and boot_video.encode() in r.data
@@ -358,7 +372,7 @@ def test_local_copy_that_differs_is_offered(pi, client, github):
     webservice.RUNNING_VERSION = installed()
     with open(os.path.join(updater.APP_DIR, 'static', 'style.css'), 'a') as f:
         f.write('/* changed here */\n')
-    assert b'An update is available' in client.post('/check_update', follow_redirects=True).data
+    assert b'Update available: <strong>' in client.post('/check_update', follow_redirects=True).data
     assert installed()['commit'] == 'local'
 
 
@@ -370,7 +384,7 @@ def test_local_copy_comparison_failing_offers_the_update(pi, client, github, mon
         raise RuntimeError('mount failed')
     monkeypatch.setattr(system, 'writable', broken_mount)
     r = client.post('/check_update', follow_redirects=True)
-    assert r.status_code == 200 and b'An update is available' in r.data
+    assert r.status_code == 200 and b'Update available: <strong>' in r.data
 
 
 # ----- mp4m-update command ----- #
@@ -391,6 +405,15 @@ def cli(monkeypatch, capsys, pi):
             code = e.code
         return code, capsys.readouterr().out
     return run
+
+
+def test_cli_waits_for_a_card_being_made(cli, github):
+    making_a_card = system.try_busy_lock()
+    code, out = cli([], answers=['y'])
+    assert code == "A card is being made or a file copied in the web interface: update when it's done."
+    assert github.downloads == []
+    # checking is fine meanwhile
+    assert 'An update is available' in cli(['--check'])[1]
 
 
 def test_cli_check_installs_nothing(cli, github):

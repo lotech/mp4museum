@@ -534,6 +534,11 @@ select {
   flex-wrap: wrap;
 }
 
+.input-row + label {
+  /* a second field in the same form */
+  margin-top: 12px;
+}
+
 .input-row select, .input-row input[type="text"] {
   flex: 1 1 160px;
 }
@@ -810,8 +815,32 @@ select {
   list-style: none;
   padding: 0;
   margin: 12px -8px 0;
+  /* the script makes it fill the window */
   max-height: 640px;
   overflow-y: auto;
+}
+
+/* a scrollbar that can be seen on the dark background, also where it's usually hidden until
+   scrolled (macOS): long playlists scroll inside the card */
+.playlist::-webkit-scrollbar {
+  width: 10px;
+}
+
+.playlist::-webkit-scrollbar-track {
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+
+.playlist::-webkit-scrollbar-thumb {
+  background: var(--faint);
+  border: 2px solid var(--surface-2);
+  border-radius: 999px;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .playlist {
+    scrollbar-color: var(--faint) var(--surface-2);
+  }
 }
 
 .playlist-item {

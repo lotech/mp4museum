@@ -25,6 +25,12 @@ import RPi.GPIO as GPIO
 import subprocess
 
 MEDIA_FILES = '/media/*/*.*'
+# only these are played: a USB stick or SD card can have other files on it (an SD card made
+# for a Pi has its boot files). Same list as the web interface's
+MEDIA_TYPES = ('.mp4', '.m4v', '.mov', '.mkv', '.avi', '.ts', '.mts', '.m2ts', '.h264', '.mpg', '.mpeg',
+               '.m2v', '.vob', '.webm', '.wmv', '.flv', '.ogv', '.3gp',
+               '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff',
+               '.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.aif', '.aiff')
 BOOT_VIDEO = '/home/pi/mp4museum-boot.mp4'
 # a boot video put on the boot partition (e.g. from a computer) is played instead
 CUSTOM_BOOT_VIDEO = '/boot/mp4museum-boot.mp4'
@@ -825,6 +831,10 @@ class LogoAddress:
                     # VLC can't show it here: not tried again (it says why in the log once)
                     self.failed = True
 
+def media_files():
+    """The files to play, in order."""
+    return sorted(path for path in glob.glob(MEDIA_FILES) if path.lower().endswith(MEDIA_TYPES))
+
 def read_disabled():
     try:
         with open(DISABLED_FILE, 'r') as f:
@@ -894,7 +904,7 @@ retry_next_round = False
 playlist_started = True
 try:
     while(1):
-        files = sorted(glob.glob(MEDIA_FILES))
+        files = media_files()
         # nothing to play yet (no USB stick, empty media partition): check again shortly
         if not files:
             # don't leave the last frame of a deleted file on screen
@@ -927,7 +937,7 @@ try:
                             break
                 index = position
             if requested and requested not in files:
-                files = sorted(glob.glob(MEDIA_FILES))
+                files = media_files()
             if requested in files:
                 index = files.index(requested)
                 if requested in skipped:

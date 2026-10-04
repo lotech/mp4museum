@@ -49,6 +49,14 @@ def test_start_up_and_playlist_order(tmp_path):
 
 
 
+def test_only_media_files_are_played(tmp_path):
+    # an SD card in a USB reader: the boot files of the Pi it was made for
+    r = run(tmp_path, files=['/media/usb0/LICENCE.broadcom', '/media/usb0/bcm2710-rpi-2-b.dtb',
+                             '/media/usb0/config.txt', '/media/usb0/Film.MOV', '/media/internal/a.mp4',
+                             '/media/internal/notes.txt'], max_plays=7)
+    assert plays(r)[3:7] == ['a.mp4', 'Film.MOV', 'a.mp4', 'Film.MOV']
+
+
 def marquee(result):
     """What was set on VLC's marquee, in order: (option, value, the file playing then)."""
     events, playing = [], None

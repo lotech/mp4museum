@@ -36,7 +36,8 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
 
 ## Code layout (`v7-beta/`)
 
-- `boot/mp4museum.py`: the player. One VLC instance; plays `/media/*/*.*` in order; GPIO
+- `boot/mp4museum.py`: the player. One VLC instance; plays the media files in `/media/*/` in order (`MEDIA_TYPES`, the same list as
+  `system.py`'s); GPIO
   pin 11 pause; pin 13 next (pressed once), previous (twice), back to the start (held). `.bashrc` starts it again unless it exits with 0 (Ctrl-C, SIGTERM,
   SIGHUP); a file it was playing when it died is skipped until replaced (`/tmp/mp4museum-skipped.json`),
   so one bad file can't stop it again and again. VLC is not stopped when a file ends by itself (`stop()` closes
@@ -60,7 +61,9 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   Users can edit this file in the web interface, so the updater only replaces it if unedited.
 - `boot/mp4m-web/`: the web interface, on `/boot` so it can be updated with the overlay on.
   `webservice.py` (Flask routes), `system.py` (everything that touches the Pi),
-  `updater.py` (software updates, also the `mp4m-update` command), `templates/`, `static/`.
+  `updater.py` (software updates, also the `mp4m-update` command), `clone.py` (copying the
+  player to an SD card in a USB reader: new partitions and disk ID, needs exfat-utils from
+  `install.sh`), `templates/`, `static/`.
   Icons are [Lucide](https://lucide.dev) symbols in `static/icons.svg`, used with the `icon()`
   macro in `templates/_icons.html`; to add one, copy its `<symbol>` from the lucide-static
   package (same version) into the sprite. `test_every_icon_is_in_the_sprite` checks them.
@@ -108,6 +111,7 @@ python -m pytest tests
   and media folders; `mount`, `reboot` and hostname changes stubbed and recorded in
   `pi.commands`); `client` is a logged-in browser; `github` is a fake GitHub serving a
   temporary copy of this repository to the updater.
+- `test_clone.py`: copying to an SD card, on simulated disks (partitions are files and folders).
 - `test_web.py`, `test_storage.py`, `test_updater.py`: the web interface, read-only
   partitions and file writes, software updates and `mp4m-update`.
 - `test_player.py` runs the real player through `player_harness.py`: fake `vlc` and

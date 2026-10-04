@@ -19,6 +19,7 @@ from datetime import timedelta
 
 from flask import Flask, Request, request, redirect, url_for, flash, send_from_directory, render_template, render_template_string, session, g
 
+import clone
 import system
 import updater
 
@@ -157,8 +158,12 @@ def index():
     current_mode_key, current_mode = system.get_current_video_mode(config_text)
     free_space = system.get_free_space() if is_available else 0
     board = system.board_memory_megabytes()
+    # how the copies from USB sticks that have finished went
+    for category, message in system.take_copy_results():
+        flash(message, category)
 
     return render_template('index.html',
+                           copying=system.copies_running(),
                            playlist=system.get_playlist(),
                            player_log=system.read_player_log(),
                            player=player_view(system.get_player_status()),
@@ -191,7 +196,11 @@ def index():
                            loop_player=system.get_loop_player(),
                            boot_video_plays=system.get_boot_video_plays(),
                            show_address=system.get_show_address(),
-                           start_up_settings=system.player_has_start_up_settings())
+                           start_up_settings=system.player_has_start_up_settings(),
+                           clone_cards=clone.list_cards(),
+                           clone_unavailable=clone.unavailable(),
+                           clone_state=clone.get_state(),
+                           media_used=system.format_size(clone.used_bytes(system.MEDIA_PATH)) if is_available else None)
 
 
 # ----- Player ----- #
@@ -485,7 +494,9 @@ def upload_file():
                     else:
                         file.stream.flush()
                         path = os.path.join(system.MEDIA_PATH, file.filename)
-                        os.replace(file.stream.name, path)
+                        # (a copy from a USB stick checks for the name and renames under this lock)
+                        with system.media_rename_lock:
+                            os.replace(file.stream.name, path)
                         upload_message(f"File '{file.filename}' uploaded successfully.", "success")
                         pixels = system.image_size(path) if system.media_kind(path) == 'image' else None
                         if system.is_large_image(pixels):
@@ -536,6 +547,41 @@ def delete_file():
     return redirect(url_for('index'))
 
 
+@app.route('/copy_to_player', methods=['POST'])
+def copy_to_player():
+    """Copy a file from a USB stick to the media partition."""
+    path = request.form.get('file', '')
+    entry = next((e for e in system.get_playlist() if e['path'] == path and not e['internal']), None)
+    if not system.media_available():
+        flash(f"The media partition {system.MEDIA_PATH} is not mounted.", "error")
+    elif not entry:
+        flash("That file isn't on a USB stick any more.", "error")
+    elif not system.is_valid_filename(entry['name']):
+        flash(f"'{entry['name']}' has characters in its name the player can't store. Rename it on a computer first.", "error")
+    elif clone.is_running():
+        # it may be reading from the card being made
+        flash("A card is being made: copy files when it's done.", "error")
+    elif os.path.islink(path):
+        # a stick formatted ext4 could point anywhere
+        flash(f"'{entry['name']}' is a link, not a file.", "error")
+    elif entry['size'] > system.get_free_space():
+        flash(f"Not enough space to copy '{entry['name']}' ({system.format_size(entry['size'])}).", "error")
+    else:
+        # in the background: a large file takes minutes, longer than a browser waits
+        try:
+            system.start_copy(path)
+            flash(f"Copying '{entry['name']}' to this player.", "success")
+        except FileExistsError:
+            flash(f"This player already has a file called '{entry['name']}', or it's being copied.", "error")
+        except system.Busy:
+            flash("A card is being made or an update installed: copy files when it's done.", "error")
+    return redirect(url_for('index'))
+
+@app.route('/copy_status')
+def copy_status():
+    return {'copying': system.copies_running()}
+
+
 @app.route('/switch_file', methods=['POST'])
 def switch_file():
     """Switch a file off (the player leaves it out) or on again, without changing the file."""
@@ -568,7 +614,6 @@ def switch_file():
     return redirect(url_for('index'))
 
 
-_rename_lock = threading.Lock()
 
 @app.route('/rename', methods=['POST'])
 def rename_file():
@@ -585,8 +630,9 @@ def rename_file():
         return redirect(url_for('index'))
     old_path = os.path.join(system.MEDIA_PATH, filename)
     new_path = os.path.join(system.MEDIA_PATH, new_name)
-    # one at a time, so two renames to the same name can't overwrite a file
-    with _rename_lock:
+    # one at a time, and not while an upload or a copy from a USB stick is renamed into place,
+    # so none can overwrite a file another has just put there
+    with system.media_rename_lock:
         if not os.path.isfile(old_path):
             flash("File not found.", "error")
             return redirect(url_for('index'))
@@ -623,10 +669,60 @@ def rename_file():
     return redirect(url_for('index'))
 
 
+# ----- Copying this player to an SD card ----- #
+@app.route('/clone', methods=['POST'])
+def clone_card():
+    try:
+        # "<device>|<id>": the card chosen, as it was when the page was loaded
+        device, _, identity = request.form.get('device', '').partition('|')
+        clone.start(device, request.form.get('media') == 'with', identity or None)
+        flash("Copying this player to the card. It takes a few minutes: leave the card in until it's done.", "success")
+    except clone.CloneError as e:
+        flash(str(e), "error")
+    except Exception as e:
+        flash(f"Couldn't start copying: {e}", "error")
+    return redirect(url_for('index'))
+
+@app.route('/clone/status')
+def clone_status():
+    return clone.get_state()
+
+
 # ----- Reboot ----- #
+_reboot_lock = {'fd': None}
+_reboot_lock_guard = threading.Lock()
+
+def busy():
+    """Why the player shouldn't reboot (or the web interface restart) now, or None."""
+    if clone.is_running():
+        return "A card is being made: reboot when it's done."
+    if system.copies_running():
+        return "A file is being copied to this player: reboot when it's done."
+    return None
+
+
 @app.route('/reboot', methods=['POST'])
 def reboot_system():
-    status, output = system.run_command(["reboot"])
+    # held from here, so a card or a copy can't start before the reboot (kept by a reboot under
+    # way, which can be asked for again)
+    with _reboot_lock_guard:
+        lock = _reboot_lock['fd']
+        if lock is None:
+            lock = system.try_busy_lock()
+        message = busy() or (None if lock is not None else
+                             "A card is being made, a file copied or an update installed: reboot when it's done.")
+        if message:
+            if lock is not None and lock != _reboot_lock['fd']:
+                os.close(lock)
+            if is_fetch():
+                return message, 409
+            flash(message, "error")
+            return redirect(url_for('index'))
+        _reboot_lock['fd'] = lock
+        status, output = system.run_command(["reboot"])
+        if not status:
+            _reboot_lock['fd'] = None
+            os.close(lock)
     if is_fetch():
         # the page's script shows a failure (a redirect would hide it)
         return ("Rebooting.", 200) if status else (f"Failed to reboot: {output}", 500)
@@ -810,13 +906,12 @@ def check_for_update(auto):
     if not found:
         flash("The software is up to date.", "success")
     else:
-        message = f"An update is available: {latest['commit'][:7]} ({latest['date'][:10]})."
+        # the update bar shows it; a message only for what the bar doesn't say
         installed_branch = RUNNING_VERSION.get('branch')
         if installed_branch and installed_branch != config['branch']:
-            message += f" Installing it switches from branch {installed_branch} to {config['branch']}."
+            flash(f"Installing this update switches from branch {installed_branch} to {config['branch']}.", "warning")
         elif RUNNING_VERSION.get('date') and latest['date'] < RUNNING_VERSION['date']:
-            message += " It is older than the installed version."
-        flash(message, "success")
+            flash("This update is older than the installed version.", "warning")
     return redirect(url_for('index'))
 
 def update_answer(latest):
@@ -848,15 +943,27 @@ def find_update(config, latest):
 @app.route('/install_update', methods=['POST'])
 def install_update():
     latest = session.get('update')
+    message = busy()
+    if message:
+        # the web interface restarts with the new version, which would stop it half way
+        flash(message.replace('reboot', 'install the update'), "error")
+        return redirect(url_for('index'))
     if not latest:
         flash("Check for updates first.", "error")
+        return redirect(url_for('index'))
+    # held until the web interface restarts, so a card can't be started meanwhile
+    busy_lock = system.try_busy_lock()
+    if busy_lock is None:
+        flash("A card is being made or a file copied: install the update when it's done.", "error")
         return redirect(url_for('index'))
     try:
         summary = updater.update(latest)
     except updater.UpdateError as e:
+        os.close(busy_lock)
         flash(f"Update failed, nothing was changed: {e}", "error")
         return redirect(url_for('index'))
     except Exception as e:
+        os.close(busy_lock)
         flash(f"The update stopped part way: {e}. Try again, or run 'sudo mp4m-update --force' over SSH.", "error")
         return redirect(url_for('index'))
     session.pop('update', None)
@@ -867,6 +974,8 @@ def install_update():
         restarting, output = system.run_command(['systemd-run', '--on-active=2', 'systemctl', 'restart', 'mp4m-webservice'])
         if not restarting:
             print(f"Failed to schedule a restart of the web interface: {output}", flush=True)
+    if not restarting:
+        os.close(busy_lock)
     try:
         # The templates have just been replaced, so this page doesn't use them
         with open(os.path.join(updater.APP_DIR, 'static', 'style.css'), 'r') as f:
@@ -980,6 +1089,8 @@ UPDATED_PAGE = """<!doctype html>
 if __name__ == '__main__':
     # A crash or restart can leave /boot or the media partition writable
     system.restore_read_only_mounts()
+    # and usbmount, if it stopped while making a card
+    clone.recover()
     # Keep using the templates this version started with, even after an update replaces the files
     for template_name in app.jinja_env.list_templates():
         app.jinja_env.get_template(template_name)

@@ -49,6 +49,23 @@ cp etc/systemd/system/mp4m-webservice.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable mp4m-webservice.service
 
+if ! command -v mkfs.exfat >/dev/null && ! command -v mkexfatfs >/dev/null; then
+    echo "Installing exfat-utils (for copying this player to an SD card, in the web interface)"
+    # Buster's packages have moved to legacy.raspbian.org: a list just for this, the Pi's own is left as it is
+    sources=$(mktemp)
+    echo "deb http://legacy.raspbian.org/raspbian/ buster main" > "$sources"
+    # (List-Cleanup=0: the lists of the Pi's own sources are kept)
+    apt_options=(-o Dir::Etc::SourceList="$sources" -o Dir::Etc::SourceParts=- -o APT::Get::List-Cleanup=0)
+    if apt-get "${apt_options[@]}" update -qq &&
+       apt-get "${apt_options[@]}" install -y -qq --no-install-recommends exfat-utils; then
+        echo "  Installed."
+    else
+        echo "  Couldn't install it (no internet connection?). Everything else works; run this again"
+        echo "  with an internet connection to copy this player to SD cards."
+    fi
+    rm -f "$sources"
+fi
+
 echo
 echo "Done. Later updates: sudo mp4m-update, or System -> Software Update in the web interface."
 echo "Now turn the overlay file system back on:"
