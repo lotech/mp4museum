@@ -840,6 +840,21 @@ def test_network_in_use_card_with_an_address_for_the_next_start(ports, client):
     assert '<dt>Set to</dt><dd>Fixed address<br><span class="hint">From the next start: 192.168.1.60/24</span>' in card
 
 
+def test_network_in_use_card_shows_what_is_applied(ports, client, monkeypatch):
+    """Not the change being made: while it's applied, and after it went wrong."""
+    def set_to():
+        card = client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+        return card.split('<dt>Set to</dt><dd>')[1].split('</dd>')[0]
+    network.apply_at_start()
+    network.change(FIXED)
+    assert set_to() == 'Changing…'
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[0] != 'dhcpcd', 'timed out'))
+    ports.run_later(network.APPLY_DELAY)
+    assert set_to() == 'Fixed address <span class="hint">(the last change didn\'t all apply)</span>'
+    network.undo()
+    assert set_to().startswith('Automatic (DHCP)')
+
+
 def test_network_in_use_card_wifi_details_belong_to_one_interface(ports, client, monkeypatch):
     """A second Wi-Fi adapter isn't shown as connected to the first one's network; the country
     isn't shown when Wi-Fi isn't set up here (the system's own setting isn't known)."""

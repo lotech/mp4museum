@@ -423,7 +423,8 @@
           {% endif %}
           <dt>IP address</dt><dd>{% for address in port.addresses %}<a href="http://{{ address.split('/')[0] }}/">{{ address }}</a>{% if not loop.last %}<br>{% endif %}{% else %}None{% endfor %}</dd>
           {% if port.router %}<dt>Router</dt><dd>{{ port.router }}</dd>{% endif %}
-          <dt>Set to</dt><dd>{{ 'Fixed address' if port.using.mode == 'static' else 'Automatic (DHCP)' }}
+          <dt>Set to</dt><dd>{% if port.using_state == 'changing' %}Changing…{% else %}{{ 'Fixed address' if port.using.mode == 'static' else 'Automatic (DHCP)' }}
+            {%- if port.using_state == 'unsure' %} <span class="hint">(the last change didn't all apply)</span>{% endif %}{% endif %}
             {%- if port.next_start %}<br><span class="hint">From the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic (DHCP)' }}</span>{% endif %}</dd>
           {% if port.ipv6 %}<dt>IPv6</dt><dd>{{ port.ipv6|join('<br>'|safe) }}</dd>{% endif %}
           {% if port.mac %}<dt>MAC address</dt><dd>{{ port.mac }}</dd>{% endif %}
