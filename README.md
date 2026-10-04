@@ -26,16 +26,22 @@ This fork copies the v7 beta files off a running install and develops them furth
   card, and file names are checked.
 - **Login** with a password (default `mp4museum`), changeable in the web interface.
 - **A network name per player** (`mp4museum-xxxx.local`), so several players can share a network.
-- **A new web interface design:** a player with Pause/Resume and Next and how far the file has
-  got, a playlist to start any file from, uploads with progress, messages that don't push the
-  page around, and an update bar when a new version is available.
-- **Player:** shows what is playing in the web interface with Pause/Resume and Next buttons,
-  has a setting for how long images are shown, brings back sync mode from version 6, uses one
-  VLC instance for everything, and no longer uses a full CPU core while there is nothing to play.
+- **A new web interface design:** a player with Previous, Pause/Resume, Next and Rewind and how
+  far the file has got; a playlist that fills the window, to start, rename, download, delete or
+  switch off any file; uploads with progress; messages that don't push the page around; and an
+  update bar when a new version is available.
+- **Player:** plays only video, image and sound files, has a setting for how long images are
+  shown, loops videos with omxplayer (it holds the last frame), brings back sync mode from
+  version 6, uses one VLC instance for everything, and no longer uses a full CPU core while there
+  is nothing to play. If it stops by itself it's started again, skipping a file that keeps
+  stopping it. The button on pin 13: once next, twice previous, held back to the start.
+- **Switch files off** without deleting them (also on USB sticks), and **copy files from a USB
+  stick to the player**, so they play without the stick.
 - **Easier to maintain and install:** the web interface is split into modules and templates,
   runs as a system service, and has an install script.
 - **Updates from GitHub:** a Software Update button in the web interface, or
   `sudo mp4m-update` over SSH, installs the latest version and offers to reboot.
+  `sudo mp4m-update --branch <name>` installs a branch to try it.
 - **Your own boot video** if you want one: put `mp4museum-boot.mp4` on the SD card's boot partition.
   The original boot video and the MP4MUSEUM logo screen are kept.
 - **The player's address on the logo screen** at start-up (can be turned off).
@@ -52,6 +58,9 @@ to install them, and [`TODO.md`](TODO.md) for what's planned.
 | `mp4museum.py`, `mp4m-gpio.py`, `mp4m-keyboard.py`, `mp4museum-randomJPG.py`, `mp4museum DCIM chronologically.py` | The original version 6 player scripts, unchanged from the original repository |
 | `v7-beta/` | The v7 beta files, at the paths where they live on the Pi, with this fork's changes |
 | `TODO.md` | Planned work and ideas for this fork |
+| `CLAUDE.md` | Notes for working on the code: the device, its limits, how updates and tests work |
+| `tests/` | Tests (`python -m pytest tests`); `tests/manual/` clones a card image with the real tools (needs root) |
+| `ci/tests.yml` | The test workflow for GitHub Actions (not switched on) |
 | `LICENSE` | GNU General Public License v3, unchanged from the original repository |
 
 ## Using the original version 6 scripts
