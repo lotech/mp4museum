@@ -473,21 +473,30 @@ def _unmount_card(device):
         try:
             run(['umount', mount_point])
         except CloneError:
-            # in use: the player plays the media files in /media/*/, so it may be playing one from the card.
-            # Taken out of the folder now (-l); it's let go when the file is closed
+            # in use: the player plays the media files in /media/*/, so it may be playing one from
+            # the card. Then it's taken out of the folder now (-l), and let go when the player
+            # moves on. Anything else using it: the card isn't touched
+            if not _player_on([mount_point]):
+                raise CloneError("Another program is using the card, so it wasn't changed. Take it out, "
+                                 "put it back in and try again.")
             run(['umount', '-l', mount_point])
             busy.append(mount_point)
     if busy:
         _player_leaves(busy)
 
 
+def _player_on(mount_points):
+    """Whether the player is playing a file from one of these folders."""
+    status = system.get_player_status()
+    playing = str((status or {}).get('file') or '')
+    return any(playing.startswith(mount_point + '/') for mount_point in mount_points)
+
+
 def _player_leaves(mount_points, wait=10):
     """Make the player move on if it plays a file from one of these folders, and wait until it
     has (its next file can't be from there: they're unmounted)."""
     def on_card():
-        status = system.get_player_status()
-        playing = str((status or {}).get('file') or '')
-        return any(playing.startswith(mount_point + '/') for mount_point in mount_points)
+        return _player_on(mount_points)
     if on_card():
         system.signal_player(signal.SIGUSR1)
     deadline = time.monotonic() + wait

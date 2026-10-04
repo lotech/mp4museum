@@ -321,6 +321,24 @@ def test_a_card_in_use_by_the_player_is_let_go(pi, monkeypatch):
     assert len(signals) == 1
 
 
+def test_a_card_used_by_another_program_isnt_touched(pi, monkeypatch):
+    # e.g. a shell over SSH in a folder on it: not unmounted by force, nothing changed
+    with open(clone.PROC_MOUNTS, 'a') as f:
+        f.write('/dev/sda1 /media/usb0 exfat ro 0 0\n')
+    commands = []
+
+    def run(cmd, input=None):
+        commands.append(cmd)
+        if cmd == ['umount', '/media/usb0']:
+            raise clone.CloneError('umount: /media/usb0: target is busy.')
+        return ''
+    monkeypatch.setattr(clone, 'run', run)
+    monkeypatch.setattr(system, 'get_player_status', lambda: {'file': '/media/internal/a.mp4', 'pid': 1})
+    with pytest.raises(clone.CloneError, match="Another program is using the card, so it wasn't changed"):
+        clone._unmount_card('/dev/sda')
+    assert commands == [['umount', '/media/usb0']]
+
+
 def test_stops_if_the_player_keeps_the_card(pi, monkeypatch):
     # the player stuck on a file from the card: it isn't changed
     monkeypatch.setattr(system, 'get_player_status', lambda: {'file': '/media/usb0/film.mp4', 'pid': 1})
