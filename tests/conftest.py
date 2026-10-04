@@ -172,6 +172,7 @@ def pi(tmp_path, monkeypatch):
         '_next_start': {},
         '_rollback': {},
         '_generation': [0],
+        '_scan_left_on': [False],
     }.items():
         monkeypatch.setattr(network, name, value)
     real = [name for name, value in vars(network).items()

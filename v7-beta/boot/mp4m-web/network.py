@@ -712,6 +712,9 @@ def parse_scan(output):
             best[network['ssid']] = network
     return sorted(best.values(), key=lambda n: -(n['signal'] if n['signal'] is not None else -999))
 
+# a scan turned Wi-Fi on to look for networks and couldn't turn it off again: the next one tries
+_scan_left_on = [False]
+
 def scan():
     """The Wi-Fi networks in range (see parse_scan), or ValueError saying why not. Without a
     country only on the channels every country allows."""
@@ -732,7 +735,8 @@ def scan():
             raise ValueError("Wi-Fi is off. Turn it on to look for networks.")
         country = in_use['country'] if in_use else ''
         frequencies = [] if country else ['freq'] + [str(f) for f in SAFE_FREQUENCIES]
-        blocked = wifi_blocked()
+        # (or left on by a scan whose blocking again failed)
+        blocked = wifi_blocked() or _scan_left_on[0]
         if blocked:
             _command(['rfkill', 'unblock', 'wifi'])
         try:
@@ -744,7 +748,13 @@ def scan():
         finally:
             # Wi-Fi not set up here, or off (no apply ran meanwhile)
             if blocked and not (in_use and in_use['enabled']):
-                _command(['rfkill', 'block', 'wifi'])
+                done = _command(['rfkill', 'block', 'wifi'])[0] or _command(['rfkill', 'block', 'wifi'])[0]
+                _scan_left_on[0] = not done
+            else:
+                _scan_left_on[0] = False
+    if _scan_left_on[0]:
+        raise ValueError("Wi-Fi couldn't be switched off again after looking for networks. Reboot the player to "
+                         "switch it off.")
     if not ok:
         raise ValueError(f"Couldn't look for networks: {output}")
     networks = parse_scan(output)

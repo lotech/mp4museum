@@ -759,6 +759,28 @@ def test_keep_bar_says_when_wifi_isnt_connected(ports, client):
     assert "isn't connected to a network (yet)" in page and 'network/keep' in page
 
 
+def test_scan_says_when_wifi_couldnt_be_blocked_again(ports, client, monkeypatch):
+    blocked(ports)
+    failing = {'block': True}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        if cmd == ['rfkill', 'block', 'wifi'] and failing['block']:
+            return False, 'stopped after 30 seconds'
+        if cmd == ['rfkill', 'unblock', 'wifi']:
+            blocked(ports, soft='0')
+        return True, ''
+    monkeypatch.setattr(system, 'run_command', run)
+    answer = client.get('/network/scan')
+    assert answer.status_code == 409 and "couldn't be switched off again" in answer.get_json()['error']
+    assert ports.commands.count(['rfkill', 'block', 'wifi']) == 2
+    # the next scan blocks it again, though Wi-Fi isn't blocked now
+    failing['block'] = False
+    ports.commands.clear()
+    assert client.get('/network/scan').status_code == 200
+    assert ports.commands[-1] == ['rfkill', 'block', 'wifi']
+
+
 def test_wifi_off_on_the_image(ports, client):
     blocked(ports)
     page = client.get('/').data.decode()
