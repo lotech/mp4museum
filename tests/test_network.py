@@ -264,6 +264,26 @@ def test_the_first_copy_of_wifi_set_up_elsewhere_is_kept(ports, monkeypatch):
     assert wpa(ports) == by_hand and network.wifi_blocked() is True
 
 
+def test_the_same_settings_can_be_applied_again_after_they_failed(ports, client, monkeypatch):
+    """e.g. dhcpcd didn't answer at start: Apply on the settings shown tries them again."""
+    with open(network.SETTINGS_FILE, 'w') as f:
+        json.dump(FIXED, f)
+    failing = {'dhcpcd': True}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        return (False, 'timed out') if cmd[0] == 'dhcpcd' and failing['dhcpcd'] else (True, '')
+    monkeypatch.setattr(system, 'run_command', run)
+    network.apply_at_start()
+    failing['dhcpcd'] = False
+    ports.commands.clear()
+    client.post('/network/address', data={'interface': 'enxb827eb4e4fd4', 'mode': 'static',
+                                          'address': '192.168.1.50/24', 'router': '192.168.1.1'})
+    ports.run_later(network.APPLY_DELAY)
+    assert ['dhcpcd', '-n', 'enxb827eb4e4fd4'] in ports.commands and network.pending()['problems'] == []
+    assert network.all_applied()
+
+
 def test_nothing_changed(ports, client):
     client.post('/network/address', data={'interface': 'enxb827eb4e4fd4', 'mode': 'dhcp'})
     assert network.pending() is None and 'Nothing changed.' in client.get('/').data.decode()

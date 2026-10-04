@@ -470,9 +470,10 @@ def _use(settings, at_start=False, now_too=(), generation=None):
         before = _in_use['settings']
         problems = _apply(now, at_start=at_start or before is None, again=list(_maybe_in_use))
         if problems:
-            # partly done: what was in use, and these, may each be partly in use now
-            for other in (before, now):
-                if other is not None and other not in _maybe_in_use:
+            # partly done: what was in use (at start: as on the image, DHCP), and these, may each
+            # be partly in use now
+            for other in (before if before is not None else {}, now):
+                if other not in _maybe_in_use:
                     _maybe_in_use.append(other)
         else:
             del _maybe_in_use[:]
@@ -525,6 +526,11 @@ def target_settings():
     """The settings the page changes: the ones waiting to be kept, else the saved ones."""
     with _lock:
         return _pending['settings'] if _pending else read_settings()
+
+def all_applied():
+    """False while the settings in use may not all have applied (an apply went wrong): applying
+    the same settings again is then worth doing."""
+    return not _maybe_in_use
 
 def next_start_interfaces():
     """Interfaces whose saved address isn't used until the next start (Save for next start),

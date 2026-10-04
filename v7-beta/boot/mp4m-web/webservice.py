@@ -891,7 +891,7 @@ def try_network_change(settings, later=False, now_too=()):
     network.change), or saved for the next start. now_too: interfaces to use them on now even if
     they were saved for the next start."""
     now_too = set(now_too) & network.next_start_interfaces() if not later else set()
-    if network.normalize(settings) == network.target_settings() and not now_too:
+    if network.normalize(settings) == network.target_settings() and not now_too and network.all_applied():
         flash("Nothing changed.", "info")
         return redirect(url_for('index'))
     try:
