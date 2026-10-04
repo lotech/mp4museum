@@ -87,20 +87,29 @@ def _mkfs_exfat(device, label):
     return [tool, '-L' if '--volume-label' in exfat_usage(tool) else '-n', label, device]
 
 
-def media_bytes(path):
+# exFAT keeps each file and folder in whole clusters: at most 128 KB with the exFAT tools' choices
+EXFAT_CLUSTER = 128 * 1024
+
+
+def media_bytes(path, on_card=False):
     """How much a clone copies from the media partition: its files, without hidden files and
-    folders (uploads that stopped part way, what a Mac leaves). The space the partition uses is
-    more: those, and the file system's own."""
+    folders (uploads that stopped part way, what a Mac leaves). on_card: the space they take on
+    the card, each file and folder rounded up to whole clusters (many small files take much
+    more than their size)."""
+    def taken(size):
+        return -(-size // EXFAT_CLUSTER) * EXFAT_CLUSTER if on_card else size
     total = 0
     for folder, dirs, files in os.walk(path):
         dirs[:] = [name for name in dirs if not name.startswith('.')]
+        if on_card and folder != path:
+            total += EXFAT_CLUSTER
         for name in files:
             file_path = os.path.join(folder, name)
             # (rsync copies files, not links)
             if name.startswith('.') or os.path.islink(file_path):
                 continue
             try:
-                total += os.path.getsize(file_path)
+                total += taken(os.path.getsize(file_path))
             except OSError:
                 pass
     return total
@@ -221,7 +230,7 @@ def plan(card_size, root_used, media_used, with_media, boot_sectors):
 
 def sizes():
     """What a clone needs to know before it starts: the system partition's used space and the
-    media files' (both in bytes)."""
+    space the media files will take on the card (both in bytes)."""
     mount_point = tempfile.mkdtemp(prefix=WORK_PREFIX, dir=TEMP_DIR)
     try:
         run(['mount', '-o', 'ro', partition(SOURCE_DISK, 2), mount_point])
@@ -231,7 +240,7 @@ def sizes():
             run(['umount', mount_point])
     finally:
         os.rmdir(mount_point)
-    return root_used, media_bytes(system.MEDIA_PATH)
+    return root_used, media_bytes(system.MEDIA_PATH, on_card=True)
 
 
 # ----- Cloning (one at a time, in the background) ----- #

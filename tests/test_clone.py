@@ -235,6 +235,21 @@ def test_media_size_is_what_a_clone_copies(pi, tmp_path):
     (pi.media / '.Spotlight-V100' / 'Store-V2' / 'index').write_bytes(b'x' * 100000)
     os.symlink(str(tmp_path / 'elsewhere'), str(pi.media / 'link.mp4'))
     assert clone.media_bytes(str(pi.media)) == 1500
+    # on the card, each file and folder takes whole clusters: what the card's size is checked with
+    assert clone.media_bytes(str(pi.media), on_card=True) == 3 * clone.EXFAT_CLUSTER
+
+
+def test_card_size_check_counts_whole_clusters(pi, monkeypatch):
+    # 2000 small files: 2 MB of files, 250 MB on the card
+    for number in range(2000):
+        (pi.media / ('%04d.jpg' % number)).write_bytes(b'x' * 1000)
+    monkeypatch.setattr(clone, 'run', lambda cmd, input=None: '')
+    root_used, media_on_card = clone.sizes()
+    assert media_on_card == 2000 * clone.EXFAT_CLUSTER
+    gib = 1024 ** 3
+    with pytest.raises(clone.CloneError, match='too small'):
+        clone.plan(int(3.8 * gib), 2 * gib, media_on_card, True, 524288)
+    clone.plan(int(3.8 * gib), 2 * gib, clone.media_bytes(str(pi.media)), True, 524288)
 
 
 def test_system_tab_shows_the_media_size_a_clone_copies(client, pi):
