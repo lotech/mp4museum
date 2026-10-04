@@ -112,6 +112,7 @@ def pi(tmp_path, monkeypatch):
         'USBMOUNT_CONF': str(tmp_path / 'usbmount.conf'),
         'PROC_MOUNTS': str(tmp_path / 'mounts'),
         'PROC_CMDLINE': str(tmp_path / 'cmdline'),
+        'SYS_BLOCK': str(tmp_path / 'sys-block'),
         'MARKER': str(tmp_path / 'mp4m-clone.json'),
         'TEMP_DIR': str(tmp_path),
         'partition': lambda disk, number: str(tmp_path / 'dev' / ('%s-%d' % (os.path.basename(disk), number))),
@@ -122,7 +123,7 @@ def pi(tmp_path, monkeypatch):
     }.items():
         monkeypatch.setattr(clone, name, value)
     real = [name for name, value in vars(clone).items()
-            if isinstance(value, str) and value.startswith(('/etc', '/proc', '/run', '/tmp', '/boot', '/media'))
+            if isinstance(value, str) and value.startswith(('/etc', '/proc', '/sys', '/run', '/tmp', '/boot', '/media'))
             and not value.startswith(str(tmp_path))]
     assert not real, 'add these to the pi fixture: %s' % real
 
@@ -132,6 +133,7 @@ def pi(tmp_path, monkeypatch):
     monkeypatch.setattr(updater, '_differs_from_local_copy', {})
 
     monkeypatch.setattr(webservice, 'RUNNING_VERSION', {})
+    monkeypatch.setattr(webservice, '_reboot_lock', {'fd': None})
     monkeypatch.setattr(webservice, '_auto_check', {'time': None, 'ok': False, 'latest': None})
     monkeypatch.setattr(webservice.app, 'secret_key', 'test')
     monkeypatch.delenv('INVOCATION_ID', raising=False)

@@ -393,6 +393,20 @@ def test_card_identity_tells_cards_apart():
         assert clone.card_identity(dict(READER, **change)) != clone.card_identity(READER)
 
 
+def test_card_identity_counts_cards_put_in_where_the_kernel_does(pi):
+    # Linux 5.15+: /sys/block/<disk>/diskseq is new for every card put in, so even two blank
+    # cards of the same size in the same reader are told apart
+    folder = os.path.join(clone.SYS_BLOCK, 'sda')
+    os.makedirs(folder)
+    with open(os.path.join(folder, 'diskseq'), 'w') as f:
+        f.write('12\n')
+    blank = dict(READER, ptuuid=None, children=[])
+    first = clone.card_identity(blank)
+    with open(os.path.join(folder, 'diskseq'), 'w') as f:
+        f.write('13\n')
+    assert clone.card_identity(blank) != first
+
+
 def test_card_changed_after_starting_isnt_erased(pi, disks):
     # another card put in the reader after Copy was pressed: checked again just before erasing
     pi.disks[-1] = dict(READER, ptuuid='77aa0011')

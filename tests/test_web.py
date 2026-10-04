@@ -1095,6 +1095,20 @@ def test_disabled_list_from_windows_and_deleting(pi, client, monkeypatch):
     assert b'deleted successfully' in r and b'Failed to delete' not in r and b"Couldn&#39;t take it off" in r
 
 
+def test_reboot_waits_for_a_card_copy_or_update(pi, client):
+    # one started (here: by another process) holds the lock: no reboot
+    other = system.try_busy_lock()
+    r = client.post('/reboot', headers={'X-Requested-With': 'fetch'})
+    assert r.status_code == 409 and b'reboot when it' in r.data and ['reboot'] not in pi.commands
+    os.close(other)
+    # and a reboot under way holds it, so none can start before it; it can be asked for again
+    assert client.post('/reboot', headers={'X-Requested-With': 'fetch'}).status_code == 200
+    assert ['reboot'] in pi.commands and system.try_busy_lock() is None
+    assert client.post('/reboot', headers={'X-Requested-With': 'fetch'}).status_code == 200
+    assert pi.commands.count(['reboot']) == 2
+    os.close(webservice._reboot_lock['fd'])
+
+
 def test_reboot_from_the_page_says_when_it_failed(pi, client, monkeypatch):
     fetch = {'X-Requested-With': 'fetch'}
     r = client.post('/reboot', headers=fetch)

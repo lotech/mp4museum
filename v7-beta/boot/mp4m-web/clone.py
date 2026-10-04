@@ -31,6 +31,7 @@ SOURCE_DISK = '/dev/mmcblk0'
 USBMOUNT_CONF = '/etc/usbmount/usbmount.conf'
 PROC_MOUNTS = '/proc/mounts'
 PROC_CMDLINE = '/proc/cmdline'
+SYS_BLOCK = '/sys/block'
 TEMP_DIR = '/tmp'
 # there while a card is being made, with usbmount's settings to put back if the web interface
 # stops part way (it's in RAM: a reboot clears it). (mp4m-update waits through system.try_busy_lock)
@@ -93,9 +94,17 @@ def used_bytes(path):
 # ----- What there is ----- #
 def card_identity(disk):
     """What tells this card apart from another put in the same reader (lsblk's entry): its size,
-    the reader, and the IDs of its partition table and file systems."""
+    the reader, and the IDs of its partition table and file systems; and on kernels that count
+    them (5.15 and later, not Buster's), which card it is since the Pi started (diskseq: new for
+    every card put in). (Two blank cards of the same size, or two written from the same image,
+    can't be told apart without it.)"""
     ids = [disk.get('size'), disk.get('model'), disk.get('serial'), disk.get('ptuuid')]
     ids += sorted(str(child.get('uuid')) for child in disk.get('children') or [])
+    try:
+        with open(os.path.join(SYS_BLOCK, str(disk.get('name')), 'diskseq'), 'r') as f:
+            ids.append(f.read().strip())
+    except OSError:
+        pass
     return hashlib.sha1(json.dumps([str(value) for value in ids]).encode()).hexdigest()[:16]
 
 

@@ -687,6 +687,9 @@ def clone_status():
 
 
 # ----- Reboot ----- #
+_reboot_lock = {'fd': None}
+_reboot_lock_guard = threading.Lock()
+
 def busy():
     """Why the player shouldn't reboot (or the web interface restart) now, or None."""
     if clone.is_running():
@@ -698,13 +701,26 @@ def busy():
 
 @app.route('/reboot', methods=['POST'])
 def reboot_system():
-    message = busy()
-    if message:
-        if is_fetch():
-            return message, 409
-        flash(message, "error")
-        return redirect(url_for('index'))
-    status, output = system.run_command(["reboot"])
+    # held from here, so a card or a copy can't start before the reboot (kept by a reboot under
+    # way, which can be asked for again)
+    with _reboot_lock_guard:
+        lock = _reboot_lock['fd']
+        if lock is None:
+            lock = system.try_busy_lock()
+        message = busy() or (None if lock is not None else
+                             "A card is being made, a file copied or an update installed: reboot when it's done.")
+        if message:
+            if lock is not None and lock != _reboot_lock['fd']:
+                os.close(lock)
+            if is_fetch():
+                return message, 409
+            flash(message, "error")
+            return redirect(url_for('index'))
+        _reboot_lock['fd'] = lock
+        status, output = system.run_command(["reboot"])
+        if not status:
+            _reboot_lock['fd'] = None
+            os.close(lock)
     if is_fetch():
         # the page's script shows a failure (a redirect would hide it)
         return ("Rebooting.", 200) if status else (f"Failed to reboot: {output}", 500)
