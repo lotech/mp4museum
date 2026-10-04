@@ -220,6 +220,23 @@ def test_partition_names():
     assert clone.partition('/dev/mmcblk0', 2) == '/dev/mmcblk0p2'
 
 
+def test_media_size_is_what_a_clone_copies(pi, tmp_path):
+    # the files, also in folders; not uploads that stopped part way, nor links
+    (pi.media / 'a.mp4').write_bytes(b'a' * 1000)
+    (pi.media / 'folder').mkdir()
+    (pi.media / 'folder' / 'b.jpg').write_bytes(b'b' * 500)
+    (pi.media / '.upload-1234').write_bytes(b'x' * 100000)
+    os.symlink(str(tmp_path / 'elsewhere'), str(pi.media / 'link.mp4'))
+    assert clone.media_bytes(str(pi.media)) == 1500
+
+
+def test_system_tab_shows_the_media_size_a_clone_copies(client, pi):
+    pi.disks.append(READER)
+    (pi.media / 'a.mp4').write_bytes(b'a' * 3 * 1024 ** 2)
+    (pi.media / '.upload-1234').write_bytes(b'x' * 50 * 1024 ** 2)
+    assert 'Copy them (3.0 MB)' in client.get('/').get_data(as_text=True)
+
+
 def test_plan_puts_the_media_partition_after_a_system_partition_with_room():
     gib = 1024 ** 3
     layout = clone.plan(32 * gib, int(2.1 * gib), 5 * gib, False, 524288)

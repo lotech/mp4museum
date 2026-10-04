@@ -87,6 +87,24 @@ def _mkfs_exfat(device, label):
     return [tool, '-L' if '--volume-label' in exfat_usage(tool) else '-n', label, device]
 
 
+def media_bytes(path):
+    """How much a clone copies from the media partition: its files, without what is left of
+    uploads that stopped part way (the space the partition uses is more: those, and the file
+    system's own)."""
+    total = 0
+    for folder, dirs, files in os.walk(path):
+        for name in files:
+            file_path = os.path.join(folder, name)
+            # (rsync copies files, not links, and leaves the uploads out)
+            if name.startswith(system.UPLOAD_PREFIX) or os.path.islink(file_path):
+                continue
+            try:
+                total += os.path.getsize(file_path)
+            except OSError:
+                pass
+    return total
+
+
 def used_bytes(path):
     stat = os.statvfs(path)
     return (stat.f_blocks - stat.f_bfree) * stat.f_frsize
@@ -212,7 +230,7 @@ def sizes():
             run(['umount', mount_point])
     finally:
         os.rmdir(mount_point)
-    return root_used, used_bytes(system.MEDIA_PATH)
+    return root_used, media_bytes(system.MEDIA_PATH)
 
 
 # ----- Cloning (one at a time, in the background) ----- #

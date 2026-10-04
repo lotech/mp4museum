@@ -201,7 +201,7 @@ def index():
                            clone_cards=clone.list_cards(),
                            clone_unavailable=clone.unavailable(),
                            clone_state=clone.get_state(),
-                           media_used=system.format_size(clone.used_bytes(system.MEDIA_PATH)) if is_available else None)
+                           media_used=system.format_size(clone.media_bytes(system.MEDIA_PATH)) if is_available else None)
 
 
 # ----- Player ----- #
