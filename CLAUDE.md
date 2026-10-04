@@ -97,6 +97,8 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
 - A change from the page (`network.change`) is applied after `APPLY_DELAY` (the page saying
   where to find the player is sent first) and only saved to `/boot` by `keep()`; after
   `KEEP_SECONDS` without it, `undo()` puts the saved settings back. A reboot does the same.
+  *Save for next start* saves without using it: those interfaces are listed in `/run`
+  (`NEXT_START_FILE`), so a restart of the web interface (updates) doesn't use them yet.
 - Without a Wi-Fi country, Wi-Fi only uses 2.4 GHz channels 1-11 (`freq_list`): the Pi 3 B's
   firmware would use every channel. Wi-Fi passwords are kept as their WPA key.
 

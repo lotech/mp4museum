@@ -305,8 +305,29 @@ def test_an_address_for_the_next_start_waits_for_it(ports, client):
     network.keep()
     assert 'ip_address' not in dhcpcd(ports) and saved(ports)['interfaces'] == FIXED['interfaces']
     assert network.next_start_interfaces() == {'enxb827eb4e4fd4'}
-    # the next start uses it
+    # the next start uses it (/run is cleared)
     ports.commands.clear()
+    os.remove(network.NEXT_START_FILE)
+    network.apply_at_start()
+    assert 'ip_address=192.168.1.50/24' in dhcpcd(ports) and network.next_start_interfaces() == set()
+
+
+def restart_web_interface():
+    network._next_start.clear()
+    network._in_use['settings'] = None
+    network._pending.clear()
+
+
+def test_an_address_for_the_next_start_waits_while_the_web_interface_restarts(ports):
+    """e.g. after an update: the Pi hasn't started again, so the address isn't used yet."""
+    network.apply_at_start()
+    network.save_for_next_start(FIXED)
+    restart_web_interface()
+    network.apply_at_start()
+    assert 'ip_address' not in dhcpcd(ports) and network.next_start_interfaces() == {'enxb827eb4e4fd4'}
+    # the Pi starting again clears /run
+    os.remove(network.NEXT_START_FILE)
+    restart_web_interface()
     network.apply_at_start()
     assert 'ip_address=192.168.1.50/24' in dhcpcd(ports) and network.next_start_interfaces() == set()
 
@@ -319,7 +340,7 @@ def test_an_address_for_the_next_start_changed_now(ports):
     ports.run_later(network.APPLY_DELAY)
     assert 'ip_address=192.168.1.60/24' in dhcpcd(ports)
     network.keep()
-    assert network.next_start_interfaces() == set()
+    assert network.next_start_interfaces() == set() and not os.path.exists(network.NEXT_START_FILE)
 
 
 def test_apply_an_address_saved_for_the_next_start(ports, client):

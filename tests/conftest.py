@@ -164,6 +164,7 @@ def pi(tmp_path, monkeypatch):
         'RESOLV_CONF': str(etc / 'resolv.conf'),
         'ISO3166_FILE': str(tmp_path / 'iso3166.tab'),
         'RFKILL_PATH': str(tmp_path / 'rfkill'),
+        'NEXT_START_FILE': str(tmp_path / 'mp4m-network-next-start.json'),
         '_later': p.schedule,
         '_pending': {},
         '_in_use': {'settings': None},

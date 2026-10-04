@@ -32,6 +32,9 @@ RESOLV_CONF = '/etc/resolv.conf'
 # country codes and names (tzdata), for the Wi-Fi country list
 ISO3166_FILE = '/usr/share/zoneinfo/iso3166.tab'
 RFKILL_PATH = '/sys/class/rfkill'
+# the interfaces saved for the next start (_next_start), kept while the web interface restarts
+# (e.g. after an update) and gone when the Pi does (/run is in RAM)
+NEXT_START_FILE = '/run/mp4m-network-next-start.json'
 
 BLOCK_START = '# --- mp4museum network settings (set by the web interface, from /boot/mp4m-network.json) ---'
 BLOCK_END = '# --- end of mp4museum network settings ---'
@@ -377,6 +380,8 @@ def _use(settings, at_start=False, now_too=()):
     with _apply_lock:
         if at_start:
             _next_start.clear()
+            # the web interface started again, not the Pi: still for the next start
+            _next_start.update(_load_next_start())
         now = dict(settings)
         if _next_start:
             saved = read_settings().get('interfaces') or {}
@@ -402,6 +407,27 @@ def _forget_next_start():
     for name in list(_next_start):
         if saved.get(name) == using.get(name):
             del _next_start[name]
+    _store_next_start()
+
+def _load_next_start():
+    try:
+        with open(NEXT_START_FILE, 'r') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {name: value for name, value in data.items()
+            if INTERFACE_RE.match(str(name)) and (value is None or isinstance(value, dict))}
+
+def _store_next_start():
+    try:
+        if _next_start:
+            system.write_file(NEXT_START_FILE, json.dumps(_next_start))
+        elif os.path.exists(NEXT_START_FILE):
+            os.remove(NEXT_START_FILE)
+    except OSError as e:
+        print(f"Network settings: couldn't write {NEXT_START_FILE}: {e}", flush=True)
 
 def apply_at_start():
     """When the web interface starts: the saved settings into /etc (nothing without them)."""
@@ -504,6 +530,7 @@ def save_for_next_start(settings):
                 _next_start[name] = using.get(name)
             else:
                 _next_start.pop(name, None)
+        _store_next_start()
 
 def pending():
     """{'seconds': left to keep it, 'problems': [...]} while a change waits to be kept, else None."""
