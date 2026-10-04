@@ -643,7 +643,7 @@ def test_state_when_done_or_failed(pi, monkeypatch):
 # ----- Web interface ----- #
 def test_system_tab_asks_for_a_card(client):
     page = client.get('/').get_data(as_text=True)
-    assert 'Copy to an SD card' in page
+    assert 'Clone to another device' in page and 'Takes about 2–3 minutes' in page
     assert 'Plug a USB SD card reader with a card into the Pi' in page
 
 

@@ -197,11 +197,11 @@ repo=lotech/mp4museum
 branch=master
 ```
 
-## Copying a player to another SD card
+## Cloning a player to another SD card
 
-To set up another Pi the same way, put an SD card in a USB card reader and plug it into the
-player. System → Copy to an SD card lists the card; choose whether to copy the media files,
-then Copy. It takes a few minutes, plus about a minute per GB of media. When it says the card is
+To set up another Pi the same way, put an SD card in an external USB card reader and plug it
+into the player. System → Clone to another device lists the card; choose whether to copy the
+media files, then Copy. It takes about 2–3 minutes, plus about a minute per GB of media. When it says the card is
 ready, take it out; the next card put in shows up in the list.
 
 - **The card is erased**, also if it already has MP4MUSEUM on it.
