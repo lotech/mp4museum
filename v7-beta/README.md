@@ -203,8 +203,9 @@ An update replaces the web interface in `/boot/mp4m-web`, and the player script
 script is kept and the new one is saved as `/boot/mp4museum.py.new`. Nothing outside `/boot`
 can be updated this way, because the rest of the system is a read-only RAM overlay. When an
 update changes files there (`.bashrc`, the boot video, the old logo, the service, the
-`mp4m-update` command), it says so; install those with `install.sh` as above. Updates wait
-while a card is being cloned or a file is copied or uploaded.
+`mp4m-update` command), it says so; install those with `install.sh` as above. While a card is
+being cloned or a file is copied or uploaded, an update is refused with a message: install it
+when that's done.
 
 An update is checked before anything is changed, and swaps the web interface folder in one
 step. If the power goes off in the middle of that, the web interface is put back when the
@@ -251,8 +252,9 @@ overlay file system on, on a player started from its own SD card, with a card re
   again.
 - **While a card is being made:** USB sticks and cards plugged in aren't mounted (this is put
   back afterwards, also if the web interface restarts), and rebooting, updates (also
-  `mp4m-update`), uploads and copies from USB sticks wait. A card can't be started while a file
-  is copied or uploaded or an update installs.
+  `mp4m-update`), uploads and copies from USB sticks are refused with a message until it's done.
+  A card can't be started while a file is copied or uploaded or an update installs.
+
 Every card made this way, like every card made from the v7 image, shares this player's SSH host
 keys and machine ID.
 

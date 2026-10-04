@@ -6,7 +6,6 @@ set -e
 rm -f source.img target.img
 truncate -s 400M source.img
 printf 'label: dos\nlabel-id: 0x18512e38\nunit: sectors\n/dev/x1 : start=8192, size=131072, type=c\n/dev/x2 : start=401408, type=83\n/dev/x3 : start=139264, size=262144, type=7\n' | sfdisk -q source.img
-LOOPS=()
 part() { # image, number -> a loop device on that partition
   read start size <<<$(sfdisk -J "$1" | python3 -c "import json,sys; p=[x for x in json.load(sys.stdin)['partitiontable']['partitions'] if x['node'].endswith('$2')][0]; print(p['start'], p['size'])")
   losetup -f --show -o $((start*512)) --sizelimit $((size*512)) "$1"
