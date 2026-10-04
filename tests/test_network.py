@@ -568,6 +568,34 @@ def test_no_change_starts_while_saving_for_the_next_start(ports, monkeypatch):
     assert network._next_start == {'enxb827eb4e4fd4': None}
 
 
+def test_nothing_is_saved_for_the_next_start_before_start_up_is_done(ports, monkeypatch):
+    """Right after a restart of the web interface, the addresses waiting for the next start aren't
+    loaded yet: one of them would be taken for the address in use."""
+    import threading
+    monkeypatch.setattr(network, '_started', threading.Event())
+    monkeypatch.setattr(network, 'STARTUP_WAIT', 0.1)
+    with pytest.raises(RuntimeError):
+        network.save_for_next_start(FIXED)
+    assert saved(ports) is None
+    network.apply_at_start()
+    network.save_for_next_start(FIXED)
+    assert saved(ports) == FIXED
+
+
+def test_checking_an_old_address_has_a_time_limit(ports, monkeypatch):
+    limits = []
+
+    def run(cmd, timeout=None):
+        if cmd[:2] == ['ip', '-o']:
+            limits.append(timeout)
+        return (False, 'failed') if cmd[:3] == ['ip', 'addr', 'del'] else (True, '')
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    monkeypatch.setattr(system, 'run_command', run)
+    network.undo()
+    assert limits == [network.COMMAND_TIMEOUT]
+
+
 def test_save_for_the_next_start(ports):
     network.save_for_next_start(FIXED)
     assert saved(ports) == FIXED and commands(ports) == [] and 'ip_address' not in dhcpcd(ports)

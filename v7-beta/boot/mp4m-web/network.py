@@ -328,7 +328,7 @@ def _apply(settings, at_start=False, again=None):
                     address = line.split('=', 1)[1]
                     ok, output = _command(['ip', 'addr', 'del', address, 'dev', name])
                     # (failing because it's gone already is fine)
-                    if not ok and ('IPv4', address) in system.interface_addresses().get(name, []):
+                    if not ok and ('IPv4', address) in system.interface_addresses(COMMAND_TIMEOUT).get(name, []):
                         problems.append(f"{address} couldn't be taken off {name}: {output or 'failed'}")
             # reads dhcpcd.conf again and starts over on this interface
             _run(['dhcpcd', '-n', name], problems)
@@ -413,6 +413,9 @@ _pending = {}
 _rollback = {}
 # counts the changes made: a retry of going back is dropped if one was made since it was planned
 _generation = [0]
+# set once apply_at_start has run (changes wait for it, at most STARTUP_WAIT seconds)
+_started = threading.Event()
+STARTUP_WAIT = 120
 # the settings in /etc now (None: not known yet, the saved ones)
 _in_use = {'settings': None}
 # interfaces saved with an address for the next start (Save for next start): {name: the setting
@@ -432,6 +435,9 @@ def _use(settings, at_start=False, now_too=(), again=None, generation=None, repl
     wrong. again: see _apply. generation: nothing is done (None returned) if a change has been
     made since that one (_generation). replaced: a dict, given the settings that were in use
     before ('settings')."""
+    if not at_start:
+        # after apply_at_start, which finds out what is in use and what waits for the next start
+        _started.wait(STARTUP_WAIT)
     with _apply_lock:
         if generation is not None and generation != _generation[0]:
             return None
@@ -495,7 +501,10 @@ def _commit(settings, next_start):
 
 def apply_at_start():
     """When the web interface starts: the saved settings into /etc (nothing without them)."""
-    return _use(read_settings(), at_start=True)
+    try:
+        return _use(read_settings(), at_start=True)
+    finally:
+        _started.set()
 
 def target_settings():
     """The settings the page changes: the ones waiting to be kept, else the saved ones."""
@@ -622,6 +631,9 @@ def rollback():
 def save_for_next_start(settings):
     """Save settings to /boot without using them now (for a network the player isn't on yet)."""
     settings = normalize(settings)
+    if not _started.wait(STARTUP_WAIT):
+        # (until then what is in use and what waits for the next start aren't known)
+        raise RuntimeError("The network settings are still being applied after starting: try again in a moment.")
     # (held throughout, as in keep(): no change may start being tried meanwhile, or the settings
     # it puts in use would be taken for the ones in use until the next start)
     with _lock:
@@ -809,7 +821,7 @@ def dns_servers():
 def view():
     """What the Network and Wi-Fi cards show."""
     settings = target_settings()
-    addresses = system.interface_addresses()
+    addresses = system.interface_addresses(COMMAND_TIMEOUT)
     in_use = routers()
     present = system.network_interfaces()
     wireless = [name for name in present if os.path.isdir(os.path.join(system.NET_PATH, name, 'wireless'))]

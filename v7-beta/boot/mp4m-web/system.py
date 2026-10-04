@@ -468,10 +468,10 @@ def _read_interface_file(interface, name):
     except OSError:
         return ''
 
-def interface_addresses():
+def interface_addresses(timeout=None):
     """{interface: [('IPv4' or 'IPv6', '192.168.1.120/24'), ...]}"""
     addresses = {}
-    status, output = run_command(['ip', '-o', 'addr', 'show'])
+    status, output = run_command(['ip', '-o', 'addr', 'show'], timeout=timeout)
     if status:
         for line in output.splitlines():
             # e.g. "2: enxb827eb4e4fd4    inet 192.168.1.120/24 brd 192.168.1.255 scope global ..."

@@ -80,6 +80,13 @@ class FakePi:
         return os.path.join(str(self.boot), *parts)
 
 
+def _set_event():
+    import threading
+    event = threading.Event()
+    event.set()
+    return event
+
+
 @pytest.fixture
 def pi(tmp_path, monkeypatch):
     p = FakePi(tmp_path)
@@ -173,6 +180,8 @@ def pi(tmp_path, monkeypatch):
         '_rollback': {},
         '_generation': [0],
         '_scan_left_on': [False],
+        # (started: tests that need apply_at_start call it)
+        '_started': _set_event(),
     }.items():
         monkeypatch.setattr(network, name, value)
     real = [name for name, value in vars(network).items()
