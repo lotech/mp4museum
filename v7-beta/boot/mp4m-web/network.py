@@ -681,6 +681,24 @@ def save_for_next_start(settings):
                     next_start.pop(name, None)
             _commit(settings, next_start)
 
+def apply_and_save(settings):
+    """Use settings now and save them, without trying them first: for changes that can't lose the
+    page (Wi-Fi turned on, or off while the page isn't reached over Wi-Fi). Returns what went wrong
+    applying them (saved anyway: the next start tries again)."""
+    settings = normalize(settings)
+    if not _started.wait(STARTUP_WAIT):
+        raise RuntimeError("The network settings are still being applied after starting: try again in a moment.")
+    with _lock:
+        if _pending:
+            raise RuntimeError("Keep or undo the change being tried first.")
+        if _rolling_back[0] or _rollback:
+            raise RuntimeError("The previous network settings are being put back: try again in a moment.")
+        _generation[0] += 1
+        problems = _use(settings)
+        with _apply_lock:
+            _commit(settings, dict(_next_start))
+    return problems
+
 def pending():
     """{'seconds': left to keep it, 'problems': [...]} while a change waits to be kept, else None."""
     with _lock:

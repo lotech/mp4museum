@@ -106,6 +106,9 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   (`NEXT_START_FILE`), so a restart of the web interface (updates) doesn't use them yet.
 - Without a Wi-Fi country, Wi-Fi only uses 2.4 GHz channels 1-11 (`freq_list`): the Pi 3 B's
   firmware would use every channel. Wi-Fi passwords are kept as their WPA key.
+- Turning Wi-Fi on or off isn't tried first (`apply_and_save`), unless the page came in over
+  Wi-Fi (`webservice.reached_over_wifi`: the connection's local address, `werkzeug.socket`) and
+  it is turned off, or a change waits to be kept.
 
 ### Things that mustn't be cut off half way
 

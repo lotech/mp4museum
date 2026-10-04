@@ -1106,39 +1106,34 @@ select {
 }
 
 /* ----- Network ----- */
-/* settings on the left, what is in use on the right (and first on a phone) */
+/* settings on the left; what is in use on the right, with the Wi-Fi country under it (on a
+   phone: what is in use first, the Wi-Fi country last) */
 .network-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "settings status" "settings country";
   gap: 20px;
   align-items: start;
 }
 
 .network-settings {
-  grid-column: 1;
-  grid-row: 1;
+  grid-area: settings;
 }
 
 .network-status {
-  grid-column: 2;
-  grid-row: 1;
-  position: sticky;
-  top: 20px;
-  /* (taller than the window: it scrolls by itself) */
-  max-height: calc(100vh - 40px);
-  overflow-y: auto;
+  grid-area: status;
+}
+
+.network-country {
+  grid-area: country;
 }
 
 @media (max-width: 900px) {
   .network-layout {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .network-settings, .network-status {
-    grid-column: 1;
-    grid-row: auto;
-    position: static;
-    max-height: none;
+    grid-template-rows: none;
+    grid-template-areas: "status" "settings" "country";
   }
 }
 
@@ -1177,8 +1172,93 @@ select {
   border-top: 1px solid var(--border);
 }
 
-#ethernet .address-form, #wifi .setting, #wifi .choice-list, .wifi-address {
+#ethernet .address-form, .wifi-address {
   margin-top: 14px;
+}
+
+#wifi .card-head {
+  margin-bottom: 0;
+}
+
+#wifi .setting, #wifi .choice-list {
+  margin-top: 12px;
+}
+
+#wifi .input-row ~ .input-row {
+  margin-top: 8px;
+}
+
+#wifi .input-row input[type="password"] {
+  flex: 1 1 160px;
+}
+
+/* saved Wi-Fi networks: one line each */
+.choice-list.compact li {
+  padding: 8px 8px 8px 12px;
+}
+
+.choice-list.compact li > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+/* on/off */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.switch-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: left 0.15s, background 0.15s;
+}
+
+.switch.on {
+  color: var(--text);
+}
+
+.switch.on .switch-track {
+  background: rgba(61, 220, 151, 0.35);
+  border-color: rgba(61, 220, 151, 0.6);
+}
+
+.switch.on .switch-track::after {
+  left: 18px;
+  background: var(--playing);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  border-radius: var(--radius-small);
 }
 
 .address-fields {
@@ -1191,7 +1271,7 @@ select {
   margin: 8px 0 6px;
 }
 
-.address-form .button-row, .wifi-form > div:last-child {
+.address-form .button-row {
   margin-top: 12px;
 }
 
@@ -1199,7 +1279,7 @@ select {
   display: flex;
   gap: 18px;
   flex-wrap: wrap;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .checkbox-row label {

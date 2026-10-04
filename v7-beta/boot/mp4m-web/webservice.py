@@ -185,6 +185,7 @@ def index():
                            gpu_mem_recommended=system.recommended_gpu_mem(board),
                            memory_mb=system.memory_megabytes(),
                            network=network_view,
+                           page_over_wifi=bool(network_view['wifi_interface']) and reached_over_wifi(),
                            device_info=system.get_device_info(),
                            display_info=system.get_display_info(),
                            current_sound_card=system.get_current_sound_card(),
@@ -989,11 +990,36 @@ def set_wifi_country():
     wifi_settings(settings)['country'] = country
     return try_network_change(settings)
 
+def reached_over_wifi():
+    """Whether this page came in over Wi-Fi (True if that can't be told): turning Wi-Fi off loses it."""
+    sock = request.environ.get('werkzeug.socket')
+    try:
+        local = sock.getsockname()[0]
+    except (AttributeError, OSError, IndexError):
+        return True
+    addresses = system.interface_addresses(network.COMMAND_TIMEOUT)
+    return any(address.split('/')[0] == local
+               for name in network.wireless_interfaces() for kind, address in addresses.get(name, []))
+
 @app.route('/network/wifi/power', methods=['POST'])
 def set_wifi_power():
+    enabled = request.form.get('enabled') == 'on'
     settings = copy.deepcopy(network.target_settings())
-    wifi_settings(settings)['enabled'] = request.form.get('enabled') == 'on'
-    return try_network_change(settings)
+    wifi_settings(settings)['enabled'] = enabled
+    if network.pending() or not enabled and reached_over_wifi():
+        # tried first (with the change waiting to be kept): if this page can't reach the player
+        # again, Wi-Fi comes back on
+        return try_network_change(settings)
+    try:
+        problems = network.apply_and_save(settings)
+    except Exception as e:
+        flash(f"Failed to turn Wi-Fi {'on' if enabled else 'off'}: {e}", "error")
+        return redirect(url_for('index'))
+    if problems:
+        flash(f"Wi-Fi is set to {'on' if enabled else 'off'}, but: {'; '.join(problems)}", "error")
+    else:
+        flash(f"Wi-Fi is {'on' if enabled else 'off'}.", "success")
+    return redirect(url_for('index'))
 
 @app.route('/network/scan')
 def scan_wifi():

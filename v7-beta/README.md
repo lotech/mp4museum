@@ -126,7 +126,8 @@ Open `http://<network name>.local` in a browser on the same network.
   `/boot/mp4m-network.json` and written into `/etc/dhcpcd.conf` and `wpa_supplicant.conf` when
   the web interface starts; delete that file on a computer to go back to DHCP and Wi-Fi off.
 - **Wi-Fi** (Network tab): look for networks, add one with its password (several can be saved),
-  forget one, turn Wi-Fi off. Passwords are kept as their WPA key (as `wpa_passphrase` makes
+  forget one, turn Wi-Fi on or off (the switch next to its title: done straight away, except
+  turning it off from a page reached over Wi-Fi, which is tried and kept like the other changes). Passwords are kept as their WPA key (as `wpa_passphrase` makes
   it), not as typed. Raspberry Pi OS keeps Wi-Fi blocked until a country is set; here it works
   without one, on 2.4 GHz channels 1–11 only, which every country allows. Choosing the country
   allows all of its channels, including 5 GHz. To set Wi-Fi up from a computer before the first

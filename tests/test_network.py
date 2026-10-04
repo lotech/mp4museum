@@ -798,9 +798,10 @@ def test_network_settings_have_their_own_tab(ports, client):
     for card in ('Network name</h3>', 'Ethernet</h3>', 'Wi-Fi</h3>'):
         assert card in network_tab and card not in system_tab
     assert 'Password</h3>' in system_tab
-    # the Wi-Fi country, set once, is the last setting on the tab
-    assert network_tab.index('id="wifiCountry"') > network_tab.index('Turn Wi-Fi off')
-    assert network_tab.rindex('<section') == network_tab.index('id="wifiCountry"') - len('<section class="card" ')
+    # the Wi-Fi country, set once, is under what is in use (on the right), and last on a phone
+    assert network_tab.index('id="networkStatus"') < network_tab.index('id="wifi"') < network_tab.index('id="wifiCountry"')
+    assert 'class="card network-country" id="wifiCountry"' in network_tab
+    assert network_tab.rindex('<section') == network_tab.index('id="wifiCountry"') - len('<section class="card network-country" ')
 
 
 def test_network_in_use_card(ports, client, monkeypatch):
@@ -1019,6 +1020,91 @@ def blocked(pi, soft='1'):
     (folder / 'hard').write_text('0\n')
 
 
+def switch(page):
+    """The on/off switch in the Wi-Fi card's title row: 'On' or 'Off'."""
+    head = page.split('id="wifi" ')[1].split('<div class="card-head">')[1].split('</form>')[0]
+    assert 'Wi-Fi</h3>' in head
+    return head.split('role="switch"')[1].split('</span><span>')[1].split('</span>')[0]
+
+
+class Socket:
+    """The connection a page came in on (werkzeug.socket), at this address of the player."""
+    def __init__(self, address):
+        self.address = address
+
+    def getsockname(self):
+        return (self.address, 80)
+
+
+def on_ports(monkeypatch, pi):
+    """Ethernet at 192.168.1.50, Wi-Fi at 192.168.10.248."""
+    run = pi.run_command
+    output = ('2: enxb827eb4e4fd4    inet 192.168.1.50/24 brd 192.168.1.255 scope global\n'
+              '3: wlan0    inet 192.168.10.248/24 brd 192.168.10.255 scope global')
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (
+        (pi.commands.append(list(cmd)), (True, output))[1] if cmd[:2] == ['ip', '-o'] else run(cmd, timeout)))
+
+
+def wifi_set_up(pi):
+    with open(network.SETTINGS_FILE, 'w') as f:
+        json.dump({'wifi': {'networks': [{'ssid': 'Gallery', 'password': 'secret-password'}]}}, f)
+    network.apply_at_start()
+    pi.commands.clear()
+
+
+def test_wifi_turned_off_from_ethernet_straight_away(ports, client, monkeypatch):
+    """No page to keep it from: the page reached over Ethernet doesn't lose the player."""
+    wifi_set_up(ports)
+    on_ports(monkeypatch, ports)
+    assert 'onsubmit=\'return confirm("Turn Wi-Fi off?")\'' in client.get('/', environ_base={'werkzeug.socket': Socket('192.168.1.50')}).data.decode()
+    response = client.post('/network/wifi/power', data={'enabled': 'off'},
+                           environ_base={'werkzeug.socket': Socket('192.168.1.50')})
+    assert response.status_code == 302 and network.pending() is None
+    assert ['rfkill', 'block', 'wifi'] in commands(ports) and saved(ports)['wifi']['enabled'] is False
+    page = client.get('/').data.decode()
+    assert 'Wi-Fi is off.' in page and switch(page) == 'Off'
+    # and on again
+    ports.commands.clear()
+    response = client.post('/network/wifi/power', data={'enabled': 'on'},
+                           environ_base={'werkzeug.socket': Socket('192.168.1.50')})
+    assert response.status_code == 302 and network.pending() is None
+    assert ['rfkill', 'unblock', 'wifi'] in commands(ports) and saved(ports)['wifi']['enabled'] is True
+
+
+def test_wifi_turned_on_straight_away(ports, client):
+    blocked(ports)
+    response = client.post('/network/wifi/power', data={'enabled': 'on'})
+    assert response.status_code == 302 and network.pending() is None
+    assert ['rfkill', 'unblock', 'wifi'] in commands(ports) and saved(ports)['wifi']['enabled'] is True
+
+
+def test_wifi_turned_off_from_wifi_is_tried_first(ports, client, monkeypatch):
+    """The page came in over Wi-Fi: turning it off loses the player, so it comes back on unless kept."""
+    wifi_set_up(ports)
+    on_ports(monkeypatch, ports)
+    wifi = {'werkzeug.socket': Socket('192.168.10.248')}
+    assert 'This page uses Wi-Fi, so it loses the player' in client.get('/', environ_base=wifi).data.decode()
+    response = client.post('/network/wifi/power', data={'enabled': 'off'}, environ_base=wifi)
+    assert b'Applying the new settings' in response.data and network.pending() is not None
+    assert saved(ports)['wifi'].get('enabled', True) is True
+
+
+def test_wifi_turned_off_is_tried_first_if_the_connection_isnt_known(ports, client):
+    wifi_set_up(ports)
+    client.post('/network/wifi/power', data={'enabled': 'off'})
+    assert network.pending() is not None
+
+
+def test_wifi_turned_on_while_a_change_waits_to_be_kept(ports, client):
+    """It goes with that change (kept or undone with it), not refused."""
+    wifi_set_up(ports)
+    client.post('/network/wifi/power', data={'enabled': 'off'})
+    ports.run_later(network.APPLY_DELAY)
+    response = client.post('/network/wifi/power', data={'enabled': 'on'}, environ_base={'werkzeug.socket': Socket('127.0.0.1')})
+    assert b'Applying the new settings' in response.data
+    assert network.target_settings()['wifi']['enabled'] is True
+
+
 def test_scan_leaves_wifi_blocked_if_it_isnt_set_up(ports, client):
     blocked(ports)
     client.get('/network/scan')
@@ -1102,10 +1188,9 @@ def test_scan_says_when_wifi_couldnt_be_blocked_again(ports, client, monkeypatch
 def test_wifi_off_on_the_image(ports, client):
     blocked(ports)
     page = client.get('/').data.decode()
-    assert 'Wi-Fi is off: add a network to turn it on.' in page and 'Turn Wi-Fi on' in page
-    assert '<span class="badge muted">Off</span>' in page
+    assert switch(page) == 'Off' and '<span class="badge muted">Off</span>' in page
     blocked(ports, soft='0')
-    assert 'Turn Wi-Fi off' in client.get('/').data.decode()
+    assert switch(client.get('/').data.decode()) == 'On'
 
 
 def test_no_wifi(pi, client):
