@@ -89,7 +89,8 @@ a network is optional.
 - [x] Tested on a Pi 3 B+: exfat-utils installed by `install.sh` from `legacy.raspbian.org`; a card that had MP4MUSEUM on it (from a bigger card's image) was copied with the media files. The first try failed: Linux still used the card's old partitions and formatted past its end. The new partitions are now checked before anything is formatted. The second try made the card, but it didn't start: Buster's sfdisk (2.33) reads the disk ID as a signed number on the 32-bit system and quietly picked a random one for an ID of 0x80000000 or more, instead of the one in cmdline.txt and fstab. IDs are now below that, read back from the card, and written into the table directly if needed
 - [x] Tested on a Pi 3 B+ (after #14): the copied card started in another Pi with a network name of its own (mp4museum-c124, from its serial number), shown on the logo screen
 - [x] Tested on a Pi 3 B+ (after #15): the media size shown is the files' (6 MB, not the partition's 19 MB), and the clone's media partition has the files without the Mac folders (.Spotlight-V100, .fseventsd)
-- [ ] Test on the Pi: password, settings and files on the copied card; copying without the media files; the player playing a file from the card while it's erased
+- [x] The clone booted in another Pi and plays the files
+- [ ] Test on the Pi: password and settings on the copied card; copying without the media files; the player playing a file from the card while it's erased
 
 - [ ] Install script to set up v7 on a fresh Raspberry Pi OS, instead of depending on the image (`install.sh` only covers the v7 image so far)
 
