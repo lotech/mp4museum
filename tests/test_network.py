@@ -703,6 +703,19 @@ def test_an_old_address_that_cant_be_checked_is_a_problem(ports, monkeypatch):
     assert network.pending()['problems'] == ["192.168.1.50/24 couldn't be taken off enxb827eb4e4fd4: failed"]
 
 
+def test_nothing_is_saved_for_the_next_start_after_settings_didnt_apply(ports, monkeypatch):
+    """The saved address failed at start: it may not be the one in use, so it can't be recorded
+    as what is used until the next start."""
+    with open(network.SETTINGS_FILE, 'w') as f:
+        json.dump(FIXED, f)
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[0] != 'dhcpcd', 'timed out'))
+    network.apply_at_start()
+    other = {'interfaces': {'enxb827eb4e4fd4': dict(FIXED['interfaces']['enxb827eb4e4fd4'], address='192.168.1.60/24')}}
+    with pytest.raises(RuntimeError):
+        network.save_for_next_start(other)
+    assert saved(ports) == FIXED and not os.path.exists(network.NEXT_START_FILE)
+
+
 def test_save_for_the_next_start(ports):
     network.save_for_next_start(FIXED)
     assert saved(ports) == FIXED and commands(ports) == [] and 'ip_address' not in dhcpcd(ports)

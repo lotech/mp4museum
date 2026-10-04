@@ -658,6 +658,10 @@ def save_for_next_start(settings):
         if _rolling_back[0] or _rollback:
             # what is in use is still changing back (or didn't all change back)
             raise RuntimeError("The previous network settings are being put back: try again in a moment.")
+        if _maybe_in_use:
+            # applying the settings didn't all work (e.g. at start): which are in use isn't known
+            raise RuntimeError("The network settings didn't all apply, so it isn't known which are in use. "
+                               "Change them here first (Apply), or reboot.")
         with _apply_lock:
             using = (_in_use['settings'] if _in_use['settings'] is not None else read_settings()).get('interfaces') or {}
             interfaces = settings.get('interfaces') or {}
