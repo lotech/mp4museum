@@ -596,6 +596,48 @@ def test_checking_an_old_address_has_a_time_limit(ports, monkeypatch):
     assert limits == [network.COMMAND_TIMEOUT]
 
 
+def test_nothing_is_saved_for_the_next_start_while_going_back(ports, monkeypatch):
+    """Between Undo and the previous settings being in use again, the change being undone would be
+    taken for the settings in use until the next start."""
+    network.apply_at_start()
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    refused = []
+
+    def save():
+        try:
+            network.save_for_next_start({'interfaces': {'eth1': FIXED['interfaces']['enxb827eb4e4fd4']}})
+        except RuntimeError as e:
+            refused.append(str(e))
+
+    def run(cmd, timeout=None):
+        if cmd[0] == 'dhcpcd' and not refused:
+            # going back: a Save for next start from another tab
+            other = threading.Thread(target=save)
+            other.start()
+            other.join(1)
+            return False, 'timed out'
+        return True, ''
+    import threading
+    monkeypatch.setattr(system, 'run_command', run)
+    network.undo()
+    assert refused and saved(ports) is None
+    # and while going back is tried again
+    with pytest.raises(RuntimeError):
+        network.save_for_next_start(FIXED)
+
+
+def test_an_old_address_that_cant_be_checked_is_a_problem(ports, monkeypatch):
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    monkeypatch.setattr(system, 'run_command',
+                        lambda cmd, timeout=None: (False, 'failed') if cmd[:2] == ['ip', 'addr'] or cmd[:2] == ['ip', '-o']
+                        else (True, ''))
+    network.change({})
+    ports.run_later(network.APPLY_DELAY)
+    assert network.pending()['problems'] == ["192.168.1.50/24 couldn't be taken off enxb827eb4e4fd4: failed"]
+
+
 def test_save_for_the_next_start(ports):
     network.save_for_next_start(FIXED)
     assert saved(ports) == FIXED and commands(ports) == [] and 'ip_address' not in dhcpcd(ports)

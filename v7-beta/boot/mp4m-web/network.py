@@ -327,9 +327,11 @@ def _apply(settings, at_start=False, again=None):
                 if line.startswith('static ip_address=') and line not in new.get(name, []):
                     address = line.split('=', 1)[1]
                     ok, output = _command(['ip', 'addr', 'del', address, 'dev', name])
-                    # (failing because it's gone already is fine)
-                    if not ok and ('IPv4', address) in system.interface_addresses(COMMAND_TIMEOUT).get(name, []):
-                        problems.append(f"{address} couldn't be taken off {name}: {output or 'failed'}")
+                    if not ok:
+                        # failing because it's gone already is fine; not being able to tell isn't
+                        found, addresses = _command(['ip', '-o', '-4', 'addr', 'show', 'dev', name])
+                        if not found or address in addresses.split():
+                            problems.append(f"{address} couldn't be taken off {name}: {output or 'failed'}")
             # reads dhcpcd.conf again and starts over on this interface
             _run(['dhcpcd', '-n', name], problems)
 
@@ -411,6 +413,8 @@ _apply_lock = threading.Lock()
 _pending = {}
 # going back to the previous settings that failed: problems, tries, and the timer to try again
 _rollback = {}
+# going back being done now (undo() until its first try is done)
+_rolling_back = [0]
 # counts the changes made: a retry of going back is dropped if one was made since it was planned
 _generation = [0]
 # set once apply_at_start has run (changes wait for it, at most STARTUP_WAIT seconds)
@@ -593,8 +597,15 @@ def undo(token=None):
         previous = _pending['previous']
         _pending.clear()
         generation = _generation[0]
+        if changed:
+            # (until the first try is done: Save for next start waits for it)
+            _rolling_back[0] += 1
     if changed:
-        _roll_back(previous, None, 1, generation)
+        try:
+            _roll_back(previous, None, 1, generation)
+        finally:
+            with _lock:
+                _rolling_back[0] -= 1
     return True
 
 def _roll_back(previous, tried, tries, generation):
@@ -639,6 +650,9 @@ def save_for_next_start(settings):
     with _lock:
         if _pending:
             raise RuntimeError("Keep or undo the change being tried first.")
+        if _rolling_back[0] or _rollback:
+            # what is in use is still changing back (or didn't all change back)
+            raise RuntimeError("The previous network settings are being put back: try again in a moment.")
         with _apply_lock:
             using = (_in_use['settings'] if _in_use['settings'] is not None else read_settings()).get('interfaces') or {}
             interfaces = settings.get('interfaces') or {}
