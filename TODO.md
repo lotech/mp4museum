@@ -94,6 +94,23 @@ a network is optional.
 
 - [ ] Install script to set up v7 on a fresh Raspberry Pi OS, instead of depending on the image (`install.sh` only covers the v7 image so far)
 
+## 6. Wi-Fi
+
+Wi-Fi isn't set up on the players: no country is set, so Raspberry Pi OS keeps Wi-Fi switched
+off (rfkill), and the web interface has no Wi-Fi settings. Anything set has
+to survive the RAM overlay, so it's kept on `/boot`, written with `system.writable()`.
+
+- [ ] Find out on the Pi (Buster, overlay on): what `raspi-config` sets for the Wi-Fi country (`do_wifi_country`: `/etc/wpa_supplicant/wpa_supplicant.conf`, rfkill) and whether `/boot/wpa_supplicant.conf` is still picked up at boot with `/boot` read-only (the `raspberrypi-net-mods` service moves it)
+- [ ] Wi-Fi country setting (System tab, a list of countries): unblocks Wi-Fi. On `/boot` so it survives the overlay: e.g. `cfg80211.ieee80211_regdom=GB` in `cmdline.txt` (read by the kernel at boot), and `country=GB` for `wpa_supplicant`, applied at boot. Without a country Wi-Fi stays blocked
+- [ ] Connect to a Wi-Fi network from the web interface (System tab): scan (`wpa_cli scan` / `iw dev wlan0 scan`), choose a network, enter its password; saved on `/boot` and applied with `wpa_cli` without a reboot. Several saved networks, with one to forget
+- [ ] Wi-Fi in the Network card: network name (SSID), signal, address; the logo screen shows the Wi-Fi address when there's no Ethernet (it shows `hostname -I` already)
+- [ ] Careful when changing Wi-Fi from a browser connected over that Wi-Fi: the page loses the player. Say so before applying, and keep the old network if the new one doesn't connect within a minute
+- [ ] Wi-Fi passwords on `/boot` (FAT) can be read by anyone with the card: store wpa_supplicant's hashed `psk` (`wpa_passphrase`), not the password
+- [ ] Clone to another device copies `/boot`, so Wi-Fi settings go to the new card too: fine for players in the same place; say so on the page
+- [ ] Turn Wi-Fi off from the web interface (players on Ethernet don't need it; less to go wrong)
+- [ ] Offline setup: a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (`hostapd`/`dnsmasq` aren't on the image: needs `install.sh`, from `legacy.raspbian.org` like exfat-utils)
+- [ ] Test all of it on a Pi 3 B+ (2.4 and 5 GHz) and a Pi 4
+
 ## Development
 
 - [x] `CLAUDE.md` with the constraints and conventions for working on the code
@@ -109,9 +126,6 @@ a network is optional.
 - [x] Tested on a Pi 3 B+: the address and IP show on the logo screen, then the playlist starts without them
 - [ ] Test on the Pi: does the IP address appear when the network comes up during the logo (e.g. boot video off, cold start)?
 - [ ] Announce the web interface over Bonjour/mDNS (`_http._tcp`) so players show up in network browsers
-- [ ] Wi-Fi country setting in the web interface (System tab, with a list of countries): it isn't set on the players, and Wi-Fi stays blocked (rfkill) without it. It has to survive the RAM overlay, so on `/boot`: e.g. `cfg80211.ieee80211_regdom=GB` in `cmdline.txt` (read by the kernel at boot), plus `country=GB` for `wpa_supplicant`. Check on the Pi what Buster's `raspi-config` sets (`do_wifi_country`) and whether `/boot/wpa_supplicant.conf` is still picked up with `/boot` read-only
-- [ ] Connect to Wi-Fi from the web interface (System tab): scan for networks, choose one, enter its password; saved in `/boot` (e.g. `wpa_supplicant.conf`, which Raspberry Pi OS copies at boot, or written to `/etc/wpa_supplicant` with the overlay in mind) and applied with `wpa_cli`. Show the Wi-Fi address and signal in Network; the country code is needed (Wi-Fi stays off without it); a Pi 3 B+ also has 5 GHz. Careful: changing Wi-Fi while connected over Wi-Fi drops the page
-- [ ] Offline setup: create a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (there is no Wi-Fi setting yet)
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
 - [ ] "Restore default config.txt" button (the old "Auto" video preset used to do this)
 - [ ] OSC control over the network (show control software, Max/MSP, TouchOSC, QLab), for the basic controls:
