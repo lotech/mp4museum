@@ -402,6 +402,18 @@ def test_save_for_the_next_start_fails_without_its_list(ports, monkeypatch):
     assert saved(ports) is None and network.next_start_interfaces() == set()
 
 
+def test_running_out_doesnt_undo_a_newer_change(ports):
+    """The timer of a change that has just run out, and a new change made at that moment."""
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    old = network._pending['token']
+    network.change({'wifi': {'networks': []}})
+    assert not network.undo(old) and network.pending() is not None
+    network._revert(old)
+    assert network.pending() is not None
+    assert network.undo() and network.pending() is None
+
+
 def test_save_for_the_next_start(ports):
     network.save_for_next_start(FIXED)
     assert saved(ports) == FIXED and commands(ports) == [] and 'ip_address' not in dhcpcd(ports)

@@ -513,11 +513,8 @@ def _apply_pending(token):
             _pending['finished'] = True
 
 def _revert(token):
-    with _lock:
-        if _pending.get('token') is not token:
-            return
+    if undo(token):
         print("Network settings: not kept, so the previous ones are used again.", flush=True)
-    undo()
 
 class NotApplied(Exception):
     """Keep was asked for before the change had been applied (so before it could be tried)."""
@@ -541,10 +538,11 @@ def keep():
         _pending.clear()
     return True
 
-def undo():
-    """Back to the saved settings now. False if no change is waiting."""
+def undo(token=None):
+    """Back to the saved settings now. False if no change is waiting (token: or if the change
+    waiting isn't that one, e.g. made just as the timer for the one before ran out)."""
     with _lock:
-        if not _pending:
+        if not _pending or token is not None and _pending['token'] is not token:
             return False
         _cancel_timers()
         changed = _pending['changed']
