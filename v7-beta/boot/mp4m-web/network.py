@@ -621,20 +621,22 @@ def rollback():
 
 def save_for_next_start(settings):
     """Save settings to /boot without using them now (for a network the player isn't on yet)."""
+    settings = normalize(settings)
+    # (held throughout, as in keep(): no change may start being tried meanwhile, or the settings
+    # it puts in use would be taken for the ones in use until the next start)
     with _lock:
         if _pending:
             raise RuntimeError("Keep or undo the change being tried first.")
-    settings = normalize(settings)
-    with _apply_lock:
-        using = (_in_use['settings'] if _in_use['settings'] is not None else read_settings()).get('interfaces') or {}
-        interfaces = settings.get('interfaces') or {}
-        next_start = dict(_next_start)
-        for name in set(interfaces) | set(using):
-            if interfaces.get(name) != using.get(name):
-                next_start[name] = using.get(name)
-            else:
-                next_start.pop(name, None)
-        _commit(settings, next_start)
+        with _apply_lock:
+            using = (_in_use['settings'] if _in_use['settings'] is not None else read_settings()).get('interfaces') or {}
+            interfaces = settings.get('interfaces') or {}
+            next_start = dict(_next_start)
+            for name in set(interfaces) | set(using):
+                if interfaces.get(name) != using.get(name):
+                    next_start[name] = using.get(name)
+                else:
+                    next_start.pop(name, None)
+            _commit(settings, next_start)
 
 def pending():
     """{'seconds': left to keep it, 'problems': [...]} while a change waits to be kept, else None."""

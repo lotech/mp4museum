@@ -548,6 +548,26 @@ def test_going_back_gives_up_and_a_new_change_stops_it(ports, monkeypatch):
     assert network.rollback() is None
 
 
+def test_no_change_starts_while_saving_for_the_next_start(ports, monkeypatch):
+    """A change tried meanwhile would be taken for the settings in use until the next start."""
+    import threading
+    network.apply_at_start()
+    save = network._save
+    other = {}
+
+    def saving(settings):
+        other['thread'] = threading.Thread(target=network.change, args=({'wifi': {'networks': []}},))
+        other['thread'].start()
+        other['thread'].join(0.2)
+        other['waited'] = other['thread'].is_alive()
+        save(settings)
+    monkeypatch.setattr(network, '_save', saving)
+    network.save_for_next_start(FIXED)
+    other['thread'].join(5)
+    assert other['waited'] and network.pending() is not None
+    assert network._next_start == {'enxb827eb4e4fd4': None}
+
+
 def test_save_for_the_next_start(ports):
     network.save_for_next_start(FIXED)
     assert saved(ports) == FIXED and commands(ports) == [] and 'ip_address' not in dhcpcd(ports)
