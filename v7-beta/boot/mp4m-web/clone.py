@@ -97,7 +97,8 @@ def media_bytes(path, on_card=False):
     the card, each file and folder rounded up to whole clusters (many small files take much
     more than their size)."""
     def taken(size):
-        return -(-size // EXFAT_CLUSTER) * EXFAT_CLUSTER if on_card else size
+        # (an empty file takes no cluster but room in its folder: counted as one, plenty for that)
+        return -(-max(size, 1) // EXFAT_CLUSTER) * EXFAT_CLUSTER if on_card else size
     total = 0
     for folder, dirs, files in os.walk(path):
         dirs[:] = [name for name in dirs if not name.startswith('.')]

@@ -239,6 +239,10 @@ def test_media_size_is_what_a_clone_copies(pi, tmp_path):
     assert clone.media_bytes(str(pi.media)) == 1500
     # on the card, each file and folder takes whole clusters: what the card's size is checked with
     assert clone.media_bytes(str(pi.media), on_card=True) == 3 * clone.EXFAT_CLUSTER
+    # an empty file takes room in its folder: counted as a cluster too
+    (pi.media / 'empty.jpg').write_bytes(b'')
+    assert clone.media_bytes(str(pi.media)) == 1500
+    assert clone.media_bytes(str(pi.media), on_card=True) == 4 * clone.EXFAT_CLUSTER
 
 
 def test_card_size_check_counts_whole_clusters(pi, monkeypatch):
