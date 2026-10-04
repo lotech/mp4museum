@@ -311,6 +311,39 @@ def test_going_back_from_wifi_is_tried_again_if_it_fails(ports, monkeypatch):
     assert network.rollback() is None and not os.path.exists(network.WIFI_BEFORE_FILE)
 
 
+def test_an_old_address_that_stays_is_a_problem(ports, client, monkeypatch):
+    """dhcpcd may keep a fixed address: if it can't be taken off, the page may be on it."""
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    on = {'address': True}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        if cmd[:3] == ['ip', 'addr', 'del']:
+            return False, 'RTNETLINK answers: Operation not permitted'
+        if cmd[:2] == ['ip', '-o'] and on['address']:
+            return True, '2: enxb827eb4e4fd4    inet 192.168.1.50/24 brd 192.168.1.255 scope global'
+        return True, ''
+    monkeypatch.setattr(system, 'run_command', run)
+    other = {'interfaces': {'enxb827eb4e4fd4': dict(FIXED['interfaces']['enxb827eb4e4fd4'], address='192.168.1.60/24')}}
+    network.change(other)
+    ports.run_later(network.APPLY_DELAY)
+    assert network.pending()['problems'] == [
+        "192.168.1.50/24 couldn't be taken off enxb827eb4e4fd4: RTNETLINK answers: Operation not permitted"]
+    with pytest.raises(network.NotApplied):
+        network.keep()
+    # gone already: fine
+    on['address'] = False
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    assert network.pending()['problems'] == []
+
+
+def test_no_password_ticked_with_text_left_in_the_field(ports, client):
+    client.post('/network/wifi/add', data={'ssid': 'Open', 'open': '1', 'password': 'left-over-text'})
+    assert network.pending() and network.target_settings()['wifi']['networks'] == [{'ssid': 'Open'}]
+
+
 def test_change_not_kept_goes_back(ports):
     network.change(FIXED)
     ports.run_later()

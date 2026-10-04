@@ -325,7 +325,11 @@ def _apply(settings, at_start=False, again=None):
             # find the player there and keep settings that don't work)
             for line in old.get(name, []):
                 if line.startswith('static ip_address=') and line not in new.get(name, []):
-                    _command(['ip', 'addr', 'del', line.split('=', 1)[1], 'dev', name])
+                    address = line.split('=', 1)[1]
+                    ok, output = _command(['ip', 'addr', 'del', address, 'dev', name])
+                    # (failing because it's gone already is fine)
+                    if not ok and ('IPv4', address) in system.interface_addresses().get(name, []):
+                        problems.append(f"{address} couldn't be taken off {name}: {output or 'failed'}")
             # reads dhcpcd.conf again and starts over on this interface
             _run(['dhcpcd', '-n', name], problems)
 

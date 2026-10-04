@@ -945,7 +945,8 @@ def add_wifi_network():
     settings = copy.deepcopy(network.target_settings())
     wifi = wifi_settings(settings)
     ssid = request.form.get('ssid', '').strip('\r\n')
-    password = request.form.get('password', '')
+    # (No password ticked: whatever is left in the field, or a browser filled in, isn't used)
+    password = request.form.get('password', '') if request.form.get('open') != '1' else ''
     saved = next((n for n in wifi['networks'] if n['ssid'] == ssid), None)
     try:
         if not ssid.strip():
