@@ -708,22 +708,25 @@ def scan():
     wifi = target_settings().get('wifi')
     if wifi and not wifi['enabled']:
         raise ValueError("Wi-Fi is off. Turn it on to look for networks.")
+    country = wifi['country'] if wifi else ''
+    frequencies = [] if country else ['freq'] + [str(f) for f in SAFE_FREQUENCIES]
     # blocked until a country is set on Raspberry Pi OS: unblocked to scan, and blocked again
-    # after it if Wi-Fi isn't set up (wpa_supplicant would scan every channel the firmware allows)
-    blocked = wifi_blocked()
-    if blocked:
-        _command(['rfkill', 'unblock', 'wifi'])
-    try:
-        _command(['ip', 'link', 'set', interface, 'up'])
-        country = wifi['country'] if wifi else ''
-        frequencies = [] if country else ['freq'] + [str(f) for f in SAFE_FREQUENCIES]
-        ok, output = _command(['iw', 'dev', interface, 'scan'] + frequencies)
-        if not ok:
-            # e.g. busy: wpa_supplicant is scanning; its last results are there
-            ok, output = _command(['iw', 'dev', interface, 'scan', 'dump'])
-    finally:
-        if blocked and not wifi:
-            _command(['rfkill', 'block', 'wifi'])
+    # after it if Wi-Fi isn't set up (wpa_supplicant would scan every channel the firmware allows).
+    # Not while a change is applied, which may set up Wi-Fi (and must not be blocked after it)
+    with _apply_lock:
+        blocked = wifi_blocked()
+        if blocked:
+            _command(['rfkill', 'unblock', 'wifi'])
+        try:
+            _command(['ip', 'link', 'set', interface, 'up'])
+            ok, output = _command(['iw', 'dev', interface, 'scan'] + frequencies)
+            if not ok:
+                # e.g. busy: wpa_supplicant is scanning; its last results are there
+                ok, output = _command(['iw', 'dev', interface, 'scan', 'dump'])
+        finally:
+            # (what is in use now, not what the page had: no apply ran meanwhile)
+            if blocked and not (_in_use['settings'] or read_settings()).get('wifi'):
+                _command(['rfkill', 'block', 'wifi'])
     if not ok:
         raise ValueError(f"Couldn't look for networks: {output}")
     networks = parse_scan(output)

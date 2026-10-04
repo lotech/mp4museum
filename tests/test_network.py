@@ -659,6 +659,27 @@ def test_scan_leaves_wifi_blocked_if_it_isnt_set_up(ports, client):
     assert ports.commands[0] == ['rfkill', 'unblock', 'wifi'] and ports.commands[-1] == ['rfkill', 'block', 'wifi']
 
 
+def test_scan_and_applying_a_change_dont_overlap(ports, client, monkeypatch):
+    """A change setting up Wi-Fi, applied during a scan, would be blocked again by it."""
+    blocked(ports)
+    locked = []
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        if cmd[:4] == ['iw', 'dev', 'wlan0', 'scan']:
+            locked.append(network._apply_lock.locked())
+        return True, ''
+    monkeypatch.setattr(system, 'run_command', run)
+    client.get('/network/scan')
+    assert locked == [True]
+    # Wi-Fi set up (and applied) before the scan: not blocked after it
+    network.change({'wifi': {'networks': []}})
+    ports.run_later(network.APPLY_DELAY)
+    ports.commands.clear()
+    client.get('/network/scan')
+    assert ['rfkill', 'block', 'wifi'] not in ports.commands
+
+
 def test_wifi_off_on_the_image(ports, client):
     blocked(ports)
     page = client.get('/').data.decode()
