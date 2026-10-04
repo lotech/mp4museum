@@ -289,6 +289,18 @@ def test_new_partitions_are_checked_before_anything_is_written(pi, disks):
     assert disks.mounted() == []
 
 
+def test_an_old_table_with_the_same_first_partitions_is_noticed(pi, disks, monkeypatch):
+    # e.g. a card copied before from a player using less space: the media partition Linux still
+    # sees ends far before the end of the card
+    disks.kernel_keeps_old_table = True
+    monkeypatch.setattr(clone, 'sizes', lambda: (2 * 1024 ** 3, 1024 ** 2))
+    plan = clone.plan(CARD['size'], *clone.sizes(), False, 524288)
+    disks.write_sys([plan['boot'], plan['root'], (plan['media'][0], 1024 ** 3 // 512)])
+    with pytest.raises(clone.CloneError, match="The Pi didn't take in the card's new partitions"):
+        clone.clone(CARD, with_media=False)
+    assert not [cmd for cmd in pi.commands if cmd[0].startswith('mkfs')]
+
+
 def test_disk_id_written_into_the_table_if_sfdisk_didnt_use_it(pi, disks):
     disks.label_id_ignored = True
     clone.clone(CARD, with_media=False)

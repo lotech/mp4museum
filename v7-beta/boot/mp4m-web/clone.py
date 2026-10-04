@@ -498,7 +498,8 @@ def _check_partitions(device, layout):
     expected = [layout['boot'], layout['root'], (layout['media'][0], None)]
     if (not seen or any(start != want[0] or (want[1] is not None and size != want[1])
                         for (start, size), want in zip(seen, expected))
-            or seen[2][0] + seen[2][1] > end):
+            # the media partition runs to the end of the card (sfdisk may stop it a little short)
+            or not end - ALIGN <= seen[2][0] + seen[2][1] <= end):
         raise CloneError("The Pi didn't take in the card's new partitions, so nothing was copied to it. "
                          "Take it out, put it back in and try again.")
 
