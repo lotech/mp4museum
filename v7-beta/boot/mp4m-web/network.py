@@ -531,10 +531,17 @@ def change(settings, now_too=()):
         previous = _pending['previous'] if _pending else read_settings()
         changed = bool(_pending) and _pending['changed']
         now_too = set(now_too) | (_pending['now_too'] if _pending else set())
+        # what was in use before the first of these changes; if one before this went wrong (or
+        # may not have finished), everything differing from that is done again, not only what
+        # this one changes (/etc may already have the rest)
+        base = _pending['base'] if _pending else _in_use['settings']
+        redo = bool(_pending) and (_pending['redo'] or bool(_pending['problems'])
+                                   or _pending['applied'] and not _pending['finished'])
         _cancel_timers()
         _pending.clear()
         token = object()
         _pending.update(settings=settings, previous=previous, token=token, applied=False, finished=False, now_too=now_too,
+                        base=base, redo=redo,
                         changed=changed, problems=[], deadline=time.monotonic() + APPLY_DELAY + KEEP_SECONDS)
         _pending['apply_timer'] = _later(APPLY_DELAY, lambda: _apply_pending(token))
         _pending['revert_timer'] = _later(APPLY_DELAY + KEEP_SECONDS, lambda: _revert(token))
@@ -550,7 +557,8 @@ def _apply_pending(token):
             return
         _pending['applied'] = _pending['changed'] = True
         settings, now_too = _pending['settings'], _pending['now_too']
-    problems = _use(settings, now_too=now_too)
+        again = (_pending['base'] or {}) if _pending['redo'] else None
+    problems = _use(settings, now_too=now_too, again=again)
     with _lock:
         if _pending.get('token') is token:
             _pending['problems'] = problems

@@ -344,6 +344,27 @@ def test_no_password_ticked_with_text_left_in_the_field(ports, client):
     assert network.pending() and network.target_settings()['wifi']['networks'] == [{'ssid': 'Open'}]
 
 
+def test_a_change_after_one_that_failed_does_it_all_again(ports, monkeypatch):
+    """dhcpcd failed for a fixed address, then Wi-Fi is changed: the address isn't taken as done."""
+    network.apply_at_start()
+    failing = {'dhcpcd': True}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        return (False, 'timed out') if cmd[0] == 'dhcpcd' and failing['dhcpcd'] else (True, '')
+    monkeypatch.setattr(system, 'run_command', run)
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    assert network.pending()['problems']
+    failing['dhcpcd'] = False
+    ports.commands.clear()
+    network.change(dict(FIXED, wifi={'networks': []}))
+    ports.run_later(network.APPLY_DELAY)
+    assert ['dhcpcd', '-n', 'enxb827eb4e4fd4'] in ports.commands and network.pending()['problems'] == []
+    network.keep()
+    assert saved(ports)['interfaces'] == FIXED['interfaces']
+
+
 def test_change_not_kept_goes_back(ports):
     network.change(FIXED)
     ports.run_later()
