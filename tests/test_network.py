@@ -506,6 +506,34 @@ def test_going_back_is_tried_again_if_it_fails(ports, client, monkeypatch):
     assert network.rollback() is None and ports.later == []
 
 
+def test_undo_while_the_change_is_applied_then_going_back_fails(ports, monkeypatch):
+    """Undo from another tab while dhcpcd is still applying the change: the retries still know
+    the change is what may be in use."""
+    import threading
+    state = {'undo': None, 'fail': False}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        if cmd[0] == 'dhcpcd' and state['undo'] is None:
+            # applying: Undo waits for it
+            state['undo'] = threading.Thread(target=network.undo)
+            state['undo'].start()
+            state['fail'] = True
+            return True, ''
+        return (False, 'timed out') if cmd[0] == 'dhcpcd' and state['fail'] else (True, '')
+    network.apply_at_start()
+    monkeypatch.setattr(system, 'run_command', run)
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    state['undo'].join(5)
+    assert network.rollback()
+    state['fail'] = False
+    ports.commands.clear()
+    ports.run_later(network.ROLLBACK_RETRY)
+    assert ['ip', 'addr', 'del', '192.168.1.50/24', 'dev', 'enxb827eb4e4fd4'] in ports.commands
+    assert ['dhcpcd', '-n', 'enxb827eb4e4fd4'] in ports.commands and network.rollback() is None
+
+
 def test_going_back_gives_up_and_a_new_change_stops_it(ports, monkeypatch):
     monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[0] != 'dhcpcd', 'failed'))
     network.change(FIXED)
@@ -678,6 +706,18 @@ def test_scan_and_applying_a_change_dont_overlap(ports, client, monkeypatch):
     ports.commands.clear()
     client.get('/network/scan')
     assert ['rfkill', 'block', 'wifi'] not in ports.commands
+
+
+def test_scan_uses_the_country_in_use(ports, client, monkeypatch):
+    """A change choosing a country, not applied yet: still only the channels allowed everywhere."""
+    network.change({'wifi': {'country': 'GB', 'networks': []}})
+    client.get('/network/scan')
+    scan = next(cmd for cmd in ports.commands if cmd[:4] == ['iw', 'dev', 'wlan0', 'scan'])
+    assert scan[4:5] == ['freq']
+    ports.run_later(network.APPLY_DELAY)
+    ports.commands.clear()
+    client.get('/network/scan')
+    assert next(cmd for cmd in ports.commands if cmd[:4] == ['iw', 'dev', 'wlan0', 'scan']) == ['iw', 'dev', 'wlan0', 'scan']
 
 
 def test_wifi_off_on_the_image(ports, client):

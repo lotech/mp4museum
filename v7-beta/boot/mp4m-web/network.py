@@ -426,11 +426,12 @@ def _later(seconds, function):
     timer.start()
     return timer
 
-def _use(settings, at_start=False, now_too=(), again=None, generation=None):
+def _use(settings, at_start=False, now_too=(), again=None, generation=None, replaced=None):
     """Apply settings, but an interface saved for the next start keeps what it uses until then,
     unless these settings change it or it is in now_too (Apply chosen for it). Returns what went
     wrong. again: see _apply. generation: nothing is done (None returned) if a change has been
-    made since that one (_generation)."""
+    made since that one (_generation). replaced: a dict, given the settings that were in use
+    before ('settings')."""
     with _apply_lock:
         if generation is not None and generation != _generation[0]:
             return None
@@ -451,6 +452,8 @@ def _use(settings, at_start=False, now_too=(), again=None, generation=None):
             now.pop('interfaces', None)
             if interfaces:
                 now['interfaces'] = interfaces
+        if replaced is not None:
+            replaced['settings'] = _in_use['settings']
         problems = _apply(now, at_start=at_start or _in_use['settings'] is None, again=again)
         _in_use['settings'] = now
         return problems
@@ -582,12 +585,17 @@ def undo(token=None):
         _pending.clear()
         generation = _generation[0]
     if changed:
-        _roll_back(previous, _in_use['settings'], 1, generation)
+        _roll_back(previous, None, 1, generation)
     return True
 
 def _roll_back(previous, tried, tries, generation):
-    """Use the previous settings again; if that fails, try again (tried: what may still be in use)."""
-    problems = _use(previous, again=tried if tries > 1 else None, generation=generation)
+    """Use the previous settings again; if that fails, try again (tried: what may still be in use,
+    found out on the first try: what was in use when it got the apply lock, after any apply still
+    running then)."""
+    replaced = {}
+    problems = _use(previous, again=tried if tries > 1 else None, generation=generation, replaced=replaced)
+    if tried is None:
+        tried = replaced.get('settings') or {}
     with _lock:
         if problems is None or generation != _generation[0]:
             # a change made since
@@ -708,12 +716,14 @@ def scan():
     wifi = target_settings().get('wifi')
     if wifi and not wifi['enabled']:
         raise ValueError("Wi-Fi is off. Turn it on to look for networks.")
-    country = wifi['country'] if wifi else ''
-    frequencies = [] if country else ['freq'] + [str(f) for f in SAFE_FREQUENCIES]
     # blocked until a country is set on Raspberry Pi OS: unblocked to scan, and blocked again
     # after it if Wi-Fi isn't set up (wpa_supplicant would scan every channel the firmware allows).
     # Not while a change is applied, which may set up Wi-Fi (and must not be blocked after it)
     with _apply_lock:
+        # the country in use (a change setting one may not be applied yet)
+        in_use = (_in_use['settings'] or read_settings()).get('wifi')
+        country = in_use['country'] if in_use else ''
+        frequencies = [] if country else ['freq'] + [str(f) for f in SAFE_FREQUENCIES]
         blocked = wifi_blocked()
         if blocked:
             _command(['rfkill', 'unblock', 'wifi'])
