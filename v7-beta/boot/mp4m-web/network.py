@@ -296,10 +296,10 @@ def _run(cmd, problems):
         problems.append(f"{' '.join(cmd)}: {output or 'failed'}")
     return ok, output
 
-def _apply(settings, at_start=False, again=None):
+def _apply(settings, at_start=False, again=()):
     """Write the settings into /etc and use them now. Returns what went wrong (a list of lines).
-    again: settings that may still be partly in use (an attempt to go back to these failed), so
-    what differs is done again even if /etc has these already."""
+    again: settings that may still be partly in use (applying them, or going from them, went
+    wrong), so what differs from them is done again even if /etc has these settings already."""
     problems = []
     current = _read(DHCPCD_CONF)
     if current is None:
@@ -307,8 +307,7 @@ def _apply(settings, at_start=False, again=None):
             problems.append(f"{DHCPCD_CONF} not found: fixed addresses need dhcpcd.")
     else:
         base, old = split_dhcpcd_conf(current)
-        if again is not None:
-            old = split_dhcpcd_conf(dhcpcd_block(again))[1]
+        olds = [old] + [split_dhcpcd_conf(dhcpcd_block(other))[1] for other in again]
         block = dhcpcd_block(settings)
         if block:
             text = base.rstrip('\n') + '\n\n' + block
@@ -318,12 +317,13 @@ def _apply(settings, at_start=False, again=None):
         _, new = split_dhcpcd_conf(text)
         if text != current:
             _write_etc(DHCPCD_CONF, text, 0o644)
-        for name in sorted(set(old) | set(new)):
-            if old.get(name) == new.get(name):
+        for name in sorted(set(new).union(*olds)):
+            if all(other.get(name) == new.get(name) for other in olds):
                 continue
             # a fixed address dhcpcd might keep: gone before it starts again (the browser must not
             # find the player there and keep settings that don't work)
-            for line in old.get(name, []):
+            stale = sorted({line for other in olds for line in other.get(name, [])})
+            for line in stale:
                 if line.startswith('static ip_address=') and line not in new.get(name, []):
                     address = line.split('=', 1)[1]
                     ok, output = _command(['ip', 'addr', 'del', address, 'dev', name])
@@ -342,7 +342,7 @@ def _apply(settings, at_start=False, again=None):
     # (Wi-Fi no longer set up here: blocked again, as on the image, unless it wasn't before)
     block = True
     # a retry of going back, where the Wi-Fi in use may differ from these settings
-    again_wifi = again is not None and (again.get('wifi') or None) != (wifi or None)
+    again_wifi = any((other.get('wifi') or None) != (wifi or None) for other in again)
     restored = False
     if wifi:
         text = wpa_conf(wifi)
@@ -420,6 +420,8 @@ _generation = [0]
 # set once apply_at_start has run (changes wait for it, at most STARTUP_WAIT seconds)
 _started = threading.Event()
 STARTUP_WAIT = 120
+# settings that may still be partly in use, after applying them or going from them went wrong
+_maybe_in_use = []
 # the settings in /etc now (None: not known yet, the saved ones)
 _in_use = {'settings': None}
 # interfaces saved with an address for the next start (Save for next start): {name: the setting
@@ -433,12 +435,12 @@ def _later(seconds, function):
     timer.start()
     return timer
 
-def _use(settings, at_start=False, now_too=(), again=None, generation=None, replaced=None):
+def _use(settings, at_start=False, now_too=(), generation=None):
     """Apply settings, but an interface saved for the next start keeps what it uses until then,
     unless these settings change it or it is in now_too (Apply chosen for it). Returns what went
-    wrong. again: see _apply. generation: nothing is done (None returned) if a change has been
-    made since that one (_generation). replaced: a dict, given the settings that were in use
-    before ('settings')."""
+    wrong. generation: nothing is done (None returned) if a change has been made since that one
+    (_generation). After something went wrong, what differs from the settings that may still be
+    partly in use (_maybe_in_use) is done again, until an apply works."""
     if not at_start:
         # after apply_at_start, which finds out what is in use and what waits for the next start
         _started.wait(STARTUP_WAIT)
@@ -446,6 +448,7 @@ def _use(settings, at_start=False, now_too=(), again=None, generation=None, repl
         if generation is not None and generation != _generation[0]:
             return None
         if at_start:
+            del _maybe_in_use[:]
             _next_start.clear()
             # the web interface started again, not the Pi: still for the next start
             _next_start.update(_load_next_start())
@@ -462,9 +465,15 @@ def _use(settings, at_start=False, now_too=(), again=None, generation=None, repl
             now.pop('interfaces', None)
             if interfaces:
                 now['interfaces'] = interfaces
-        if replaced is not None:
-            replaced['settings'] = _in_use['settings']
-        problems = _apply(now, at_start=at_start or _in_use['settings'] is None, again=again)
+        before = _in_use['settings']
+        problems = _apply(now, at_start=at_start or before is None, again=list(_maybe_in_use))
+        if problems:
+            # partly done: what was in use, and these, may each be partly in use now
+            for other in (before, now):
+                if other is not None and other not in _maybe_in_use:
+                    _maybe_in_use.append(other)
+        else:
+            del _maybe_in_use[:]
         _in_use['settings'] = now
         return problems
 
@@ -531,17 +540,10 @@ def change(settings, now_too=()):
         previous = _pending['previous'] if _pending else read_settings()
         changed = bool(_pending) and _pending['changed']
         now_too = set(now_too) | (_pending['now_too'] if _pending else set())
-        # what was in use before the first of these changes; if one before this went wrong (or
-        # may not have finished), everything differing from that is done again, not only what
-        # this one changes (/etc may already have the rest)
-        base = _pending['base'] if _pending else _in_use['settings']
-        redo = bool(_pending) and (_pending['redo'] or bool(_pending['problems'])
-                                   or _pending['applied'] and not _pending['finished'])
         _cancel_timers()
         _pending.clear()
         token = object()
         _pending.update(settings=settings, previous=previous, token=token, applied=False, finished=False, now_too=now_too,
-                        base=base, redo=redo,
                         changed=changed, problems=[], deadline=time.monotonic() + APPLY_DELAY + KEEP_SECONDS)
         _pending['apply_timer'] = _later(APPLY_DELAY, lambda: _apply_pending(token))
         _pending['revert_timer'] = _later(APPLY_DELAY + KEEP_SECONDS, lambda: _revert(token))
@@ -557,8 +559,7 @@ def _apply_pending(token):
             return
         _pending['applied'] = _pending['changed'] = True
         settings, now_too = _pending['settings'], _pending['now_too']
-        again = (_pending['base'] or {}) if _pending['redo'] else None
-    problems = _use(settings, now_too=now_too, again=again)
+    problems = _use(settings, now_too=now_too)
     with _lock:
         if _pending.get('token') is token:
             _pending['problems'] = problems
@@ -610,20 +611,16 @@ def undo(token=None):
             _rolling_back[0] += 1
     if changed:
         try:
-            _roll_back(previous, None, 1, generation)
+            _roll_back(previous, 1, generation)
         finally:
             with _lock:
                 _rolling_back[0] -= 1
     return True
 
-def _roll_back(previous, tried, tries, generation):
-    """Use the previous settings again; if that fails, try again (tried: what may still be in use,
-    found out on the first try: what was in use when it got the apply lock, after any apply still
-    running then)."""
-    replaced = {}
-    problems = _use(previous, again=tried if tries > 1 else None, generation=generation, replaced=replaced)
-    if tried is None:
-        tried = replaced.get('settings') or {}
+def _roll_back(previous, tries, generation):
+    """Use the previous settings again; if that fails, try again (what may still be partly in use
+    is done again: _maybe_in_use)."""
+    problems = _use(previous, generation=generation)
     with _lock:
         if problems is None or generation != _generation[0]:
             # a change made since
@@ -633,7 +630,7 @@ def _roll_back(previous, tried, tries, generation):
             print(f"Network settings: going back to the previous ones failed (try {tries} of {ROLLBACK_TRIES})", flush=True)
             _rollback.update(problems=problems, tries=tries)
             if tries < ROLLBACK_TRIES:
-                _rollback['timer'] = _later(ROLLBACK_RETRY, lambda: _roll_back(previous, tried, tries + 1, generation))
+                _rollback['timer'] = _later(ROLLBACK_RETRY, lambda: _roll_back(previous, tries + 1, generation))
 
 def _stop_rollback():
     if _rollback.get('timer'):

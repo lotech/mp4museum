@@ -181,6 +181,7 @@ def pi(tmp_path, monkeypatch):
         '_generation': [0],
         '_scan_left_on': [False],
         '_rolling_back': [0],
+        '_maybe_in_use': [],
         # (started: tests that need apply_at_start call it)
         '_started': _set_event(),
     }.items():

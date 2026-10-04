@@ -365,6 +365,50 @@ def test_a_change_after_one_that_failed_does_it_all_again(ports, monkeypatch):
     assert saved(ports)['interfaces'] == FIXED['interfaces']
 
 
+def test_an_address_that_failed_is_taken_off_when_corrected(ports, monkeypatch):
+    """B failed (and may be on the port), then corrected to C: B is taken off too."""
+    network.apply_at_start()
+    failing = {'dhcpcd': True}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        return (False, 'timed out') if cmd[0] == 'dhcpcd' and failing['dhcpcd'] else (True, '')
+    monkeypatch.setattr(system, 'run_command', run)
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    failing['dhcpcd'] = False
+    ports.commands.clear()
+    corrected = {'interfaces': {'enxb827eb4e4fd4': dict(FIXED['interfaces']['enxb827eb4e4fd4'], address='192.168.1.60/24')}}
+    network.change(corrected)
+    ports.run_later(network.APPLY_DELAY)
+    assert ['ip', 'addr', 'del', '192.168.1.50/24', 'dev', 'enxb827eb4e4fd4'] in ports.commands
+    assert ['dhcpcd', '-n', 'enxb827eb4e4fd4'] in ports.commands and network.pending()['problems'] == []
+    assert network._maybe_in_use == []
+
+
+def test_a_new_change_after_going_back_failed_does_that_again(ports, monkeypatch):
+    """Going back from Wi-Fi failed to block it; a fixed address changed next blocks it too."""
+    blocked(ports)
+    network.apply_at_start()
+    network.change({'wifi': {'networks': [{'ssid': 'Gallery', 'password': 'secret-password'}]}})
+    ports.run_later(network.APPLY_DELAY)
+    failing = {'rfkill': True}
+
+    def run(cmd, timeout=None):
+        ports.commands.append(cmd)
+        return (False, 'timed out') if cmd[:2] == ['rfkill', 'block'] and failing['rfkill'] else (True, '')
+    monkeypatch.setattr(system, 'run_command', run)
+    network.undo()
+    assert network.rollback()
+    failing['rfkill'] = False
+    ports.commands.clear()
+    network.change(FIXED)
+    assert network.rollback() is None
+    ports.run_later(network.APPLY_DELAY)
+    assert ['rfkill', 'block', 'wifi'] in ports.commands and ['dhcpcd', '-n', 'enxb827eb4e4fd4'] in ports.commands
+    assert network.pending()['problems'] == []
+
+
 def test_change_not_kept_goes_back(ports):
     network.change(FIXED)
     ports.run_later()

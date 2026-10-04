@@ -98,7 +98,10 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   where to find the player is sent first) and only saved to `/boot` by `keep()`; after
   `KEEP_SECONDS` without it, `undo()` puts the saved settings back (tried again if a command
   fails, `ROLLBACK_TRIES`; the page then says to reboot). A reboot does the same. Network
-  commands stop after `COMMAND_TIMEOUT`.
+  commands stop after `COMMAND_TIMEOUT`. After an apply goes wrong, the settings that may be
+  partly in use (`_maybe_in_use`) are passed to the next applies as `again`, so what differs from
+  them is done again (not only what `/etc` shows changed), until one works. Keep is refused
+  until the change is applied, and if applying it reported problems.
   *Save for next start* saves without using it: those interfaces are listed in `/run`
   (`NEXT_START_FILE`), so a restart of the web interface (updates) doesn't use them yet.
 - Without a Wi-Fi country, Wi-Fi only uses 2.4 GHz channels 1-11 (`freq_list`): the Pi 3 B's
