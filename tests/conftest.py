@@ -43,7 +43,7 @@ class FakePi:
         self.disks = [{'name': 'mmcblk0', 'size': '31914983424', 'type': 'disk', 'tran': None, 'rm': False, 'model': None},
                       {'name': 'sdb', 'size': '0', 'type': 'disk', 'tran': 'usb', 'rm': True, 'model': 'Reader'}]
 
-    def run_command(self, cmd):
+    def run_command(self, cmd, timeout=None):
         self.commands.append(list(cmd))
         if cmd[0] == 'aplay':
             return True, 'card 0: Headphones\ncard 1: vc4hdmi'

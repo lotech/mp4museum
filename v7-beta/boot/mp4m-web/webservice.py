@@ -886,10 +886,12 @@ def wifi_settings(settings):
     """The Wi-Fi part of settings, to change (made if Wi-Fi wasn't set up)."""
     return settings.setdefault('wifi', {'enabled': True, 'country': '', 'networks': []})
 
-def try_network_change(settings, later=False):
+def try_network_change(settings, later=False, now_too=()):
     """Use the changed settings: tried now and kept if the page is opened again (see
-    network.change), or saved for the next start."""
-    if network.normalize(settings) == network.target_settings():
+    network.change), or saved for the next start. now_too: interfaces to use them on now even if
+    they were saved for the next start."""
+    now_too = set(now_too) & network.next_start_interfaces() if not later else set()
+    if network.normalize(settings) == network.target_settings() and not now_too:
         flash("Nothing changed.", "info")
         return redirect(url_for('index'))
     try:
@@ -897,7 +899,7 @@ def try_network_change(settings, later=False):
             network.save_for_next_start(settings)
             flash("Saved. The player uses the new network settings from the next start.", "success")
             return redirect(url_for('index'))
-        network.change(settings)
+        network.change(settings, now_too=now_too)
     except Exception as e:
         flash(f"Failed to change the network settings: {e}", "error")
         return redirect(url_for('index'))
@@ -936,7 +938,7 @@ def set_network_address():
                 return redirect(url_for('index'))
     else:
         interfaces.pop(name, None)
-    return try_network_change(settings, later=request.form.get('when') == 'later')
+    return try_network_change(settings, later=request.form.get('when') == 'later', now_too=[name])
 
 @app.route('/network/wifi/add', methods=['POST'])
 def add_wifi_network():

@@ -342,7 +342,7 @@ def test_network_section_lists_every_interface(pi, client, monkeypatch, tmp_path
         (net / name / 'operstate').write_text(state + '\n')
     monkeypatch.setattr(system, 'NET_PATH', str(net))
     monkeypatch.setattr(system, 'read_mac', lambda i: (net / i / 'address').read_text().strip())
-    monkeypatch.setattr(system, 'run_command', lambda cmd: (True, IP_OUTPUT) if cmd[:2] == ['ip', '-o'] else pi.run_command(cmd))
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (True, IP_OUTPUT) if cmd[:2] == ['ip', '-o'] else pi.run_command(cmd))
     text = system.get_network_status()
     assert 'enxb827eb4e4fd4 (wired): connected' in text
     assert 'IPv4 192.168.1.120/24' in text and 'MAC address: b8:27:eb:4e:4f:d4' in text
@@ -978,7 +978,7 @@ def test_device_info(pi, client, tmp_path, monkeypatch):
     monkeypatch.setattr(system, 'OS_RELEASE_FILE', str(tmp_path / 'os-release'))
     monkeypatch.setattr(system, 'UPTIME_FILE', str(tmp_path / 'uptime'))
     answers = {'get_mem gpu': 'gpu=256M', 'measure_temp': "temp=48.3'C", 'get_throttled': 'throttled=0x50000'}
-    monkeypatch.setattr(system, 'run_command', lambda cmd: (True, answers[' '.join(cmd[1:])]) if cmd[0] == 'vcgencmd'
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (True, answers[' '.join(cmd[1:])]) if cmd[0] == 'vcgencmd'
                         else pi.run_command(cmd))
     info = dict(system.get_device_info())
     assert info['Model'] == 'Raspberry Pi 3 Model B Rev 1.2' and info['Memory'] == '1 GB'
@@ -1003,7 +1003,7 @@ def test_device_info(pi, client, tmp_path, monkeypatch):
     assert info['Temperature'] == '88.7 °C' and info['Power'].startswith('Too low now')
     # old boards, no vcgencmd, nothing readable: only what is known
     revision.write_text('Revision\t: 000e\n')
-    monkeypatch.setattr(system, 'run_command', lambda cmd: (False, 'not found'))
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (False, 'not found'))
     (tmp_path / 'model').unlink()
     info = dict(system.get_device_info())
     assert info['Memory'] == '861 MB for programs' and 'Model' not in info and 'Power' not in info
@@ -1144,7 +1144,7 @@ def test_reboot_from_the_page_says_when_it_failed(pi, client, monkeypatch):
     r = client.post('/reboot', headers=fetch)
     assert r.status_code == 200 and ['reboot'] in pi.commands
     # the page's script gets the failure (a redirect would hide it behind the page it waits for)
-    monkeypatch.setattr(system, 'run_command', lambda cmd: (False, 'not allowed') if cmd == ['reboot'] else pi.run_command(cmd))
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (False, 'not allowed') if cmd == ['reboot'] else pi.run_command(cmd))
     r = client.post('/reboot', headers=fetch)
     assert r.status_code == 500 and r.data == b'Failed to reboot: not allowed'
     assert b'Failed to reboot: not allowed' in client.post('/reboot', follow_redirects=True).data

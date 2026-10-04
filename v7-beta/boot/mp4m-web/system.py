@@ -139,12 +139,15 @@ def is_valid_filename(filename):
             # exFAT allows 255 UTF-16 characters
             and len(filename.encode('utf-16-le')) <= 510)
 
-def run_command(cmd):
+def run_command(cmd, timeout=None):
+    """(True, its output) or (False, its errors). timeout: seconds before it is stopped."""
     try:
-        completed = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        completed = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
         return True, completed.stdout.strip()
     except subprocess.CalledProcessError as err:
         return False, err.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return False, f"stopped after {timeout} seconds"
     except OSError as err:
         return False, str(err)
 

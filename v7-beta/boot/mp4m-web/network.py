@@ -46,6 +46,8 @@ KEEP_SECONDS = 300
 # the page saying what happens is sent first: the change may cut the browser off
 APPLY_DELAY = 2
 MAX_WIFI_NETWORKS = 10
+# seconds before a network command is stopped (a scan takes a few)
+COMMAND_TIMEOUT = 30
 
 INTERFACE_RE = re.compile(r'^[A-Za-z0-9_.-]{1,15}$')
 COUNTRY_RE = re.compile(r'^[A-Z]{2}$')
@@ -275,8 +277,12 @@ def wireless_interfaces():
     return [name for name in system.network_interfaces()
             if os.path.isdir(os.path.join(system.NET_PATH, name, 'wireless'))]
 
+def _command(cmd):
+    # bounded: a command that hangs mustn't hold up going back to the previous settings
+    return system.run_command(cmd, timeout=COMMAND_TIMEOUT)
+
 def _run(cmd, problems):
-    ok, output = system.run_command(cmd)
+    ok, output = _command(cmd)
     if not ok:
         problems.append(f"{' '.join(cmd)}: {output or 'failed'}")
     return ok, output
@@ -306,7 +312,7 @@ def _apply(settings, at_start=False):
             # find the player there and keep settings that don't work)
             for line in old.get(name, []):
                 if line.startswith('static ip_address=') and line not in new.get(name, []):
-                    system.run_command(['ip', 'addr', 'del', line.split('=', 1)[1], 'dev', name])
+                    _command(['ip', 'addr', 'del', line.split('=', 1)[1], 'dev', name])
             # reads dhcpcd.conf again and starts over on this interface
             _run(['dhcpcd', '-n', name], problems)
 
@@ -333,7 +339,7 @@ def _apply(settings, at_start=False):
             # remembers that, is in RAM)
             _run(['rfkill', 'unblock', 'wifi'], problems)
             _run(['iw', 'reg', 'set', wifi['country'] or '00'], problems)
-            ok, output = system.run_command(['wpa_cli', '-i', interface, 'reconfigure'])
+            ok, output = _command(['wpa_cli', '-i', interface, 'reconfigure'])
             if not ok or 'FAIL' in output:
                 # not running for this interface (dhcpcd's hook usually starts it)
                 _run(['wpa_supplicant', '-B', '-i', interface, '-c', path, '-D', 'nl80211,wext'], problems)
@@ -364,9 +370,10 @@ def _later(seconds, function):
     timer.start()
     return timer
 
-def _use(settings, at_start=False):
+def _use(settings, at_start=False, now_too=()):
     """Apply settings, but an interface saved for the next start keeps what it uses until then,
-    unless these settings change it. Returns what went wrong."""
+    unless these settings change it or it is in now_too (Apply chosen for it). Returns what went
+    wrong."""
     with _apply_lock:
         if at_start:
             _next_start.clear()
@@ -375,7 +382,7 @@ def _use(settings, at_start=False):
             saved = read_settings().get('interfaces') or {}
             interfaces = dict(settings.get('interfaces') or {})
             for name, current in _next_start.items():
-                if interfaces.get(name) == saved.get(name):
+                if interfaces.get(name) == saved.get(name) and name not in now_too:
                     if current:
                         interfaces[name] = current
                     else:
@@ -385,11 +392,11 @@ def _use(settings, at_start=False):
                 now['interfaces'] = interfaces
         problems = _apply(now, at_start=at_start or _in_use['settings'] is None)
         _in_use['settings'] = now
-        _forget_next_start()
         return problems
 
 def _forget_next_start():
-    """Interfaces saved for the next start that use their saved setting now (changed and kept)."""
+    """Once a change is kept: interfaces saved for the next start that use their saved setting
+    now (an undone change must still find what they used before)."""
     saved = read_settings().get('interfaces') or {}
     using = (_in_use['settings'] or {}).get('interfaces') or {}
     for name in list(_next_start):
@@ -406,20 +413,23 @@ def target_settings():
         return _pending['settings'] if _pending else read_settings()
 
 def next_start_interfaces():
-    """Interfaces whose saved address isn't used until the next start (Save for next start)."""
-    return set(_next_start)
+    """Interfaces whose saved address isn't used until the next start (Save for next start),
+    other than those it is being tried on now."""
+    with _lock:
+        return set(_next_start) - (_pending['now_too'] if _pending else set())
 
-def change(settings):
+def change(settings, now_too=()):
     """Use these settings in a moment, and go back to the saved ones unless keep() is called
-    within KEEP_SECONDS."""
+    within KEEP_SECONDS. now_too: interfaces to use them on now even if saved for the next start."""
     settings = normalize(settings)
     with _lock:
         previous = _pending['previous'] if _pending else read_settings()
         changed = bool(_pending) and _pending['changed']
+        now_too = set(now_too) | (_pending['now_too'] if _pending else set())
         _cancel_timers()
         _pending.clear()
         token = object()
-        _pending.update(settings=settings, previous=previous, token=token, applied=False, finished=False,
+        _pending.update(settings=settings, previous=previous, token=token, applied=False, finished=False, now_too=now_too,
                         changed=changed, problems=[], deadline=time.monotonic() + APPLY_DELAY + KEEP_SECONDS)
         _pending['apply_timer'] = _later(APPLY_DELAY, lambda: _apply_pending(token))
         _pending['revert_timer'] = _later(APPLY_DELAY + KEEP_SECONDS, lambda: _revert(token))
@@ -434,8 +444,8 @@ def _apply_pending(token):
         if _pending.get('token') is not token or _pending['applied']:
             return
         _pending['applied'] = _pending['changed'] = True
-        settings = _pending['settings']
-    problems = _use(settings)
+        settings, now_too = _pending['settings'], _pending['now_too']
+    problems = _use(settings, now_too=now_too)
     with _lock:
         if _pending.get('token') is token:
             _pending['problems'] = problems
@@ -579,18 +589,18 @@ def scan():
     # after it if Wi-Fi isn't set up (wpa_supplicant would scan every channel the firmware allows)
     blocked = wifi_blocked()
     if blocked:
-        system.run_command(['rfkill', 'unblock', 'wifi'])
+        _command(['rfkill', 'unblock', 'wifi'])
     try:
-        system.run_command(['ip', 'link', 'set', interface, 'up'])
+        _command(['ip', 'link', 'set', interface, 'up'])
         country = wifi['country'] if wifi else ''
         frequencies = [] if country else ['freq'] + [str(f) for f in SAFE_FREQUENCIES]
-        ok, output = system.run_command(['iw', 'dev', interface, 'scan'] + frequencies)
+        ok, output = _command(['iw', 'dev', interface, 'scan'] + frequencies)
         if not ok:
             # e.g. busy: wpa_supplicant is scanning; its last results are there
-            ok, output = system.run_command(['iw', 'dev', interface, 'scan', 'dump'])
+            ok, output = _command(['iw', 'dev', interface, 'scan', 'dump'])
     finally:
         if blocked and not wifi:
-            system.run_command(['rfkill', 'block', 'wifi'])
+            _command(['rfkill', 'block', 'wifi'])
     if not ok:
         raise ValueError(f"Couldn't look for networks: {output}")
     networks = parse_scan(output)
@@ -600,7 +610,7 @@ def scan():
 
 def _wifi_link(interface):
     """(network name, signal in dBm) the interface is connected to, or (None, None)."""
-    ok, output = system.run_command(['iw', 'dev', interface, 'link'])
+    ok, output = _command(['iw', 'dev', interface, 'link'])
     if not ok or not output.startswith('Connected'):
         return None, None
     ssid = signal = None
@@ -630,7 +640,7 @@ def wifi_blocked():
 
 def routers():
     """{interface: router} from the default routes in use."""
-    ok, output = system.run_command(['ip', '-4', 'route', 'show', 'default'])
+    ok, output = _command(['ip', '-4', 'route', 'show', 'default'])
     found = {}
     for line in output.splitlines() if ok else []:
         parts = line.split()

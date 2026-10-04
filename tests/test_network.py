@@ -219,7 +219,7 @@ def test_nothing_changed(ports, client):
 
 
 def test_wpa_supplicant_started_if_it_isnt_running(ports, monkeypatch):
-    def run(cmd):
+    def run(cmd, timeout=None):
         ports.commands.append(cmd)
         return (False, 'Failed to connect') if cmd[0] == 'wpa_cli' else (True, '')
     monkeypatch.setattr(system, 'run_command', run)
@@ -248,7 +248,7 @@ def test_kept_only_once_applied(ports, client, monkeypatch):
     with pytest.raises(network.NotApplied):
         network.keep()
     # being applied: the commands haven't finished
-    def run(cmd):
+    def run(cmd, timeout=None):
         if cmd[0] == 'dhcpcd':
             client.post('/network/keep')
         return ports.run_command(cmd)
@@ -320,6 +320,39 @@ def test_an_address_for_the_next_start_changed_now(ports):
     assert 'ip_address=192.168.1.60/24' in dhcpcd(ports)
     network.keep()
     assert network.next_start_interfaces() == set()
+
+
+def test_apply_an_address_saved_for_the_next_start(ports, client):
+    """Apply on the address shown (saved for the next start) uses it now."""
+    network.apply_at_start()
+    network.save_for_next_start(FIXED)
+    form = {'interface': 'enxb827eb4e4fd4', 'mode': 'static', 'address': '192.168.1.50/24',
+            'router': '192.168.1.1', 'when': 'now'}
+    client.post('/network/address', data=form)
+    ports.run_later(network.APPLY_DELAY)
+    assert 'ip_address=192.168.1.50/24' in dhcpcd(ports)
+    assert 'From the next start' not in client.get('/').data.decode()
+    # not kept: still for the next start only
+    network.undo()
+    assert 'ip_address' not in dhcpcd(ports) and network.next_start_interfaces() == {'enxb827eb4e4fd4'}
+    client.post('/network/address', data=form)
+    keep(ports, client)
+    assert 'ip_address=192.168.1.50/24' in dhcpcd(ports) and network.next_start_interfaces() == set()
+    assert saved(ports) == FIXED
+
+
+def test_network_commands_have_a_time_limit(ports, monkeypatch):
+    """A command that hangs mustn't keep the previous settings from coming back."""
+    limits = []
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (limits.append(timeout), (True, ''))[1])
+    network.change(FIXED)
+    ports.run_later()
+    assert limits and all(limit == network.COMMAND_TIMEOUT for limit in limits)
+
+
+def test_run_command_stops_a_command_that_hangs():
+    ok, output = system.run_command(['sleep', '5'], timeout=0.2)
+    assert not ok and 'stopped after 0.2 seconds' in output
 
 
 def test_save_for_the_next_start(ports):
@@ -434,7 +467,7 @@ BSS aa:bb:cc:dd:ee:04(on wlan0)
 
 
 def test_scan(ports, client, monkeypatch):
-    def run(cmd):
+    def run(cmd, timeout=None):
         ports.commands.append(cmd)
         return (True, SCAN) if cmd[:2] == ['iw', 'dev'] else (True, '')
     monkeypatch.setattr(system, 'run_command', run)
