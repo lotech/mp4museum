@@ -165,6 +165,7 @@ def pi(tmp_path, monkeypatch):
         'ISO3166_FILE': str(tmp_path / 'iso3166.tab'),
         'RFKILL_PATH': str(tmp_path / 'rfkill'),
         'NEXT_START_FILE': str(tmp_path / 'mp4m-network-next-start.json'),
+        'WIFI_BEFORE_FILE': str(tmp_path / 'mp4m-network-wifi-before.json'),
         '_later': p.schedule,
         '_pending': {},
         '_in_use': {'settings': None},

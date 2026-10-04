@@ -204,6 +204,7 @@ def test_wifi_turned_off_and_on_again(ports, client):
 
 
 def test_first_wifi_setup_undone(ports):
+    blocked(ports)
     network.change({'wifi': {'networks': [{'ssid': 'Gallery', 'password': 'secret-password'}]}})
     ports.run_later(network.APPLY_DELAY)
     assert ['rfkill', 'unblock', 'wifi'] in ports.commands
@@ -211,6 +212,22 @@ def test_first_wifi_setup_undone(ports):
     network.undo()
     # blocked again, as on the image
     assert wpa(ports) == network.DEFAULT_WPA_CONF and ports.commands[0] == ['rfkill', 'block', 'wifi']
+
+
+def test_wifi_set_up_some_other_way_comes_back(ports):
+    """e.g. by hand with the overlay off: undoing the first Wi-Fi change here puts it back."""
+    by_hand = network.DEFAULT_WPA_CONF + 'country=DE\nnetwork={\n\tssid="Studio"\n\tpsk="studio-password"\n}\n'
+    with open(network.wpa_conf_path(), 'w') as f:
+        f.write(by_hand)
+    blocked(ports, soft='0')
+    network.change({'wifi': {'networks': [{'ssid': 'Gallery', 'password': 'secret-password'}]}})
+    ports.run_later(network.APPLY_DELAY)
+    assert wpa(ports).startswith(network.WPA_HEADER)
+    ports.commands.clear()
+    network.undo()
+    assert wpa(ports) == by_hand and not os.path.exists(network.WIFI_BEFORE_FILE)
+    # it wasn't blocked: it isn't now
+    assert ['rfkill', 'block', 'wifi'] not in ports.commands and ['rfkill', 'unblock', 'wifi'] in ports.commands
 
 
 def test_nothing_changed(ports, client):
@@ -374,6 +391,15 @@ def test_network_commands_have_a_time_limit(ports, monkeypatch):
 def test_run_command_stops_a_command_that_hangs():
     ok, output = system.run_command(['sleep', '5'], timeout=0.2)
     assert not ok and 'stopped after 0.2 seconds' in output
+
+
+def test_save_for_the_next_start_fails_without_its_list(ports, monkeypatch):
+    """Without the list in /run, a restart of the web interface would use the address now."""
+    network.apply_at_start()
+    monkeypatch.setattr(network, 'NEXT_START_FILE', str(ports.root / 'missing' / 'next-start.json'))
+    with pytest.raises(OSError):
+        network.save_for_next_start(FIXED)
+    assert saved(ports) is None and network.next_start_interfaces() == set()
 
 
 def test_save_for_the_next_start(ports):

@@ -35,6 +35,9 @@ RFKILL_PATH = '/sys/class/rfkill'
 # the interfaces saved for the next start (_next_start), kept while the web interface restarts
 # (e.g. after an update) and gone when the Pi does (/run is in RAM)
 NEXT_START_FILE = '/run/mp4m-network-next-start.json'
+# wpa_supplicant.conf as it was before Wi-Fi was first set up here (e.g. set up by hand, with the
+# overlay off), and whether Wi-Fi was blocked: put back if that is undone
+WIFI_BEFORE_FILE = '/run/mp4m-network-wifi-before.json'
 
 BLOCK_START = '# --- mp4museum network settings (set by the web interface, from /boot/mp4m-network.json) ---'
 BLOCK_END = '# --- end of mp4museum network settings ---'
@@ -323,25 +326,41 @@ def _apply(settings, at_start=False):
     interface = (wireless_interfaces() or [None])[0]
     path = wpa_conf_path(interface or 'wlan0')
     current = _read(path)
+    # (Wi-Fi no longer set up here: blocked again, as on the image, unless it wasn't before)
+    block = True
     if wifi:
         text = wpa_conf(wifi)
-        if current != text:
+        if current != text and current is not None and not current.startswith(WPA_HEADER):
+            # set up some other way: kept, to put back if this is undone
+            try:
+                system.write_file(WIFI_BEFORE_FILE, json.dumps({'text': current, 'blocked': wifi_blocked()}))
+            except OSError as e:
+                problems.append(f"Wi-Fi not changed: couldn't keep a copy of {path}: {e}")
+                wifi, text = None, current
+        if wifi and current != text:
             _write_etc(path, text, 0o600)
     elif current is not None and current.startswith(WPA_HEADER):
-        # Wi-Fi no longer set up (a first setup undone, the settings file deleted with the overlay
-        # off): as on the image
-        text = DEFAULT_WPA_CONF
+        # Wi-Fi no longer set up here (a first setup undone, the settings file deleted with the
+        # overlay off): back to what was there before, or as on the image
+        before = _wifi_before()
+        text, block = (before['text'], before['blocked']) if before else (DEFAULT_WPA_CONF, True)
         _write_etc(path, text, 0o600)
+        try:
+            if os.path.exists(WIFI_BEFORE_FILE):
+                os.remove(WIFI_BEFORE_FILE)
+        except OSError:
+            pass
     else:
         text = current
     if interface and text != current or interface and wifi and at_start:
-        if not wifi or not wifi['enabled']:
+        if wifi and not wifi['enabled'] or not wifi and block:
             _run(['rfkill', 'block', 'wifi'], problems)
         else:
             # Raspberry Pi OS keeps Wi-Fi blocked until a country is set (and /var, where it
             # remembers that, is in RAM)
             _run(['rfkill', 'unblock', 'wifi'], problems)
-            _run(['iw', 'reg', 'set', wifi['country'] or '00'], problems)
+            if wifi:
+                _run(['iw', 'reg', 'set', wifi['country'] or '00'], problems)
             ok, output = _command(['wpa_cli', '-i', interface, 'reconfigure'])
             if not ok or 'FAIL' in output:
                 # not running for this interface (dhcpcd's hook usually starts it)
@@ -349,6 +368,17 @@ def _apply(settings, at_start=False):
     for problem in problems:
         print(f"Network settings: {problem}", flush=True)
     return problems
+
+
+def _wifi_before():
+    try:
+        with open(WIFI_BEFORE_FILE, 'r') as f:
+            before = json.load(f)
+        if isinstance(before, dict) and isinstance(before.get('text'), str):
+            return {'text': before['text'], 'blocked': before.get('blocked') is not False}
+    except (OSError, ValueError):
+        pass
+    return None
 
 
 # ----- Changes from the web interface ----- #
@@ -399,16 +429,6 @@ def _use(settings, at_start=False, now_too=()):
         _in_use['settings'] = now
         return problems
 
-def _forget_next_start():
-    """Once a change is kept: interfaces saved for the next start that use their saved setting
-    now (an undone change must still find what they used before)."""
-    saved = read_settings().get('interfaces') or {}
-    using = (_in_use['settings'] or {}).get('interfaces') or {}
-    for name in list(_next_start):
-        if saved.get(name) == using.get(name):
-            del _next_start[name]
-    _store_next_start()
-
 def _load_next_start():
     try:
         with open(NEXT_START_FILE, 'r') as f:
@@ -420,14 +440,29 @@ def _load_next_start():
     return {name: value for name, value in data.items()
             if INTERFACE_RE.match(str(name)) and (value is None or isinstance(value, dict))}
 
-def _store_next_start():
+def _write_next_start(next_start):
+    """OSError if it can't be written."""
+    if next_start:
+        system.write_file(NEXT_START_FILE, json.dumps(next_start))
+    elif os.path.exists(NEXT_START_FILE):
+        os.remove(NEXT_START_FILE)
+
+def _commit(settings, next_start):
+    """Save settings to /boot, with the interfaces they leave for the next start: that list is
+    written first (a restart of the web interface without it would use them now), and put back if
+    saving fails. Raises what went wrong."""
+    old = dict(_next_start)
+    _write_next_start(next_start)
     try:
-        if _next_start:
-            system.write_file(NEXT_START_FILE, json.dumps(_next_start))
-        elif os.path.exists(NEXT_START_FILE):
-            os.remove(NEXT_START_FILE)
-    except OSError as e:
-        print(f"Network settings: couldn't write {NEXT_START_FILE}: {e}", flush=True)
+        _save(settings)
+    except BaseException:
+        try:
+            _write_next_start(old)
+        except OSError:
+            pass
+        raise
+    _next_start.clear()
+    _next_start.update(next_start)
 
 def apply_at_start():
     """When the web interface starts: the saved settings into /etc (nothing without them)."""
@@ -495,11 +530,15 @@ def keep():
             return False
         if not _pending['finished']:
             raise NotApplied()
-        _save(_pending['settings'])
+        settings = _pending['settings']
+        with _apply_lock:
+            # an interface saved for the next start and changed by this: in use now as saved
+            interfaces = settings.get('interfaces') or {}
+            using = (_in_use['settings'] or {}).get('interfaces') or {}
+            _commit(settings, {name: value for name, value in _next_start.items()
+                               if interfaces.get(name) != using.get(name)})
         _cancel_timers()
         _pending.clear()
-    with _apply_lock:
-        _forget_next_start()
     return True
 
 def undo():
@@ -523,14 +562,14 @@ def save_for_next_start(settings):
     settings = normalize(settings)
     with _apply_lock:
         using = (_in_use['settings'] if _in_use['settings'] is not None else read_settings()).get('interfaces') or {}
-        _save(settings)
         interfaces = settings.get('interfaces') or {}
+        next_start = dict(_next_start)
         for name in set(interfaces) | set(using):
             if interfaces.get(name) != using.get(name):
-                _next_start[name] = using.get(name)
+                next_start[name] = using.get(name)
             else:
-                _next_start.pop(name, None)
-        _store_next_start()
+                next_start.pop(name, None)
+        _commit(settings, next_start)
 
 def pending():
     """{'seconds': left to keep it, 'problems': [...]} while a change waits to be kept, else None."""
