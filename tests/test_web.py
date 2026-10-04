@@ -43,6 +43,9 @@ def test_page_titles_name_the_player(pi, client, monkeypatch):
     assert '<title>gallery-3 - MP4Museum</title>' in client.get('/').data.decode()
     assert '<title>gallery-3 - Reboot - MP4Museum</title>' in client.get('/confirm_reboot').data.decode()
     assert '<title>gallery-3 - Log in - MP4Museum</title>' in webservice.app.test_client().get('/login').data.decode()
+    # after a change of name, the page at the old address names the new one: the tab moves there
+    r = client.post('/set_hostname', data={'hostname': 'gallery-4'}, base_url='http://gallery-3.local')
+    assert '<title>gallery-4 - Network name changed - MP4Museum</title>' in r.data.decode()
 
 
 def test_wrong_password_refused(pi):
