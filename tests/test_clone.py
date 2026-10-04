@@ -48,6 +48,7 @@ class Disks:
         self.copies = []
         self.fail = None
         self.rereads = []
+        self.totals = []
         self.busy = 0                   # times blockdev --rereadpt finds the card in use
         self.new_table = None
         self.kernel_keeps_old_table = False
@@ -165,6 +166,7 @@ class Disks:
 
     def copy_tree(self, cmd, target, total, progress):
         self.copies.append(cmd)
+        self.totals.append(total)
         excluded = [cmd[i + 1].rstrip('*') for i, arg in enumerate(cmd) if arg == '--exclude']
         source = cmd[-2]
         for folder, dirs, files in os.walk(source):
@@ -314,6 +316,8 @@ def test_copies_this_player_to_the_card(pi, disks):
     assert not (disks.dev / 'sda3.d' / '.upload-1234').exists()
     # nor hidden folders (what a Mac leaves)
     assert not (disks.dev / 'sda3.d' / '.fseventsd').exists()
+    # its progress against the files' size (the card's size was checked with whole clusters)
+    assert disks.totals[-1] == len(b'video')
     assert disks.copies[-1][:4] == ['rsync', '-rt', '--exclude', '.*']
     # everything unmounted again, the work folder gone
     assert disks.mounted() == [] and not list(pi.root.glob('mp4m-clone-*'))

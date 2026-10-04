@@ -431,7 +431,7 @@ def main():
         # held until the web interface has restarted (which would stop making a card half way)
         busy = system.try_busy_lock()
         if busy is None:
-            sys.exit("A card is being made or a file copied in the web interface: update when it's done.")
+            sys.exit("A card is being made or a file copied or uploaded in the web interface: update when it's done.")
         summary = update(latest, config)
     except UpdateError as e:
         sys.exit(f"{e} Nothing was changed.")

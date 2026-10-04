@@ -99,6 +99,25 @@ def test_upload(pi, client):
     assert pi.mounts() == [['mount', '-o', 'remount,rw', str(pi.media)], ['mount', '-o', 'remount,ro', str(pi.media)]]
 
 
+def test_upload_waits_for_a_card_an_update_or_a_reboot(pi, client, monkeypatch):
+    # one holds the lock (here another process): no upload; a card being made counted the media
+    # files before copying them
+    other = system.try_busy_lock()
+    r = upload(client, 'late.mp4', follow_redirects=True)
+    assert 'A card is being made, an update installed or the player rebooting' in r.data.decode()
+    assert media_files(pi) == []
+    os.close(other)
+    # and an upload holds it (shared) until its file is in place
+    held = []
+    real = os.replace
+    monkeypatch.setattr(system.os, 'replace', lambda src, dst: (held.append(system.try_busy_lock()), real(src, dst)))
+    upload(client, 'clip.mp4')
+    assert held == [None] and media_files(pi) == ['clip.mp4']
+    lock = system.try_busy_lock()
+    assert lock is not None
+    os.close(lock)
+
+
 def test_upload_large_file_streams_to_disk(pi, client):
     upload(client, 'big.mp4', b'x' * 200 * 1024)
     assert (pi.media / 'big.mp4').stat().st_size == 200 * 1024

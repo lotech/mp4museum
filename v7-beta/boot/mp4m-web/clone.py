@@ -299,7 +299,7 @@ def start(device, with_media, identity=None):
     plan(card['size'], root_used, media_used, with_media, source_partitions()[1][0][1])
     busy = system.try_busy_lock()
     if busy is None:
-        raise CloneError("An update is being installed or a file copied: make the card when it's done.")
+        raise CloneError("An update is being installed or a file copied or uploaded: make the card when it's done.")
     try:
         with _lock:
             if state['running']:
@@ -429,7 +429,10 @@ def clone(card, with_media, progress=_set):
             # without hidden files and folders: uploads that stopped part way, and what a Mac
             # leaves (.Spotlight-V100, .fseventsd, ._*); the player never plays them
             _copy_tree(['rsync', '-rt', '--exclude', '.*',
-                        system.MEDIA_PATH + '/', card_media + '/'], card_media, media_used, progress)
+                        system.MEDIA_PATH + '/', card_media + '/'], card_media,
+                       # (progress against the files' size: media_used is an upper bound for the
+                       # card's size, with clusters bigger than the card usually gets)
+                       media_bytes(system.MEDIA_PATH), progress)
             unmount(card_media)
         run(['sync'])
     finally:
