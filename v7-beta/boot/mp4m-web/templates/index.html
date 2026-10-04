@@ -403,14 +403,18 @@
       <dl class="device-info">
         <dt>Address</dt><dd><a href="http://{{ hostname }}.local/">http://{{ hostname }}.local</a></dd>
         {% if network.dns %}<dt>DNS servers</dt><dd>{{ network.dns|join(', ') }}</dd>{% endif %}
-        {% if network.wifi_interface and network.wifi.managed %}<dt>Wi-Fi country</dt><dd>{{ network.wifi.country_name if network.wifi.country else 'Not set: channels 1–11 only' }}</dd>{% endif %}
+        {% set applied = network.wifi_in_use %}
+        {% if network.wifi_interface and (applied.managed or applied.state == 'changing') %}<dt>Wi-Fi country</dt><dd>
+          {%- if applied.state == 'changing' %}Changing…
+          {%- else %}{{ applied.country_name or applied.country if applied.country else 'Not set: channels 1–11 only' }}
+          {%- if applied.state == 'unsure' %} <span class="hint">(the last change didn't all apply)</span>{% endif %}{% endif %}</dd>{% endif %}
       </dl>
       {# the ones connected first #}
       {% for port in network.interfaces|sort(attribute='connected', reverse=True) %}
       {% set wireless = port.kind == 'wireless' %}
       {# (Wi-Fi network, signal and on/off are the first Wi-Fi interface's: the one set up here) #}
       {% set wifi_port = network.wifi_interface and port.name == network.wifi_interface.name %}
-      {% set off = wifi_port and (network.wifi.managed and not network.wifi.enabled or network.wifi.blocked) %}
+      {% set off = wifi_port and (network.wifi_in_use.managed and not network.wifi_in_use.enabled or network.wifi.blocked) %}
       <div class="status-port">
         <h4>{{ icon('wifi' if wireless else 'ethernet-port') }}{{ port.label }} <span class="hint">{{ port.name }}</span>
           {% if port.state == 'absent' %}<span class="badge muted">Not plugged in</span>

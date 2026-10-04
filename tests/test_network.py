@@ -855,6 +855,23 @@ def test_network_in_use_card_shows_what_is_applied(ports, client, monkeypatch):
     assert set_to().startswith('Automatic (DHCP)')
 
 
+def test_network_in_use_card_shows_the_wifi_country_applied(ports, client, monkeypatch):
+    def country():
+        card = client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+        return card.split('<dt>Wi-Fi country</dt><dd>')[1].split('</dd>')[0]
+    with open(network.SETTINGS_FILE, 'w') as f:
+        json.dump({'wifi': {'country': 'DE', 'networks': []}}, f)
+    network.apply_at_start()
+    assert country() == 'Germany'
+    network.change({'wifi': {'country': 'GB', 'networks': []}})
+    assert country() == 'Changing…'
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[:2] != ['iw', 'reg'], 'failed'))
+    ports.run_later(network.APPLY_DELAY)
+    assert country() == 'Britain (UK) <span class="hint">(the last change didn\'t all apply)</span>'
+    network.undo()
+    assert country().startswith('Germany')
+
+
 def test_network_in_use_card_wifi_details_belong_to_one_interface(ports, client, monkeypatch):
     """A second Wi-Fi adapter isn't shown as connected to the first one's network; the country
     isn't shown when Wi-Fi isn't set up here (the system's own setting isn't known)."""

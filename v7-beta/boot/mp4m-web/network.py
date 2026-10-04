@@ -861,9 +861,11 @@ def view():
     names = present + [name for name in sorted(settings.get('interfaces') or {}) if name not in present]
     dhcp = {'mode': 'dhcp', 'address': '', 'router': '', 'dns': []}
     # applied (with what waits for the next start left out), not what the page is changing to
-    applied = (_in_use['settings'] if _in_use['settings'] is not None else read_settings()).get('interfaces') or {}
+    applied_settings = _in_use['settings'] if _in_use['settings'] is not None else read_settings()
+    applied = applied_settings.get('interfaces') or {}
     with _lock:
         changing = bool(_pending) and not _pending['finished']
+    using_state = 'changing' if changing else 'unsure' if _maybe_in_use else None
     interfaces = []
     for name in names:
         kind = 'wireless' if name in wireless else 'wired'
@@ -878,7 +880,7 @@ def view():
             'setting': (settings.get('interfaces') or {}).get(name) or dhcp,
             # in use now; 'changing' while a change is being applied, 'unsure' if applying went wrong
             'using': applied.get(name) or dhcp,
-            'using_state': 'changing' if changing else 'unsure' if _maybe_in_use else None,
+            'using_state': using_state,
         })
     wifi = settings.get('wifi') or {'enabled': True, 'country': '', 'networks': []}
     interface = wireless[0] if wireless else None
@@ -892,6 +894,11 @@ def view():
         'wifi': dict(wifi, managed='wifi' in settings, blocked=wifi_blocked() if interface else False,
                      ssid=ssid, signal=signal,
                      country_name=dict(country_names).get(wifi['country'], wifi['country'])),
+        # Wi-Fi as applied (the Wi-Fi card shows the settings, which may be being changed)
+        'wifi_in_use': {'managed': 'wifi' in applied_settings, 'state': using_state,
+                        'enabled': (applied_settings.get('wifi') or {}).get('enabled', True),
+                        'country': (applied_settings.get('wifi') or {}).get('country', ''),
+                        'country_name': dict(country_names).get((applied_settings.get('wifi') or {}).get('country', ''), '')},
         'addresses': addresses,
         'dns': dns_servers(),
         'countries': country_names,
