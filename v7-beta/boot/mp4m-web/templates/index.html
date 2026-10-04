@@ -403,12 +403,14 @@
       <dl class="device-info">
         <dt>Address</dt><dd><a href="http://{{ hostname }}.local/">http://{{ hostname }}.local</a></dd>
         {% if network.dns %}<dt>DNS servers</dt><dd>{{ network.dns|join(', ') }}</dd>{% endif %}
-        {% if network.wifi_interface %}<dt>Wi-Fi country</dt><dd>{{ network.wifi.country_name if network.wifi.country else 'Not set: channels 1–11 only' }}</dd>{% endif %}
+        {% if network.wifi_interface and network.wifi.managed %}<dt>Wi-Fi country</dt><dd>{{ network.wifi.country_name if network.wifi.country else 'Not set: channels 1–11 only' }}</dd>{% endif %}
       </dl>
       {# the ones connected first #}
       {% for port in network.interfaces|sort(attribute='connected', reverse=True) %}
       {% set wireless = port.kind == 'wireless' %}
-      {% set off = wireless and (network.wifi.managed and not network.wifi.enabled or network.wifi.blocked) %}
+      {# (Wi-Fi network, signal and on/off are the first Wi-Fi interface's: the one set up here) #}
+      {% set wifi_port = network.wifi_interface and port.name == network.wifi_interface.name %}
+      {% set off = wifi_port and (network.wifi.managed and not network.wifi.enabled or network.wifi.blocked) %}
       <div class="status-port">
         <h4>{{ icon('wifi' if wireless else 'ethernet-port') }}{{ port.label }} <span class="hint">{{ port.name }}</span>
           {% if port.state == 'absent' %}<span class="badge muted">Not plugged in</span>
@@ -416,12 +418,12 @@
           {% elif port.connected %}<span class="badge on">Connected</span>
           {% else %}<span class="badge muted">Not connected</span>{% endif %}</h4>
         <dl class="device-info">
-          {% if wireless and network.wifi.ssid %}
+          {% if wifi_port and network.wifi.ssid %}
           <dt>Wi-Fi network</dt><dd>{{ network.wifi.ssid }}{% if network.wifi.signal is not none %} <span class="hint">(signal {{ network.wifi.signal }} dBm)</span>{% endif %}</dd>
           {% endif %}
           <dt>IP address</dt><dd>{% for address in port.addresses %}<a href="http://{{ address.split('/')[0] }}/">{{ address }}</a>{% if not loop.last %}<br>{% endif %}{% else %}None{% endfor %}</dd>
           {% if port.router %}<dt>Router</dt><dd>{{ port.router }}</dd>{% endif %}
-          <dt>Set to</dt><dd>{{ 'Fixed address' if port.setting.mode == 'static' and not port.next_start else 'Automatic (DHCP)' }}
+          <dt>Set to</dt><dd>{{ 'Fixed address' if port.using.mode == 'static' else 'Automatic (DHCP)' }}
             {%- if port.next_start %}<br><span class="hint">From the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic (DHCP)' }}</span>{% endif %}</dd>
           {% if port.ipv6 %}<dt>IPv6</dt><dd>{{ port.ipv6|join('<br>'|safe) }}</dd>{% endif %}
           {% if port.mac %}<dt>MAC address</dt><dd>{{ port.mac }}</dd>{% endif %}
@@ -430,10 +432,6 @@
       {% else %}
       <p class="current">No network ports found.</p>
       {% endfor %}
-      <details>
-        <summary>Details</summary>
-        <pre>{{ network_status }}</pre>
-      </details>
     </section>
 
     <div class="stack network-settings">
@@ -467,7 +465,7 @@
         <p class="current">No Ethernet port found.</p>
         {% endfor %}
         <p class="hint">Changes are tried first: open the player again and choose Keep within 5 minutes, or it goes
-          back to the previous settings. Clone to another device leaves fixed addresses out.</p>
+          back to the previous settings. A copy made with Clone to another device uses automatic addresses (DHCP).</p>
       </section>
 
       <section class="card" id="wifi" data-scan-url="{{ url_for('scan_wifi') }}">
@@ -518,7 +516,8 @@
 
         {% if network.available %}
         <details class="wifi-address"{% if port.setting.mode == 'static' %} open{% endif %}>
-          <summary>Wi-Fi address: {{ 'fixed' if port.setting.mode == 'static' else 'automatic (DHCP)' }}</summary>
+          <summary>Wi-Fi address: {{ 'fixed' if port.using.mode == 'static' else 'automatic (DHCP)' }}{% if port.next_start %}
+            (from the next start: {{ port.setting.address if port.setting.mode == 'static' else 'automatic' }}){% endif %}</summary>
           {{ address_form(port) }}
         </details>
         {% endif %}

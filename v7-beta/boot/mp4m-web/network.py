@@ -859,6 +859,7 @@ def view():
     next_start = next_start_interfaces()
     # set up for an adapter that isn't plugged in now
     names = present + [name for name in sorted(settings.get('interfaces') or {}) if name not in present]
+    dhcp = {'mode': 'dhcp', 'address': '', 'router': '', 'dns': []}
     interfaces = []
     for name in names:
         kind = 'wireless' if name in wireless else 'wired'
@@ -870,7 +871,10 @@ def view():
             'ipv6': [address for family, address in addresses.get(name, []) if family == 'IPv6'],
             'mac': system.read_mac(name) if name in present else '',
             'router': in_use.get(name), 'next_start': name in next_start,
-            'setting': (settings.get('interfaces') or {}).get(name) or {'mode': 'dhcp', 'address': '', 'router': '', 'dns': []},
+            'setting': (settings.get('interfaces') or {}).get(name) or dhcp,
+            # in use now: an interface saved for the next start uses what it had until then
+            'using': ((_next_start.get(name) or dhcp) if name in next_start
+                      else (settings.get('interfaces') or {}).get(name) or dhcp),
         })
     wifi = settings.get('wifi') or {'enabled': True, 'country': '', 'networks': []}
     interface = wireless[0] if wireless else None

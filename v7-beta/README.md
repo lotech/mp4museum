@@ -198,8 +198,9 @@ goes back to `master`.
    logo and `.bashrc` to `/home/pi`, the `mp4m-webservice` service and the `mp4m-update` command,
    and exfat-utils if it can (for copying to an SD card; it needs an internet connection). It
    also hides the "Wi-Fi is currently blocked by rfkill" message Raspberry Pi OS prints on the
-   screen at login (Wi-Fi is set up in the web interface instead); to bring it back:
-   `sudo dpkg-divert --rename --remove /etc/profile.d/wifi-check.sh`.
+   screen at login (Wi-Fi is set up in the web interface instead); to bring it back, with the
+   overlay off: `sudo mv /etc/profile.d/wifi-check.sh.mp4m-orig /etc/profile.d/wifi-check.sh`.
+   This is outside `/boot`, so updates don't bring it: run `install.sh` (again) for it.
 3. Run `sudo raspi-config` again, open **Overlay File System** and answer **Yes**. If it asks
    "Would you like the boot partition to be write-protected?", answer **Yes**; if it says the boot
    partition is already read-only, nothing more is needed. Reboot.
@@ -252,8 +253,9 @@ it says the card is ready, take it out; the next card put in shows up in the lis
   player and web interface), and the system as installed (not what is only in RAM now).
 - **Its own network name:** `hostname.txt` isn't copied, so the new player makes its name from
   its own serial number. Set a name in the web interface once it's running.
-- **No fixed addresses:** two players can't share one, so the card uses DHCP. Wi-Fi networks and
-  the Wi-Fi country are copied.
+- **No fixed addresses:** two players can't share one, so the card uses DHCP, for Ethernet and
+  Wi-Fi, from its first start. Wi-Fi networks (with their passwords) and the Wi-Fi country are
+  copied, so it joins the same Wi-Fi.
 - **Media files:** the media partition's files (not those on USB sticks), copied or left out (an
   empty media partition). Hidden files and folders, such as what a Mac leaves on a card
   (`.Spotlight-V100`, `._…`), aren't copied.

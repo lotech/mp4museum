@@ -828,6 +828,30 @@ def test_network_in_use_card(ports, client, monkeypatch):
     assert card.index('enxb827eb4e4fd4</span>') < card.index('wlan0</span>')
 
 
+def test_network_in_use_card_with_an_address_for_the_next_start(ports, client):
+    """The address in use stays shown as it is until the next start, not as the one saved."""
+    network.apply_at_start()
+    network.change(FIXED)
+    ports.run_later(network.APPLY_DELAY)
+    network.keep()
+    other = {'interfaces': {'enxb827eb4e4fd4': dict(FIXED['interfaces']['enxb827eb4e4fd4'], address='192.168.1.60/24')}}
+    network.save_for_next_start(other)
+    card = client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+    assert '<dt>Set to</dt><dd>Fixed address<br><span class="hint">From the next start: 192.168.1.60/24</span>' in card
+
+
+def test_network_in_use_card_wifi_details_belong_to_one_interface(ports, client, monkeypatch):
+    """A second Wi-Fi adapter isn't shown as connected to the first one's network; the country
+    isn't shown when Wi-Fi isn't set up here (the system's own setting isn't known)."""
+    interface(ports, 'wlan1', wireless=True)
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (
+        True, 'Connected to aa:bb (on wlan0)\n\tSSID: Gallery\n\tsignal: -60 dBm' if cmd[:2] == ['iw', 'dev'] else ''))
+    card = client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+    assert card.count('Gallery') == 1 and 'wlan1</span>' in card
+    assert 'Gallery' in card.split('wlan0</span>')[1].split('wlan1</span>')[0]
+    assert 'Wi-Fi country' not in card
+
+
 def test_fixed_address_from_the_page(ports, client):
     r = client.post('/network/address', data={'interface': 'enxb827eb4e4fd4', 'mode': 'static',
                                               'address': '192.168.1.50', 'router': '192.168.1.1', 'when': 'now'},

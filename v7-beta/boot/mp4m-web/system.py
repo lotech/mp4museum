@@ -481,30 +481,6 @@ def interface_addresses(timeout=None):
                 addresses.setdefault(interface, []).append(('IPv4' if parts[2] == 'inet' else 'IPv6', parts[3]))
     return addresses
 
-def get_network_status(addresses=None):
-    """Each network interface with its state, MAC address and IP addresses (addresses: from
-    interface_addresses(), if already read)."""
-    addresses = {interface: [f"{label} {address}" for label, address in found]
-                 for interface, found in (interface_addresses() if addresses is None else addresses).items()}
-
-    lines = [f"Network name: {socket.gethostname()}.local"]
-    interfaces = network_interfaces()
-    if not interfaces:
-        lines.append("No network interfaces found.")
-    for interface in interfaces:
-        kind = 'wireless' if os.path.isdir(os.path.join(NET_PATH, interface, 'wireless')) else 'wired'
-        state = _read_interface_file(interface, 'operstate')
-        state = {'up': 'connected', 'down': 'not connected'}.get(state, state or 'unknown')
-        lines += ['', f"{interface} ({kind}): {state}"]
-        mac = read_mac(interface)
-        if mac:
-            lines.append(f"  MAC address: {mac}")
-        for address in addresses.get(interface, []):
-            lines.append(f"  {address}")
-        if not addresses.get(interface):
-            lines.append("  No IP address")
-    return "\n".join(lines)
-
 # ----- Device ----- #
 CPUINFO_FILE = '/proc/cpuinfo'
 OS_RELEASE_FILE = '/etc/os-release'
