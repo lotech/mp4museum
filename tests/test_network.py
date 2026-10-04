@@ -34,6 +34,12 @@ def commands(pi):
     return [cmd for cmd in pi.commands if cmd[0] != 'mount']
 
 
+def keep(pi, client):
+    """Keep on the page, once the change has been applied."""
+    pi.run_later(network.APPLY_DELAY)
+    return client.post('/network/keep')
+
+
 def dhcpcd(pi):
     return open(network.DHCPCD_CONF).read()
 
@@ -235,6 +241,24 @@ def test_change_is_tried_then_kept(ports):
     assert ports.later == []
 
 
+def test_kept_only_once_applied(ports, client, monkeypatch):
+    """Keep from another tab before the new settings are in use (or while they're being
+    applied) would save settings nobody has reached the player with."""
+    network.change(FIXED)
+    with pytest.raises(network.NotApplied):
+        network.keep()
+    # being applied: the commands haven't finished
+    def run(cmd):
+        if cmd[0] == 'dhcpcd':
+            client.post('/network/keep')
+        return ports.run_command(cmd)
+    monkeypatch.setattr(system, 'run_command', run)
+    ports.run_later(network.APPLY_DELAY)
+    assert saved(ports) is None and network.pending()['applied']
+    assert 'still being applied' in client.get('/').data.decode()
+    assert network.keep() and saved(ports) == FIXED
+
+
 def test_change_not_kept_goes_back(ports):
     network.change(FIXED)
     ports.run_later()
@@ -305,6 +329,7 @@ def test_save_for_the_next_start(ports):
     with pytest.raises(RuntimeError):
         network.save_for_next_start({})
     # back to DHCP: no file
+    ports.run_later(network.APPLY_DELAY)
     network.keep()
     assert saved(ports) is None
 
@@ -329,7 +354,7 @@ def test_fixed_address_from_the_page(ports, client):
     ports.run_later(network.APPLY_DELAY)
     page = client.get('/').data.decode()
     assert 'networkBar' in page and 'come back in <strong id="networkSeconds">5:0' in page
-    client.post('/network/keep')
+    keep(ports, client)
     assert saved(ports) == FIXED
     assert 'networkBar' not in client.get('/').data.decode()
 
@@ -355,32 +380,32 @@ def test_wifi_from_the_page(ports, client):
     client.post('/network/wifi/add', data={'ssid': 'Gallery', 'password': 'secret-password'})
     ports.run_later(network.APPLY_DELAY)
     assert 'secret-password' not in wpa(ports) and network.wifi_psk('Gallery', 'secret-password') in wpa(ports)
-    client.post('/network/keep')
+    keep(ports, client)
     assert saved(ports) == {'wifi': {'enabled': True, 'country': '', 'networks': [
         {'ssid': 'Gallery', 'psk': network.wifi_psk('Gallery', 'secret-password')}]}}
     assert 'secret-password' not in open(network.SETTINGS_FILE).read()
 
     # changing it without typing the password again keeps it
     client.post('/network/wifi/add', data={'ssid': 'Gallery', 'hidden': '1'})
-    client.post('/network/keep')
+    keep(ports, client)
     assert saved(ports)['wifi']['networks'] == [{'ssid': 'Gallery', 'psk': network.wifi_psk('Gallery', 'secret-password'),
                                                  'hidden': True}]
     # a new network needs a password, or No password
     client.post('/network/wifi/add', data={'ssid': 'Open'})
     assert network.pending() is None
     client.post('/network/wifi/add', data={'ssid': 'Open', 'open': '1'})
-    client.post('/network/keep')
+    keep(ports, client)
     assert [n['ssid'] for n in saved(ports)['wifi']['networks']] == ['Gallery', 'Open']
 
     client.post('/network/wifi/country', data={'country': 'XX'})
     assert network.pending() is None
     client.post('/network/wifi/country', data={'country': 'GB'})
-    client.post('/network/keep')
+    keep(ports, client)
     assert saved(ports)['wifi']['country'] == 'GB' and 'country=GB' in wpa(ports)
 
     client.post('/network/wifi/forget', data={'ssid': 'Gallery'})
     client.post('/network/wifi/power', data={'enabled': 'off'})
-    client.post('/network/keep')
+    keep(ports, client)
     assert saved(ports)['wifi'] == {'enabled': False, 'country': 'GB', 'networks': [{'ssid': 'Open'}]}
     assert ['rfkill', 'block', 'wifi'] in ports.commands
 

@@ -347,9 +347,9 @@ def _apply(settings, at_start=False):
 # _apply at a time; its commands may take a while, and the page doesn't wait for them
 _lock = threading.RLock()
 _apply_lock = threading.Lock()
-# the change waiting to be kept: settings, previous, deadline (time.monotonic()), applied (these
-# settings are in use), changed (anything other than the saved settings has been used since),
-# problems, and the timers
+# the change waiting to be kept: settings, previous, deadline (time.monotonic()), applied (being
+# put in use), finished (in use), changed (anything other than the saved settings has been used
+# since), problems, and the timers
 _pending = {}
 # the settings in /etc now (None: not known yet, the saved ones)
 _in_use = {'settings': None}
@@ -419,8 +419,8 @@ def change(settings):
         _cancel_timers()
         _pending.clear()
         token = object()
-        _pending.update(settings=settings, previous=previous, token=token, applied=False, changed=changed,
-                        problems=[], deadline=time.monotonic() + APPLY_DELAY + KEEP_SECONDS)
+        _pending.update(settings=settings, previous=previous, token=token, applied=False, finished=False,
+                        changed=changed, problems=[], deadline=time.monotonic() + APPLY_DELAY + KEEP_SECONDS)
         _pending['apply_timer'] = _later(APPLY_DELAY, lambda: _apply_pending(token))
         _pending['revert_timer'] = _later(APPLY_DELAY + KEEP_SECONDS, lambda: _revert(token))
 
@@ -439,6 +439,7 @@ def _apply_pending(token):
     with _lock:
         if _pending.get('token') is token:
             _pending['problems'] = problems
+            _pending['finished'] = True
 
 def _revert(token):
     with _lock:
@@ -447,16 +448,17 @@ def _revert(token):
         print("Network settings: not kept, so the previous ones are used again.", flush=True)
     undo()
 
+class NotApplied(Exception):
+    """Keep was asked for before the change had been applied (so before it could be tried)."""
+
 def keep():
-    """Save the settings being tried to /boot. False if none are waiting."""
+    """Save the settings being tried to /boot. False if none are waiting; NotApplied while they
+    are still being applied: only settings the page has been reached with are kept."""
     with _lock:
         if not _pending:
             return False
-        token = _pending['token']
-    _apply_pending(token)
-    with _lock:
-        if _pending.get('token') is not token:
-            return False
+        if not _pending['finished']:
+            raise NotApplied()
         _save(_pending['settings'])
         _cancel_timers()
         _pending.clear()
@@ -499,7 +501,7 @@ def pending():
         if not _pending:
             return None
         return {'seconds': max(0, int(_pending['deadline'] - time.monotonic())),
-                'problems': list(_pending['problems']), 'applied': _pending['applied']}
+                'problems': list(_pending['problems']), 'applied': _pending['finished']}
 
 
 # ----- What the page shows ----- #
