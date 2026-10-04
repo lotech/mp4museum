@@ -429,6 +429,16 @@ def test_recover_does_nothing_normally(pi):
     assert pi.commands == [] and open(clone.USBMOUNT_CONF).read().startswith('ENABLED=1')
 
 
+def test_copies_empty_media_files_too(pi, disks):
+    # chosen to copy them: copied, even when they add up to nothing
+    for path in list(pi.media.iterdir()):
+        if path.is_file():
+            path.unlink()
+    (pi.media / 'blank.jpg').write_bytes(b'')
+    clone.clone(CARD, with_media=True)
+    assert (disks.dev / 'sda3.d' / 'blank.jpg').exists()
+
+
 def test_copies_without_the_media_files(pi, disks):
     clone.clone(CARD, with_media=False)
     assert ['mkfs.exfat', '-n', 'Media', disks.partition('/dev/sda', 3)] in pi.commands

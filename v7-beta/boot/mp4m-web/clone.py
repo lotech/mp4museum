@@ -423,7 +423,7 @@ def clone(card, with_media, progress=_set):
 
         progress(step='Making the media partition', percent=None)
         run(_mkfs_exfat(partition(device, 3), 'Media'))
-        if with_media and media_used:
+        if with_media:
             progress(step='Copying the media files', percent=0)
             card_media = mount(partition(device, 3), 'card-media')
             # without hidden files and folders: uploads that stopped part way, and what a Mac
