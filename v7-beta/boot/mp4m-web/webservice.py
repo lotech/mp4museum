@@ -494,7 +494,9 @@ def upload_file():
                     else:
                         file.stream.flush()
                         path = os.path.join(system.MEDIA_PATH, file.filename)
-                        os.replace(file.stream.name, path)
+                        # (a copy from a USB stick checks for the name and renames under this lock)
+                        with system.media_rename_lock:
+                            os.replace(file.stream.name, path)
                         upload_message(f"File '{file.filename}' uploaded successfully.", "success")
                         pixels = system.image_size(path) if system.media_kind(path) == 'image' else None
                         if system.is_large_image(pixels):

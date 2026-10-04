@@ -1214,6 +1214,22 @@ def test_a_file_uploaded_meanwhile_is_kept(pi, stick, monkeypatch):
     assert os.listdir(pi.media) == ['film.mp4'] and (pi.media / 'film.mp4').read_bytes() == b'uploaded'
 
 
+def test_copy_and_upload_rename_under_one_lock(pi, client, stick, monkeypatch):
+    # the copy checks for the name and renames in one go: an upload of the same name finishing
+    # meanwhile waits, so it isn't overwritten
+    renamed = []
+    real = os.replace
+
+    def replace(src, dst):
+        renamed.append(system.media_rename_lock.locked())
+        real(src, dst)
+    monkeypatch.setattr(system.os, 'replace', replace)
+    system.copy_to_media(str(stick / 'film.mp4'))
+    client.post('/upload', data={'file': (io.BytesIO(b'up'), 'upload.mp4')}, content_type='multipart/form-data')
+    assert (pi.media / 'upload.mp4').read_bytes() == b'up'
+    assert renamed == [True, True]
+
+
 @pytest.mark.parametrize('name', ['b.mp4', '../usb0/film.mp4', '/etc/passwd'])
 def test_copy_only_from_usb_sticks(pi, client, stick, name):
     (pi.media / 'b.mp4').write_bytes(b'b')

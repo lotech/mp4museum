@@ -995,6 +995,9 @@ def remove_stale_uploads():
         except OSError:
             pass
 
+# Held while a finished upload or copy is renamed into place on the media partition
+media_rename_lock = threading.Lock()
+
 # Files being copied from USB sticks (lower-case names: exFAT doesn't tell case apart), and how
 # the copies that have finished went, for the next page shown
 _copies = {}
@@ -1080,10 +1083,12 @@ def copy_to_media(source):
                     shutil.copyfileobj(src, dst, 4 * 1024 * 1024)
                     dst.flush()
                     os.fsync(dst.fileno())
-            # an upload of the same name may have arrived meanwhile: that one stays
-            if _media_has(name):
-                raise FileExistsError(name)
-            os.replace(temp, target)
+            # an upload of the same name may have arrived meanwhile: that one stays (checked and
+            # renamed in one go: an upload is renamed into place under the same lock)
+            with media_rename_lock:
+                if _media_has(name):
+                    raise FileExistsError(name)
+                os.replace(temp, target)
         except BaseException:
             if os.path.exists(temp):
                 os.remove(temp)
