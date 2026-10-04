@@ -80,6 +80,8 @@ class Disks:
         self.folder('sda3')
         (pi.media / 'video.mp4').write_bytes(b'video')
         (pi.media / '.upload-1234').write_bytes(b'half')
+        (pi.media / '.fseventsd').mkdir()
+        (pi.media / '.fseventsd' / 'fseventsd-uuid').write_bytes(b'mac')
         pi.disks.append(READER)
         with open(clone.PROC_MOUNTS, 'a') as f:
             f.write('/dev/sda1 /media/usb0 vfat ro 0 0\n/dev/sda3 /media/usb\\0401 exfat ro 0 0\n')
@@ -166,6 +168,7 @@ class Disks:
         excluded = [cmd[i + 1].rstrip('*') for i, arg in enumerate(cmd) if arg == '--exclude']
         source = cmd[-2]
         for folder, dirs, files in os.walk(source):
+            dirs[:] = [name for name in dirs if not any(name.startswith(prefix) for prefix in excluded)]
             relative = os.path.relpath(folder, source)
             os.makedirs(os.path.join(cmd[-1], relative), exist_ok=True)
             for name in files:
@@ -221,11 +224,15 @@ def test_partition_names():
 
 
 def test_media_size_is_what_a_clone_copies(pi, tmp_path):
-    # the files, also in folders; not uploads that stopped part way, nor links
+    # the files, also in folders; not hidden ones (uploads that stopped part way, what a Mac
+    # leaves), nor links
     (pi.media / 'a.mp4').write_bytes(b'a' * 1000)
     (pi.media / 'folder').mkdir()
     (pi.media / 'folder' / 'b.jpg').write_bytes(b'b' * 500)
     (pi.media / '.upload-1234').write_bytes(b'x' * 100000)
+    (pi.media / '._a.mp4').write_bytes(b'x' * 4096)
+    (pi.media / '.Spotlight-V100' / 'Store-V2').mkdir(parents=True)
+    (pi.media / '.Spotlight-V100' / 'Store-V2' / 'index').write_bytes(b'x' * 100000)
     os.symlink(str(tmp_path / 'elsewhere'), str(pi.media / 'link.mp4'))
     assert clone.media_bytes(str(pi.media)) == 1500
 
@@ -286,10 +293,13 @@ def test_copies_this_player_to_the_card(pi, disks):
     assert (card_root / 'var' / 'lib' / 'dhcpcd5' / 'duid').exists()
     assert not (card_root / 'var' / 'lib' / 'dhcpcd5' / 'eth0.lease').exists()
     assert ['mount', '-o', 'ro', disks.partition(clone.SOURCE_DISK, 2)] == pi.mounts()[1][:4]
-    # media: an exFAT partition with the files, not the uploads half done
+    # media: an exFAT partition with the files, not hidden ones (uploads half done)
     assert ['mkfs.exfat', '-n', 'Media', disks.partition('/dev/sda', 3)] in pi.commands
     assert (disks.dev / 'sda3.d' / 'video.mp4').read_bytes() == b'video'
     assert not (disks.dev / 'sda3.d' / '.upload-1234').exists()
+    # nor hidden folders (what a Mac leaves)
+    assert not (disks.dev / 'sda3.d' / '.fseventsd').exists()
+    assert disks.copies[-1][:4] == ['rsync', '-rt', '--exclude', '.*']
     # everything unmounted again, the work folder gone
     assert disks.mounted() == [] and not list(pi.root.glob('mp4m-clone-*'))
     assert pi.commands[-1] == ['sync']

@@ -88,15 +88,16 @@ def _mkfs_exfat(device, label):
 
 
 def media_bytes(path):
-    """How much a clone copies from the media partition: its files, without what is left of
-    uploads that stopped part way (the space the partition uses is more: those, and the file
-    system's own)."""
+    """How much a clone copies from the media partition: its files, without hidden files and
+    folders (uploads that stopped part way, what a Mac leaves). The space the partition uses is
+    more: those, and the file system's own."""
     total = 0
     for folder, dirs, files in os.walk(path):
+        dirs[:] = [name for name in dirs if not name.startswith('.')]
         for name in files:
             file_path = os.path.join(folder, name)
-            # (rsync copies files, not links, and leaves the uploads out)
-            if name.startswith(system.UPLOAD_PREFIX) or os.path.islink(file_path):
+            # (rsync copies files, not links)
+            if name.startswith('.') or os.path.islink(file_path):
                 continue
             try:
                 total += os.path.getsize(file_path)
@@ -416,7 +417,9 @@ def clone(card, with_media, progress=_set):
         if with_media and media_used:
             progress(step='Copying the media files', percent=0)
             card_media = mount(partition(device, 3), 'card-media')
-            _copy_tree(['rsync', '-rt', '--exclude', system.UPLOAD_PREFIX + '*',
+            # without hidden files and folders: uploads that stopped part way, and what a Mac
+            # leaves (.Spotlight-V100, .fseventsd, ._*); the player never plays them
+            _copy_tree(['rsync', '-rt', '--exclude', '.*',
                         system.MEDIA_PATH + '/', card_media + '/'], card_media, media_used, progress)
             unmount(card_media)
         run(['sync'])

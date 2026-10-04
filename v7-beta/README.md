@@ -209,7 +209,8 @@ it says the card is ready, take it out; the next card put in shows up in the lis
   player and web interface), and the system as installed (not what is only in RAM now).
 - **Its own network name:** `hostname.txt` isn't copied, so the new player makes its name from
   its own serial number. Set a name in the web interface once it's running.
-- **Media files:** copied, or left out (an empty media partition).
+- **Media files:** copied, or left out (an empty media partition). Hidden files and folders,
+  such as what a Mac leaves on a card (`.Spotlight-V100`, `._…`), aren't copied.
 - **Partitions:** the system partition is the size the system needs plus 1 GB, and the media
   partition fills the rest of the card. Use a card of 8 GB or more, bigger with the media files;
   the page says if it's too small.
