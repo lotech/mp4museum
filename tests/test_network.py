@@ -872,6 +872,28 @@ def test_network_in_use_card_shows_the_wifi_country_applied(ports, client, monke
     assert country().startswith('Germany')
 
 
+def test_network_in_use_card_states_are_for_what_changes(ports, client, monkeypatch):
+    """A change to the Ethernet address doesn't show the Wi-Fi country as changing, nor the other way."""
+    def card():
+        return client.get('/').data.decode().split('id="networkStatus">')[1].split('</section>')[0]
+    wifi = {'country': 'DE', 'networks': []}
+    with open(network.SETTINGS_FILE, 'w') as f:
+        json.dump({'wifi': wifi}, f)
+    network.apply_at_start()
+    network.change({'interfaces': FIXED['interfaces'], 'wifi': wifi})
+    assert '<dt>Wi-Fi country</dt><dd>Germany</dd>' in card() and 'Changing…' in card()
+    network.undo()
+    network.change({'wifi': dict(wifi, country='GB')})
+    assert '<dt>Set to</dt><dd>Automatic (DHCP)</dd>' in card().split('enxb827eb4e4fd4</span>')[1]
+    # applying the address went wrong: only that port is unsure
+    network.undo()
+    monkeypatch.setattr(system, 'run_command', lambda cmd, timeout=None: (cmd[0] != 'dhcpcd', 'timed out'))
+    network.change({'interfaces': FIXED['interfaces'], 'wifi': wifi})
+    ports.run_later(network.APPLY_DELAY)
+    assert "didn't all apply" in card().split('enxb827eb4e4fd4</span>')[1]
+    assert '<dt>Wi-Fi country</dt><dd>Germany</dd>' in card()
+
+
 def test_network_in_use_card_wifi_details_belong_to_one_interface(ports, client, monkeypatch):
     """A second Wi-Fi adapter isn't shown as connected to the first one's network; the country
     isn't shown when Wi-Fi isn't set up here (the system's own setting isn't known)."""

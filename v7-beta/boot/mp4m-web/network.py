@@ -864,8 +864,17 @@ def view():
     applied_settings = _in_use['settings'] if _in_use['settings'] is not None else read_settings()
     applied = applied_settings.get('interfaces') or {}
     with _lock:
-        changing = bool(_pending) and not _pending['finished']
-    using_state = 'changing' if changing else 'unsure' if _maybe_in_use else None
+        being_applied = _pending['settings'] if _pending and not _pending['finished'] else None
+    maybe = list(_maybe_in_use)
+
+    def using_state(part):
+        """'changing' if a change being applied changes this part (part: settings -> its value),
+        'unsure' if applying went wrong where it differs, else None."""
+        if being_applied is not None and part(being_applied) != part(applied_settings):
+            return 'changing'
+        if any(part(other) != part(applied_settings) for other in maybe):
+            return 'unsure'
+        return None
     interfaces = []
     for name in names:
         kind = 'wireless' if name in wireless else 'wired'
@@ -880,7 +889,7 @@ def view():
             'setting': (settings.get('interfaces') or {}).get(name) or dhcp,
             # in use now; 'changing' while a change is being applied, 'unsure' if applying went wrong
             'using': applied.get(name) or dhcp,
-            'using_state': using_state,
+            'using_state': using_state(lambda s, name=name: (s.get('interfaces') or {}).get(name)),
         })
     wifi = settings.get('wifi') or {'enabled': True, 'country': '', 'networks': []}
     interface = wireless[0] if wireless else None
@@ -895,7 +904,7 @@ def view():
                      ssid=ssid, signal=signal,
                      country_name=dict(country_names).get(wifi['country'], wifi['country'])),
         # Wi-Fi as applied (the Wi-Fi card shows the settings, which may be being changed)
-        'wifi_in_use': {'managed': 'wifi' in applied_settings, 'state': using_state,
+        'wifi_in_use': {'managed': 'wifi' in applied_settings, 'state': using_state(lambda s: s.get('wifi')),
                         'enabled': (applied_settings.get('wifi') or {}).get('enabled', True),
                         'country': (applied_settings.get('wifi') or {}).get('country', ''),
                         'country_name': dict(country_names).get((applied_settings.get('wifi') or {}).get('country', ''), '')},
