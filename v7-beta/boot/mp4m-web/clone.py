@@ -87,6 +87,35 @@ def _mkfs_exfat(device, label):
     return [tool, '-L' if '--volume-label' in exfat_usage(tool) else '-n', label, device]
 
 
+# exFAT keeps each file and folder in whole clusters: at most 128 KB with the exFAT tools' choices
+EXFAT_CLUSTER = 128 * 1024
+
+
+def media_bytes(path, on_card=False):
+    """How much a clone copies from the media partition: its files, without hidden files and
+    folders (uploads that stopped part way, what a Mac leaves). on_card: the space they take on
+    the card, each file and folder rounded up to whole clusters (many small files take much
+    more than their size)."""
+    def taken(size):
+        # (an empty file takes no cluster but room in its folder: counted as one, plenty for that)
+        return -(-max(size, 1) // EXFAT_CLUSTER) * EXFAT_CLUSTER if on_card else size
+    total = 0
+    for folder, dirs, files in os.walk(path):
+        dirs[:] = [name for name in dirs if not name.startswith('.')]
+        if on_card and folder != path:
+            total += EXFAT_CLUSTER
+        for name in files:
+            file_path = os.path.join(folder, name)
+            # (rsync copies files, not links)
+            if name.startswith('.') or os.path.islink(file_path):
+                continue
+            try:
+                total += taken(os.path.getsize(file_path))
+            except OSError:
+                pass
+    return total
+
+
 def used_bytes(path):
     stat = os.statvfs(path)
     return (stat.f_blocks - stat.f_bfree) * stat.f_frsize
@@ -202,7 +231,7 @@ def plan(card_size, root_used, media_used, with_media, boot_sectors):
 
 def sizes():
     """What a clone needs to know before it starts: the system partition's used space and the
-    media files' (both in bytes)."""
+    space the media files will take on the card (both in bytes)."""
     mount_point = tempfile.mkdtemp(prefix=WORK_PREFIX, dir=TEMP_DIR)
     try:
         run(['mount', '-o', 'ro', partition(SOURCE_DISK, 2), mount_point])
@@ -212,7 +241,7 @@ def sizes():
             run(['umount', mount_point])
     finally:
         os.rmdir(mount_point)
-    return root_used, used_bytes(system.MEDIA_PATH)
+    return root_used, media_bytes(system.MEDIA_PATH, on_card=True)
 
 
 # ----- Cloning (one at a time, in the background) ----- #
@@ -271,7 +300,7 @@ def start(device, with_media, identity=None):
     plan(card['size'], root_used, media_used, with_media, source_partitions()[1][0][1])
     busy = system.try_busy_lock()
     if busy is None:
-        raise CloneError("An update is being installed or a file copied: make the card when it's done.")
+        raise CloneError("An update is being installed or a file copied or uploaded: make the card when it's done.")
     try:
         with _lock:
             if state['running']:
@@ -395,11 +424,16 @@ def clone(card, with_media, progress=_set):
 
         progress(step='Making the media partition', percent=None)
         run(_mkfs_exfat(partition(device, 3), 'Media'))
-        if with_media and media_used:
+        if with_media:
             progress(step='Copying the media files', percent=0)
             card_media = mount(partition(device, 3), 'card-media')
-            _copy_tree(['rsync', '-rt', '--exclude', system.UPLOAD_PREFIX + '*',
-                        system.MEDIA_PATH + '/', card_media + '/'], card_media, media_used, progress)
+            # without hidden files and folders: uploads that stopped part way, and what a Mac
+            # leaves (.Spotlight-V100, .fseventsd, ._*); the player never plays them
+            _copy_tree(['rsync', '-rt', '--exclude', '.*',
+                        system.MEDIA_PATH + '/', card_media + '/'], card_media,
+                       # (progress against the files' size: media_used is an upper bound for the
+                       # card's size, with clusters bigger than the card usually gets)
+                       media_bytes(system.MEDIA_PATH), progress)
             unmount(card_media)
         run(['sync'])
     finally:

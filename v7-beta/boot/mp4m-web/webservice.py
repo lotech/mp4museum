@@ -201,7 +201,7 @@ def index():
                            clone_cards=clone.list_cards(),
                            clone_unavailable=clone.unavailable(),
                            clone_state=clone.get_state(),
-                           media_used=system.format_size(clone.used_bytes(system.MEDIA_PATH)) if is_available else None)
+                           media_used=system.format_size(clone.media_bytes(system.MEDIA_PATH)) if is_available else None)
 
 
 # ----- Player ----- #
@@ -480,6 +480,13 @@ def upload_file():
     if not request.content_length:
         upload_message("Upload refused: the browser didn't say how big the file is.", "error")
         return upload_result()
+    # held (shared) until the file is in place: a card being made counted the media files before
+    # copying them, and an update or a reboot would stop the upload half way
+    busy = system.try_busy_lock(shared=True)
+    if busy is None:
+        upload_message("A card is being made, an update installed or the player rebooting: "
+                       "upload when it's done.", "error")
+        return upload_result()
     try:
         with system.writable(system.MEDIA_PATH):
             # Before the space check, so leftovers from a power cut can't block new uploads
@@ -511,6 +518,8 @@ def upload_file():
         upload_message("Not enough free space for this file.", "error")
     except Exception as e:
         upload_message(f"File upload failed: {e}", "error")
+    finally:
+        os.close(busy)
     return upload_result()
 
 @app.route('/download/<filename>')
@@ -717,7 +726,7 @@ def reboot_system():
         if lock is None:
             lock = system.try_busy_lock()
         message = busy() or (None if lock is not None else
-                             "A card is being made, a file copied or an update installed: reboot when it's done.")
+                             "A card is being made, a file copied or uploaded, or an update installed: reboot when it's done.")
         if message:
             if lock is not None and lock != _reboot_lock['fd']:
                 os.close(lock)
@@ -971,7 +980,7 @@ def install_update():
     # held until the web interface restarts, so a card can't be started meanwhile
     busy_lock = system.try_busy_lock()
     if busy_lock is None:
-        flash("A card is being made or a file copied: install the update when it's done.", "error")
+        flash("A card is being made or a file copied or uploaded: install the update when it's done.", "error")
         return redirect(url_for('index'))
     try:
         summary = updater.update(latest)

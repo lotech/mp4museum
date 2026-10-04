@@ -197,19 +197,20 @@ repo=lotech/mp4museum
 branch=master
 ```
 
-## Copying a player to another SD card
+## Cloning a player to another SD card
 
-To set up another Pi the same way, put an SD card in a USB card reader and plug it into the
-player. System → Copy to an SD card lists the card; choose whether to copy the media files,
-then Copy. It takes a few minutes, plus about a minute per GB of media. When it says the card is
-ready, take it out; the next card put in shows up in the list.
+To set up another Pi the same way, put an SD card in an external USB card reader and plug it
+into the player. System → Clone to another device lists the card; choose whether to copy the
+media files, then Copy. It takes about 2–3 minutes, plus about a minute per GB of media. When
+it says the card is ready, take it out; the next card put in shows up in the list.
 
 - **The card is erased**, also if it already has MP4MUSEUM on it.
 - **It gets this player:** the boot partition as it is (settings, password, `config.txt`, the
   player and web interface), and the system as installed (not what is only in RAM now).
 - **Its own network name:** `hostname.txt` isn't copied, so the new player makes its name from
   its own serial number. Set a name in the web interface once it's running.
-- **Media files:** copied, or left out (an empty media partition).
+- **Media files:** copied, or left out (an empty media partition). Hidden files and folders,
+  such as what a Mac leaves on a card (`.Spotlight-V100`, `._…`), aren't copied.
 - **Partitions:** the system partition is the size the system needs plus 1 GB, and the media
   partition fills the rest of the card. Use a card of 8 GB or more, bigger with the media files;
   the page says if it's too small.

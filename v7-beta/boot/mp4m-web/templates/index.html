@@ -446,7 +446,9 @@
           Custom player script is untouched. Over SSH: <code>sudo mp4m-update</code></p>
       </section>
       <section class="card" id="clone" data-status-url="{{ url_for('clone_status') }}">
-        <h3>{{ icon('copy') }}Copy to an SD card</h3>
+        <h3>{{ icon('copy') }}Clone to another device</h3>
+        <p class="hint intro">Copies all settings and files for a new Pi with a new network name. Needs an SD card in an
+          external USB card reader. Takes about 2–3 minutes.</p>
         <div id="cloneProgress" {% if not clone_state.running %}hidden{% endif %}>
           <p class="update-status"><span class="spinner"></span><span id="cloneStep">{{ clone_state.step }}…</span></p>
           <div class="progress indeterminate"><div id="cloneBar" class="progress-fill"></div></div>
@@ -482,8 +484,7 @@
           </div>
         </form>
         {% endif %}
-        <p class="hint">The card is erased, then gets this player: its settings, software and password, and a network name
-          of its own. A few minutes, plus about a minute per GB of media.</p>
+        <p class="hint">The card is erased first. Lots of media takes longer: about a minute per GB.</p>
       </section>
     </div>
   </div>

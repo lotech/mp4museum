@@ -387,6 +387,11 @@ pre.log {
   margin-bottom: 0;
 }
 
+/* a card's description under its title */
+.hint.intro {
+  margin: -4px 0 16px;
+}
+
 .count {
   color: var(--muted);
   font-weight: 500;

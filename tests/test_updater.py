@@ -417,7 +417,7 @@ def cli(monkeypatch, capsys, pi):
 def test_cli_waits_for_a_card_being_made(cli, github):
     making_a_card = system.try_busy_lock()
     code, out = cli([], answers=['y'])
-    assert code == "A card is being made or a file copied in the web interface: update when it's done."
+    assert code == "A card is being made or a file copied or uploaded in the web interface: update when it's done."
     assert github.downloads == []
     # checking is fine meanwhile
     assert 'An update is available' in cli(['--check'])[1]

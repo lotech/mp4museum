@@ -48,6 +48,7 @@ class Disks:
         self.copies = []
         self.fail = None
         self.rereads = []
+        self.totals = []
         self.busy = 0                   # times blockdev --rereadpt finds the card in use
         self.new_table = None
         self.kernel_keeps_old_table = False
@@ -80,6 +81,8 @@ class Disks:
         self.folder('sda3')
         (pi.media / 'video.mp4').write_bytes(b'video')
         (pi.media / '.upload-1234').write_bytes(b'half')
+        (pi.media / '.fseventsd').mkdir()
+        (pi.media / '.fseventsd' / 'fseventsd-uuid').write_bytes(b'mac')
         pi.disks.append(READER)
         with open(clone.PROC_MOUNTS, 'a') as f:
             f.write('/dev/sda1 /media/usb0 vfat ro 0 0\n/dev/sda3 /media/usb\\0401 exfat ro 0 0\n')
@@ -163,9 +166,11 @@ class Disks:
 
     def copy_tree(self, cmd, target, total, progress):
         self.copies.append(cmd)
+        self.totals.append(total)
         excluded = [cmd[i + 1].rstrip('*') for i, arg in enumerate(cmd) if arg == '--exclude']
         source = cmd[-2]
         for folder, dirs, files in os.walk(source):
+            dirs[:] = [name for name in dirs if not any(name.startswith(prefix) for prefix in excluded)]
             relative = os.path.relpath(folder, source)
             os.makedirs(os.path.join(cmd[-1], relative), exist_ok=True)
             for name in files:
@@ -220,6 +225,46 @@ def test_partition_names():
     assert clone.partition('/dev/mmcblk0', 2) == '/dev/mmcblk0p2'
 
 
+def test_media_size_is_what_a_clone_copies(pi, tmp_path):
+    # the files, also in folders; not hidden ones (uploads that stopped part way, what a Mac
+    # leaves), nor links
+    (pi.media / 'a.mp4').write_bytes(b'a' * 1000)
+    (pi.media / 'folder').mkdir()
+    (pi.media / 'folder' / 'b.jpg').write_bytes(b'b' * 500)
+    (pi.media / '.upload-1234').write_bytes(b'x' * 100000)
+    (pi.media / '._a.mp4').write_bytes(b'x' * 4096)
+    (pi.media / '.Spotlight-V100' / 'Store-V2').mkdir(parents=True)
+    (pi.media / '.Spotlight-V100' / 'Store-V2' / 'index').write_bytes(b'x' * 100000)
+    os.symlink(str(tmp_path / 'elsewhere'), str(pi.media / 'link.mp4'))
+    assert clone.media_bytes(str(pi.media)) == 1500
+    # on the card, each file and folder takes whole clusters: what the card's size is checked with
+    assert clone.media_bytes(str(pi.media), on_card=True) == 3 * clone.EXFAT_CLUSTER
+    # an empty file takes room in its folder: counted as a cluster too
+    (pi.media / 'empty.jpg').write_bytes(b'')
+    assert clone.media_bytes(str(pi.media)) == 1500
+    assert clone.media_bytes(str(pi.media), on_card=True) == 4 * clone.EXFAT_CLUSTER
+
+
+def test_card_size_check_counts_whole_clusters(pi, monkeypatch):
+    # 2000 small files: 2 MB of files, 250 MB on the card
+    for number in range(2000):
+        (pi.media / ('%04d.jpg' % number)).write_bytes(b'x' * 1000)
+    monkeypatch.setattr(clone, 'run', lambda cmd, input=None: '')
+    root_used, media_on_card = clone.sizes()
+    assert media_on_card == 2000 * clone.EXFAT_CLUSTER
+    gib = 1024 ** 3
+    with pytest.raises(clone.CloneError, match='too small'):
+        clone.plan(int(3.8 * gib), 2 * gib, media_on_card, True, 524288)
+    clone.plan(int(3.8 * gib), 2 * gib, clone.media_bytes(str(pi.media)), True, 524288)
+
+
+def test_system_tab_shows_the_media_size_a_clone_copies(client, pi):
+    pi.disks.append(READER)
+    (pi.media / 'a.mp4').write_bytes(b'a' * 3 * 1024 ** 2)
+    (pi.media / '.upload-1234').write_bytes(b'x' * 50 * 1024 ** 2)
+    assert 'Copy them (3.0 MB)' in client.get('/').get_data(as_text=True)
+
+
 def test_plan_puts_the_media_partition_after_a_system_partition_with_room():
     gib = 1024 ** 3
     layout = clone.plan(32 * gib, int(2.1 * gib), 5 * gib, False, 524288)
@@ -269,10 +314,15 @@ def test_copies_this_player_to_the_card(pi, disks):
     assert (card_root / 'var' / 'lib' / 'dhcpcd5' / 'duid').exists()
     assert not (card_root / 'var' / 'lib' / 'dhcpcd5' / 'eth0.lease').exists()
     assert ['mount', '-o', 'ro', disks.partition(clone.SOURCE_DISK, 2)] == pi.mounts()[1][:4]
-    # media: an exFAT partition with the files, not the uploads half done
+    # media: an exFAT partition with the files, not hidden ones (uploads half done)
     assert ['mkfs.exfat', '-n', 'Media', disks.partition('/dev/sda', 3)] in pi.commands
     assert (disks.dev / 'sda3.d' / 'video.mp4').read_bytes() == b'video'
     assert not (disks.dev / 'sda3.d' / '.upload-1234').exists()
+    # nor hidden folders (what a Mac leaves)
+    assert not (disks.dev / 'sda3.d' / '.fseventsd').exists()
+    # its progress against the files' size (the card's size was checked with whole clusters)
+    assert disks.totals[-1] == len(b'video')
+    assert disks.copies[-1][:4] == ['rsync', '-rt', '--exclude', '.*']
     # everything unmounted again, the work folder gone
     assert disks.mounted() == [] and not list(pi.root.glob('mp4m-clone-*'))
     assert pi.commands[-1] == ['sync']
@@ -381,6 +431,16 @@ def test_recovers_after_the_web_interface_stopped_part_way(pi, tmp_path):
 def test_recover_does_nothing_normally(pi):
     clone.recover()
     assert pi.commands == [] and open(clone.USBMOUNT_CONF).read().startswith('ENABLED=1')
+
+
+def test_copies_empty_media_files_too(pi, disks):
+    # chosen to copy them: copied, even when they add up to nothing
+    for path in list(pi.media.iterdir()):
+        if path.is_file():
+            path.unlink()
+    (pi.media / 'blank.jpg').write_bytes(b'')
+    clone.clone(CARD, with_media=True)
+    assert (disks.dev / 'sda3.d' / 'blank.jpg').exists()
 
 
 def test_copies_without_the_media_files(pi, disks):
@@ -643,7 +703,7 @@ def test_state_when_done_or_failed(pi, monkeypatch):
 # ----- Web interface ----- #
 def test_system_tab_asks_for_a_card(client):
     page = client.get('/').get_data(as_text=True)
-    assert 'Copy to an SD card' in page
+    assert 'Clone to another device' in page and 'Takes about 2–3 minutes' in page
     assert 'Plug a USB SD card reader with a card into the Pi' in page
 
 
