@@ -83,6 +83,7 @@ a network is optional.
 - [x] Device info on the System tab: model, memory, graphics memory, temperature, power (under-voltage), media space, OS
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
 - [x] "Save and Reboot" asks once (it asked twice)
+- [x] Page titles start with the player's network name, to tell players apart in a browser's tabs
 - [x] The playlist fills the window and scrolls inside its card, with a scrollbar that shows on the dark background; the file playing is kept in view
 - [x] The update bar says when installing an update switches back from a branch (`sudo mp4m-update --branch`); no message on top of it when an update is found
 - [ ] Warn about videos the Pi can't decode in hardware, like large images: H.265/HEVC (phones and editing software often export it), VP9, AV1. A Pi 3 decodes H.264 and MPEG-4 Part 2 in hardware (an H.264 1080p25 MP4 played at 0.4 % CPU); others are decoded in software, stutter and heat the Pi. Mark them in the playlist and warn on upload, saying to export as H.264. The codec can be read with `omxplayer -i` (the player's `omx_can_play` does it for loops), or from the MP4 header without omxplayer (newer OS)

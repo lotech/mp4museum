@@ -37,6 +37,14 @@ def test_pages_need_login(pi):
     assert r.status_code == 302 and ['reboot'] not in pi.commands
 
 
+def test_page_titles_name_the_player(pi, client, monkeypatch):
+    # to tell players apart in a browser's tabs
+    monkeypatch.setattr(webservice.socket, 'gethostname', lambda: 'gallery-3')
+    assert '<title>gallery-3 - MP4Museum</title>' in client.get('/').data.decode()
+    assert '<title>gallery-3 - Reboot - MP4Museum</title>' in client.get('/confirm_reboot').data.decode()
+    assert '<title>gallery-3 - Log in - MP4Museum</title>' in webservice.app.test_client().get('/login').data.decode()
+
+
 def test_wrong_password_refused(pi):
     r = webservice.app.test_client().post('/login', data={'password': 'wrong'})
     assert b'Wrong password' in r.data

@@ -5,7 +5,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>{% block title %}MP4Museum{% endblock %}</title>
+    {# the network name first, to tell players apart in a browser's tabs #}
+    <title>{% block title %}{{ hostname }} - MP4Museum{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     {% block head %}
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">

@@ -1018,7 +1018,7 @@ def version():
 UPDATED_PAGE = """<!doctype html>
 <html>
   <head>
-    <title>MP4Museum - Updated</title>
+    <title>{{ hostname }} - Updated - MP4Museum</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>{{ inline_css|safe }}</style>
   </head>
