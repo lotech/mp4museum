@@ -201,8 +201,8 @@ branch=master
 
 To set up another Pi the same way, put an SD card in an external USB card reader and plug it
 into the player. System → Clone to another device lists the card; choose whether to copy the
-media files, then Copy. It takes about 2–3 minutes, plus about a minute per GB of media. When it says the card is
-ready, take it out; the next card put in shows up in the list.
+media files, then Copy. It takes about 2–3 minutes, plus about a minute per GB of media. When
+it says the card is ready, take it out; the next card put in shows up in the list.
 
 - **The card is erased**, also if it already has MP4MUSEUM on it.
 - **It gets this player:** the boot partition as it is (settings, password, `config.txt`, the
