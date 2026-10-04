@@ -104,22 +104,30 @@ a network is optional.
 - [ ] Make an image file (`.img`) of a player, to write onto cards with Raspberry Pi Imager or balenaEtcher on a computer, or to keep as a backup or a release. Small: only the space used (like Clone to another device, the system partition sized to what it uses and a small media partition that grows to fill the card on first start, e.g. `parted resizepart` + exFAT grown or remade at boot). Options: from the web interface onto a USB stick (`clone.py` already lays out the partitions and changes the disk ID; it would write to a loop device on a file instead of a card), or a script on a computer from a card (like PiShrink). Leave out `hostname.txt`, the password (or keep it, asked), DHCP leases; compress it (`.img.xz`)
 - [ ] Install script to set up v7 on a fresh Raspberry Pi OS, instead of depending on the image (`install.sh` only covers the v7 image so far)
 
-## 6. Wi-Fi
+## 6. Network and Wi-Fi
 
-Wi-Fi isn't set up on the players: no country is set, so Raspberry Pi OS keeps Wi-Fi switched
-off (rfkill), and the web interface has no Wi-Fi settings. Anything set has
-to survive the RAM overlay, so it's kept on `/boot`, written with `system.writable()`.
+The players get their address by DHCP (dhcpcd) and the web interface has no network settings.
+Wi-Fi isn't set up: no country is set, so Raspberry Pi OS keeps Wi-Fi switched off (rfkill).
+Anything set has to survive the RAM overlay, so it's kept on `/boot`, written with
+`system.writable()`, and applied at boot: dhcpcd and wpa_supplicant read `/etc`, so a small
+service installed by `install.sh` (outside `/boot`) copies the settings in before they start.
+
+- [ ] Network settings in the web interface (System → Network), for Ethernet and Wi-Fi: automatic (DHCP, as now) or a fixed address, with the address and prefix (e.g. `192.168.1.50/24`), router (gateway) and DNS servers. Kept on `/boot` (e.g. `mp4m-network.txt`), written into `/etc/dhcpcd.conf` at boot (`interface eth0` / `static ip_address=…`, `static routers=…`, `static domain_name_servers=…`) and applied without a reboot (`dhcpcd -n eth0`)
+- [ ] A wrong fixed address loses the player: check the values (address in the router's network, not in use: `arping`), apply them, and go back to the previous settings unless the page is reopened at the new address within a few minutes. The logo screen shows the address in use, and deleting the settings file from `/boot` on a computer goes back to DHCP
+- [ ] Show the network in use in the Network card: address, prefix, router, DNS, and whether it's fixed or from DHCP
+- [ ] Clone to another device copies `/boot`: a fixed address would be on two players at once. Leave it out of the clone (back to DHCP), or ask for the new player's address
+- [ ] Optional: a fallback address when no DHCP server answers (dhcpcd's `fallback` profile), so a player on a bare network can still be reached
 
 - [ ] Find out on the Pi (Buster, overlay on): what `raspi-config` sets for the Wi-Fi country (`do_wifi_country`: `/etc/wpa_supplicant/wpa_supplicant.conf`, rfkill) and whether `/boot/wpa_supplicant.conf` is still picked up at boot with `/boot` read-only (the `raspberrypi-net-mods` service moves it)
 - [ ] Wi-Fi country setting (System tab, a list of countries): unblocks Wi-Fi. On `/boot` so it survives the overlay: e.g. `cfg80211.ieee80211_regdom=GB` in `cmdline.txt` (read by the kernel at boot), and `country=GB` for `wpa_supplicant`, applied at boot. Without a country Wi-Fi stays blocked
 - [ ] Connect to a Wi-Fi network from the web interface (System tab): scan (`wpa_cli scan` / `iw dev wlan0 scan`), choose a network, enter its password; saved on `/boot` and applied with `wpa_cli` without a reboot. Several saved networks, with one to forget
-- [ ] Wi-Fi in the Network card: network name (SSID), signal, address; the logo screen shows the Wi-Fi address when there's no Ethernet (it shows `hostname -I` already)
+- [ ] Wi-Fi in the Network card: network name (SSID), signal, address (a fixed address for Wi-Fi as above); the logo screen shows the Wi-Fi address when there's no Ethernet (it shows `hostname -I` already)
 - [ ] Careful when changing Wi-Fi from a browser connected over that Wi-Fi: the page loses the player. Say so before applying, and keep the old network if the new one doesn't connect within a minute
 - [ ] Wi-Fi passwords on `/boot` (FAT) can be read by anyone with the card: store wpa_supplicant's hashed `psk` (`wpa_passphrase`), not the password
-- [ ] Clone to another device copies `/boot`, so Wi-Fi settings go to the new card too: fine for players in the same place; say so on the page
+- [ ] Clone to another device copies `/boot`, so Wi-Fi settings go to the new card too: fine for players in the same place (the Wi-Fi network, not a fixed address); say so on the page
 - [ ] Turn Wi-Fi off from the web interface (players on Ethernet don't need it; less to go wrong)
 - [ ] Offline setup: a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (`hostapd`/`dnsmasq` aren't on the image: needs `install.sh`, from `legacy.raspbian.org` like exfat-utils)
-- [ ] Test all of it on a Pi 3 B+ (2.4 and 5 GHz) and a Pi 4
+- [ ] Test all of it on a Pi 3 B+ (2.4 and 5 GHz) and a Pi 4, with the overlay on and after a reboot
 
 ## Development
 
