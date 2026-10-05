@@ -553,10 +553,20 @@ def delete_file():
         # not while the player has it open: it moves on first
         switched_off = False
         try:
+            chosen = os.stat(file_path)
             let_go, switched_off = system.let_go_of(file_path)
             if let_go:
-                with system.writable(system.MEDIA_PATH):
-                    os.remove(file_path)
+                # an upload of the same name may have replaced it meanwhile: that one stays
+                # (checked and removed in one go: an upload is renamed into place under the same lock)
+                with system.media_rename_lock:
+                    now = os.stat(file_path)
+                    if (now.st_ino, now.st_size, now.st_mtime) != (chosen.st_ino, chosen.st_size, chosen.st_mtime):
+                        raise RuntimeError("it was replaced meanwhile")
+                    with system.writable(system.MEDIA_PATH):
+                        os.remove(file_path)
+        except FileNotFoundError:
+            let_go = None
+            flash("File not found.", "error")
         except Exception as e:
             let_go = None
             flash(f"Failed to delete file: {e}", "error")

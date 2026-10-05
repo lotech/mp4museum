@@ -1394,3 +1394,21 @@ def test_deleting_a_file_in_use_with_an_edited_player_or_sync_mode(pi, client, m
         r = client.post('/delete', data={'filename': 'a.mp4'}, follow_redirects=True)
     assert b'deleted successfully' in r.data and not (pi.media / 'a.mp4').exists()
     assert sent == [signal.SIGUSR1] and system.get_disabled_files() == set()
+
+
+def test_a_file_replaced_while_the_delete_waits_stays(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    (pi.media / 'a.mp4').write_bytes(b'old')
+    a = str(pi.media / 'a.mp4')
+    write_status('playing', a)
+    vlc = open(a, 'rb')
+    def player(pid, sig):
+        # while the player moves on, an upload of the same name is renamed into place
+        (pi.media / '.upload-new').write_bytes(b'new upload')
+        os.replace(str(pi.media / '.upload-new'), a)
+        vlc.close()
+    monkeypatch.setattr(os, 'kill', player)
+    r = client.post('/delete', data={'filename': 'a.mp4'}, follow_redirects=True)
+    assert b'replaced meanwhile' in r.data and (pi.media / 'a.mp4').read_bytes() == b'new upload'
+    # it plays again
+    assert system.get_disabled_files() == set()
