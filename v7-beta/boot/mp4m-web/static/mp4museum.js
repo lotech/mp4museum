@@ -259,7 +259,8 @@ function uploadFiles(input) {
       return;
     }
     uploadFile(form.action, files[index], index, files.length)
-      .then(answer => messages.push(...answer))
+      // the new files show in the list: only errors and warnings are worth a message
+      .then(answer => messages.push(...answer.filter(([category]) => category !== 'success')))
       .catch(error => messages.push(['error', error]))
       .then(() => next(index + 1));
   };

@@ -73,6 +73,7 @@ a network is optional.
 - [x] Click a file's name to play it; play buttons stay on when the player isn't running and say why
 - [x] Deleting the file playing: the player moves off it first (switched off meanwhile) and the file is deleted once nothing has it open (`system.let_go_of`); refused if it's still in use after 10 seconds. Test on the Pi (VLC and omxplayer loops)
 - [x] The playlist shows each file's extension under its name (long names are cut off)
+- [x] Uploads from the page only show errors and warnings (the new files show in the list)
 - [x] The player icon flickered every few seconds (it was set again on every status check); the reboot spinner turns around its centre
 - [x] Very large images (bigger than a 4K screen) marked in the playlist, with a warning when uploaded
 - [x] Rewind button: back to the first frame, held until play (omxplayer loops show it in VLC, then loop in omxplayer again)
