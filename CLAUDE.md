@@ -66,6 +66,8 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
     - `/boot/mp4m-player.txt`: settings (`image_duration`, `loop_player`, `boot_video_plays`,
       `show_address`);
     - `/boot/mp4m-disabled.txt`: files switched off in the web interface, one path per line.
+  - **Deleting a file it has open** (VLC, omxplayer): the web interface switches it off, sends
+    next and waits until no process has it open (`system.let_go_of`, `/proc/*/fd`) before deleting.
   - **Edited players** are kept by updates. The web interface finds out what one can do by
     searching its text (`system.player_*`, `get_boot_video_plays`): `MEDIA_TYPES`,
     `mp4m-disabled.txt`, `boot_video_plays` and `show_address`, `'boot_video_plays': <n>`. Keep

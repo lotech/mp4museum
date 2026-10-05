@@ -208,7 +208,10 @@
             <button type="submit" form="play-{{ loop.index }}" class="item-name js-play" title="{{ entry.name }}"
                     {% if not playable %}disabled{% endif %}>{{ entry.name }}</button>
             <div class="item-meta">
-              {{ icon(kind_icons[entry.kind]) }}<span>{{ entry.size|size }}</span>
+              {{ icon(kind_icons[entry.kind]) }}
+              {# long names are cut off: the type shows here #}
+              {% if '.' in entry.name %}<span class="item-ext">{{ entry.name.rpartition('.')[2]|upper }}</span>{% endif %}
+              <span>{{ entry.size|size }}</span>
               {% if entry.pixels %}<span>{{ entry.pixels[0] }}×{{ entry.pixels[1] }}</span>{% endif %}
               {% if entry.skipped %}<span class="badge danger" title="The player stopped while playing this file, so it skips it. Replace the file, or play it from here to try again.">{{ icon('circle-alert') }}skipped</span>{% endif %}
               {% if entry.large %}<span class="badge warning" title="A Pi 3 can't show images over 2048 pixels wide or high, so it skips it. Resize it to the screen's size, e.g. 1920×1080.">{{ icon('triangle-alert') }}too large</span>{% endif %}

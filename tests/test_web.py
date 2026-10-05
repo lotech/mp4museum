@@ -219,6 +219,45 @@ def test_delete_refused_when_media_not_mounted(pi, client, monkeypatch):
     assert (pi.media / 'keep.mp4').exists()
 
 
+def test_deleting_the_file_playing_waits_for_the_player_to_let_go(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    (pi.media / 'a-loop.jpeg').write_bytes(b'x')
+    a = str(pi.media / 'a-loop.jpeg')
+    write_status('playing', a)
+    # this test stands in for VLC, which has the file open
+    vlc = open(a, 'rb')
+    assert os.getpid() in system.processes_using(a)
+    seen = []
+    def player(pid, sig):
+        # the player moves on (an only file wouldn't start again: it is switched off meanwhile)
+        seen.append((pid, sig, system.get_disabled_files(), (pi.media / 'a-loop.jpeg').exists()))
+        vlc.close()
+    monkeypatch.setattr(os, 'kill', player)
+    r = client.post('/delete', data={'filename': 'a-loop.jpeg'}, follow_redirects=True)
+    assert b'deleted successfully' in r.data
+    assert seen == [(4242, signal.SIGUSR1, {a}, True)]
+    assert media_files(pi) == [] and system.get_disabled_files() == set()
+
+
+def test_deleting_a_file_still_in_use_is_refused(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    monkeypatch.setattr(system, 'LET_GO_SECONDS', 0.3)
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: None)
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    a = str(pi.media / 'a.mp4')
+    write_status('playing', a)
+    # the player doesn't let go of it (stuck): it isn't deleted, and plays again
+    with open(a, 'rb'):
+        r = client.post('/delete', data={'filename': 'a.mp4'}, follow_redirects=True)
+    assert b'still in use' in r.data and b'deleted successfully' not in r.data
+    assert (pi.media / 'a.mp4').exists() and system.get_disabled_files() == set()
+    # switched off before: it stays off
+    system.update_disabled_files(add=[a])
+    with open(a, 'rb'):
+        client.post('/delete', data={'filename': 'a.mp4'})
+    assert (pi.media / 'a.mp4').exists() and system.get_disabled_files() == {a}
+
+
 def test_download(pi, client):
     (pi.media / 'a.mp4').write_text('x')
     r = client.get('/download/a.mp4')
@@ -1321,3 +1360,55 @@ def test_playlist_for_a_player_edited_before_media_types(pi, client):
     (usb / 'config.txt').write_text('x')
     (pi.media / 'notes.txt').write_text('x')
     assert [(e['name'], e['plays']) for e in system.get_playlist()] == [('notes.txt', True), ('config.txt', True)]
+
+
+def test_playlist_shows_each_files_type(pi, client):
+    # a long name is cut off on the page: its extension shows under it
+    (pi.media / ('a very long name for a file that goes on and on-loop.jpeg')).write_bytes(b'x')
+    (pi.media / 'clip.Mp4').write_bytes(b'x')
+    (pi.media / 'README').write_bytes(b'x')
+    html = client.get('/').data.decode()
+    assert '<span class="item-ext">JPEG</span>' in html and '<span class="item-ext">MP4</span>' in html
+    assert html.count('class="item-ext"') == 2
+
+
+def test_deleting_a_file_in_use_with_an_edited_player_or_sync_mode(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    monkeypatch.setattr(system, 'LET_GO_SECONDS', 0.3)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append(sig))
+    (pi.media / 'sync.mp4').write_bytes(b'x')
+    sync = str(pi.media / 'sync.mp4')
+    # sync mode (omxplayer-sync has it open until the player stops): refused straight away
+    write_status('sync', sync)
+    r = client.post('/delete', data={'filename': 'sync.mp4'}, follow_redirects=True)
+    assert b'playing in sync mode' in r.data and (pi.media / 'sync.mp4').exists() and sent == []
+    # a player edited before switching files off existed comes back to an only file: deleted
+    # anyway after it has had the time to move on, as before
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    a = str(pi.media / 'a.mp4')
+    write_status('playing', a)
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write('# edited before switching files off existed\n')
+    with open(a, 'rb'):
+        r = client.post('/delete', data={'filename': 'a.mp4'}, follow_redirects=True)
+    assert b'deleted successfully' in r.data and not (pi.media / 'a.mp4').exists()
+    assert sent == [signal.SIGUSR1] and system.get_disabled_files() == set()
+
+
+def test_a_file_replaced_while_the_delete_waits_stays(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    (pi.media / 'a.mp4').write_bytes(b'old')
+    a = str(pi.media / 'a.mp4')
+    write_status('playing', a)
+    vlc = open(a, 'rb')
+    def player(pid, sig):
+        # while the player moves on, an upload of the same name is renamed into place
+        (pi.media / '.upload-new').write_bytes(b'new upload')
+        os.replace(str(pi.media / '.upload-new'), a)
+        vlc.close()
+    monkeypatch.setattr(os, 'kill', player)
+    r = client.post('/delete', data={'filename': 'a.mp4'}, follow_redirects=True)
+    assert b'replaced meanwhile' in r.data and (pi.media / 'a.mp4').read_bytes() == b'new upload'
+    # it plays again
+    assert system.get_disabled_files() == set()
