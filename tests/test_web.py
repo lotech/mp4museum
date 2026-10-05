@@ -1370,3 +1370,27 @@ def test_playlist_shows_each_files_type(pi, client):
     html = client.get('/').data.decode()
     assert '<span class="item-ext">JPEG</span>' in html and '<span class="item-ext">MP4</span>' in html
     assert html.count('class="item-ext"') == 2
+
+
+def test_deleting_a_file_in_use_with_an_edited_player_or_sync_mode(pi, client, monkeypatch):
+    monkeypatch.setattr(system, '_is_player_process', lambda pid: pid == 4242)
+    monkeypatch.setattr(system, 'LET_GO_SECONDS', 0.3)
+    sent = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: sent.append(sig))
+    (pi.media / 'sync.mp4').write_bytes(b'x')
+    sync = str(pi.media / 'sync.mp4')
+    # sync mode (omxplayer-sync has it open until the player stops): refused straight away
+    write_status('sync', sync)
+    r = client.post('/delete', data={'filename': 'sync.mp4'}, follow_redirects=True)
+    assert b'playing in sync mode' in r.data and (pi.media / 'sync.mp4').exists() and sent == []
+    # a player edited before switching files off existed comes back to an only file: deleted
+    # anyway after it has had the time to move on, as before
+    (pi.media / 'a.mp4').write_bytes(b'x')
+    a = str(pi.media / 'a.mp4')
+    write_status('playing', a)
+    with open(system.SCRIPT_FILE, 'w') as f:
+        f.write('# edited before switching files off existed\n')
+    with open(a, 'rb'):
+        r = client.post('/delete', data={'filename': 'a.mp4'}, follow_redirects=True)
+    assert b'deleted successfully' in r.data and not (pi.media / 'a.mp4').exists()
+    assert sent == [signal.SIGUSR1] and system.get_disabled_files() == set()

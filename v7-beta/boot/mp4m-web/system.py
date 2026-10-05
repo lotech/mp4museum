@@ -832,15 +832,18 @@ def let_go_of(path, timeout=None):
     has it open any more, True if it was switched off here: switch it on again)."""
     status = get_player_status() or {}
     switched_off = False
+    # a player edited before switching files off existed may come straight back to it (an only
+    # file): deleted anyway once it has had the time to move on, as before
+    stays_off = player_reads_disabled_files()
     if status.get('file') == path and status.get('state') in ('playing', 'paused'):
-        if player_reads_disabled_files() and path not in get_disabled_files():
+        if stays_off and path not in get_disabled_files():
             update_disabled_files(add=[path])
             switched_off = True
         signal_player(signal.SIGUSR1)
     deadline = time.monotonic() + (LET_GO_SECONDS if timeout is None else timeout)
     while processes_using(path):
         if time.monotonic() > deadline:
-            return False, switched_off
+            return not stays_off, switched_off
         time.sleep(0.1)
     return True, switched_off
 

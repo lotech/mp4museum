@@ -545,6 +545,11 @@ def delete_file():
         return redirect(url_for('index'))
     file_path = os.path.join(system.MEDIA_PATH, filename)
     if os.path.isfile(file_path):
+        status = system.get_player_status() or {}
+        if status.get('state') == 'sync' and status.get('file') == file_path:
+            # omxplayer-sync has it open until the player stops
+            flash(f"'{filename}' is playing in sync mode: switch it off and reboot, then delete it.", "error")
+            return redirect(url_for('index'))
         # not while the player has it open: it moves on first
         switched_off = False
         try:
