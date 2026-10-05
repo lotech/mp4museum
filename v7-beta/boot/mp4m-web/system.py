@@ -795,6 +795,55 @@ def update_disabled_files(add=(), remove=()):
             with writable(BOOT_PATH):
                 write_file(DISABLED_FILE, ''.join(path + '\n' for path in sorted(changed)))
 
+# seconds a file the player is showing may take to be let go of before it is deleted
+LET_GO_SECONDS = 10
+
+def processes_using(path):
+    """The processes (pids) that have this file open."""
+    path = os.path.realpath(path)
+    pids = set()
+    try:
+        processes = os.listdir('/proc')
+    except OSError:
+        return pids
+    for pid in processes:
+        if not pid.isdigit():
+            continue
+        fd_dir = os.path.join('/proc', pid, 'fd')
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            # gone, or not ours to look at
+            continue
+        for fd in fds:
+            try:
+                if os.readlink(os.path.join(fd_dir, fd)) == path:
+                    pids.add(int(pid))
+                    break
+            except OSError:
+                pass
+    return pids
+
+def let_go_of(path, timeout=None):
+    """Before a media file is deleted: the player moves off it if it is showing it, switched off
+    meanwhile so it doesn't come back to it (an only file would start again). Deleting a file VLC
+    or omxplayer still has open leaves it on the partition until they close it, and then the
+    exFAT driver frees it, with the partition read-only again or not. Returns (True if nothing
+    has it open any more, True if it was switched off here: switch it on again)."""
+    status = get_player_status() or {}
+    switched_off = False
+    if status.get('file') == path and status.get('state') in ('playing', 'paused'):
+        if player_reads_disabled_files() and path not in get_disabled_files():
+            update_disabled_files(add=[path])
+            switched_off = True
+        signal_player(signal.SIGUSR1)
+    deadline = time.monotonic() + (LET_GO_SECONDS if timeout is None else timeout)
+    while processes_using(path):
+        if time.monotonic() > deadline:
+            return False, switched_off
+        time.sleep(0.1)
+    return True, switched_off
+
 def player_plays_media_files_only():
     """Whether the player script leaves out files that aren't media (one edited here before
     that is kept by updates, and plays every file with an extension)."""

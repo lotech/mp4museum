@@ -545,13 +545,27 @@ def delete_file():
         return redirect(url_for('index'))
     file_path = os.path.join(system.MEDIA_PATH, filename)
     if os.path.isfile(file_path):
+        # not while the player has it open: it moves on first
+        switched_off = False
         try:
-            with system.writable(system.MEDIA_PATH):
-                os.remove(file_path)
-            flash(f"File '{filename}' deleted successfully.", "success")
+            let_go, switched_off = system.let_go_of(file_path)
+            if let_go:
+                with system.writable(system.MEDIA_PATH):
+                    os.remove(file_path)
         except Exception as e:
+            let_go = None
             flash(f"Failed to delete file: {e}", "error")
+        if not let_go:
+            if let_go is False:
+                flash(f"'{filename}' is still in use (playing, or being downloaded): try again in a moment.", "error")
+            # switched off only so the player would let go of it: it plays again
+            if switched_off:
+                try:
+                    system.update_disabled_files(remove=[file_path])
+                except Exception:
+                    pass
             return redirect(url_for('index'))
+        flash(f"File '{filename}' deleted successfully.", "success")
         # a file of the same name added later is played
         try:
             system.update_disabled_files(remove=[file_path])
