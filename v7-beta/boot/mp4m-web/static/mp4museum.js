@@ -237,8 +237,10 @@ function uploadFiles(input) {
   startUpload(input.form, files);
 }
 
-function startUpload(form, files) {
+// notes: messages to show with the upload's results, after the page reloads
+function startUpload(form, files, notes) {
   if (!files.length) {
+    (notes || []).forEach(([category, message]) => showToast(message, category));
     return;
   }
   if (uploading) {
@@ -253,7 +255,7 @@ function startUpload(form, files) {
   }
   uploading = true;
   document.getElementById('uploadProgress').hidden = false;
-  const messages = [];
+  const messages = (notes || []).slice();
   // One at a time; then reload the page to show the new files, and the messages after it
   const next = index => {
     if (index >= files.length) {
@@ -324,25 +326,37 @@ function draggingFiles(event) {
   return Boolean(event.dataTransfer) && Array.from(event.dataTransfer.types).includes('Files');
 }
 
+// The files dropped, and messages about what can't be uploaded
 function droppedFiles(dataTransfer) {
   const items = Array.from(dataTransfer.items || []).filter(item => item.kind === 'file');
-  if (!items.length || !items[0].webkitGetAsEntry) {
-    return {files: Array.from(dataTransfer.files), folders: 0};
-  }
   const files = [];
   let folders = 0;
-  items.forEach(item => {
-    const entry = item.webkitGetAsEntry();
-    if (entry && entry.isDirectory) {
-      folders += 1;
-    } else {
-      const file = item.getAsFile();
-      if (file) {
+  let unreadable = 0;
+  if (items.length && items[0].webkitGetAsEntry) {
+    items.forEach(item => {
+      const entry = item.webkitGetAsEntry();
+      const file = entry && entry.isDirectory ? null : item.getAsFile();
+      if (entry && entry.isDirectory) {
+        folders += 1;
+      } else if (file) {
         files.push(file);
+      } else {
+        // e.g. dragged out of a zip file
+        unreadable += 1;
       }
-    }
-  });
-  return {files, folders};
+    });
+  } else {
+    files.push(...Array.from(dataTransfer.files));
+  }
+  const notes = [];
+  if (folders) {
+    notes.push(['warning', "Folders can't be uploaded: open the folder and drop the files in it."]);
+  }
+  if (unreadable) {
+    notes.push(['warning', "The browser couldn't read " + unreadable + ' of the dropped items. ' +
+                           'Save them to a folder first, or use the Upload button.']);
+  }
+  return {files, notes};
 }
 
 function setUpDropUpload() {
@@ -351,45 +365,39 @@ function setUpDropUpload() {
   if (!card) {
     return;
   }
-  // Files dropped anywhere else would be opened by the browser, leaving the page
-  ['dragover', 'drop'].forEach(type => document.addEventListener(type, event => {
-    if (draggingFiles(event)) {
-      event.preventDefault();
-      if (!card.contains(event.target)) {
-        event.dataTransfer.dropEffect = 'none';
-      }
-    }
-  }));
-  // Counted, as dragging over the card's contents leaves and enters them
-  let inside = 0;
-  card.addEventListener('dragenter', event => {
-    if (draggingFiles(event)) {
-      inside += 1;
-      card.classList.add('drop-target');
-    }
-  });
-  card.addEventListener('dragleave', event => {
-    if (draggingFiles(event)) {
-      inside = Math.max(0, inside - 1);
-      card.classList.toggle('drop-target', inside > 0);
-    }
-  });
-  card.addEventListener('dragover', event => {
-    if (draggingFiles(event)) {
-      event.dataTransfer.dropEffect = 'copy';
-    }
-  });
-  card.addEventListener('drop', event => {
+  // Shown while files are dragged over the card: browsers keep sending dragover then, and
+  // don't always send dragleave (Esc, or leaving the window quickly)
+  let hideTimer = null;
+  const hideOverlay = () => {
+    clearTimeout(hideTimer);
+    card.classList.remove('drop-target');
+  };
+  document.addEventListener('dragover', event => {
     if (!draggingFiles(event)) {
       return;
     }
-    inside = 0;
-    card.classList.remove('drop-target');
-    const dropped = droppedFiles(event.dataTransfer);
-    if (dropped.folders) {
-      showToast("Folders can't be uploaded: open the folder and drop the files in it.", 'warning');
+    // Files dropped anywhere else would be opened by the browser, leaving the page
+    event.preventDefault();
+    const accepted = card.contains(event.target) && !uploading;
+    event.dataTransfer.dropEffect = accepted ? 'copy' : 'none';
+    if (accepted) {
+      card.classList.add('drop-target');
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(hideOverlay, 300);
+    } else {
+      hideOverlay();
     }
-    startUpload(form, dropped.files);
+  });
+  document.addEventListener('drop', event => {
+    if (!draggingFiles(event)) {
+      return;
+    }
+    event.preventDefault();
+    hideOverlay();
+    if (card.contains(event.target)) {
+      const dropped = droppedFiles(event.dataTransfer);
+      startUpload(form, dropped.files, dropped.notes);
+    }
   });
 }
 
@@ -655,7 +663,10 @@ function followCopies() {
     .then(response => response.ok ? response.json() : null)
     .then(status => {
       if (status && status.copying.length === 0) {
-        location.reload();
+        // (an upload reloads the page when it's done, which shows this too)
+        if (!uploading) {
+          location.reload();
+        }
       } else if (status) {
         setTimeout(followCopies, 2000);
       }

@@ -4,6 +4,7 @@
 
 :root {
   --bg: #0e0f11;
+  --bg-overlay: rgba(14, 15, 17, 0.88);
   --surface: #17181b;
   --surface-2: #1f2024;
   --surface-3: #2a2c31;
@@ -336,7 +337,7 @@ a {
 
 .player-card { grid-area: player; }
 .playback-card { grid-area: playback; }
-.playlist-card { grid-area: playlist; }
+.playlist-card { grid-area: playlist; position: relative; }
 
 .wide-card {
   margin-top: 20px;
@@ -997,10 +998,6 @@ select {
 }
 
 /* files dragged over the playlist: dropping them uploads them */
-.playlist-card {
-  position: relative;
-}
-
 .playlist-card.drop-target::after {
   content: "Drop files to upload them";
   position: absolute;
@@ -1016,10 +1013,17 @@ select {
   text-align: center;
   font-weight: 600;
   color: var(--text);
-  background: rgba(14, 15, 17, 0.88);
+  background: var(--bg-overlay);
   border: 2px dashed var(--playing);
   border-radius: var(--radius);
   pointer-events: none;
+}
+
+/* no dragging files onto the page on phones and tablets */
+@media (hover: none) {
+  .drop-hint {
+    display: none;
+  }
 }
 
 .upload-label {
