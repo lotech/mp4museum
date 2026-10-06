@@ -631,6 +631,18 @@ def test_upload_from_the_page_gets_json(pi, client):
     assert "form.mp4&#39; uploaded successfully" in html
 
 
+def test_files_can_be_dropped_on_the_playlist_only_when_uploads_work(client, monkeypatch):
+    # the script makes the card holding the upload form a drop target
+    html = client.get('/').data.decode()
+    card = html[html.index('class="card playlist-card"'):html.index('id="playlist"')]
+    assert 'id="uploadForm"' in card and 'Drop files here to upload them.' in card
+    js = client.get('/static/mp4museum.js').data.decode()
+    assert "getElementById('uploadForm')" in js and "closest('.playlist-card')" in js
+    monkeypatch.setattr(system, 'media_available', lambda: False)
+    html = client.get('/').data.decode()
+    assert 'id="uploadForm"' not in html and 'Drop files here' not in html
+
+
 # ----- Sound ----- #
 def test_sound_cards_listed(client):
     cards = system.parse_sound_cards(

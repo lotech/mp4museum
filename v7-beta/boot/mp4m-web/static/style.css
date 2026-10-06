@@ -996,6 +996,32 @@ select {
   background: var(--surface-2);
 }
 
+/* files dragged over the playlist: dropping them uploads them */
+.playlist-card {
+  position: relative;
+}
+
+.playlist-card.drop-target::after {
+  content: "Drop files to upload them";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(14, 15, 17, 0.88);
+  border: 2px dashed var(--playing);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
 .upload-label {
   display: flex;
   justify-content: space-between;

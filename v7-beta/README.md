@@ -98,8 +98,9 @@ Open `http://<network name>.local` in a browser on the same network.
   and the playlist: every file the player plays, from the media partition and USB sticks, in
   order, and the media partition's other files, marked "not played". The list fills the window
   and scrolls inside its card, keeping the file playing in view. Start any file from there (its
-  play button or its name); upload files (several at once, with progress), rename them (files
-  play in order of name; add `-loop` to repeat a video), download, delete or switch them off.
+  play button or its name); upload files (several at once, with progress; or drop them on the
+  playlist), rename them (files play in order of name; add `-loop` to repeat a video), download,
+  delete or switch them off.
   Files on a USB stick can be copied to the player, so they play without the stick. The copy runs
   in the background; meanwhile rebooting, updates and cloning say to wait, and on a Pi 3 playback
   may slow down. While the stick is in, its copy plays too: switch one off, or take the stick out.

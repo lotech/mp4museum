@@ -229,19 +229,29 @@ function sendPlayerForm(form) {
 }
 
 // ----- Media ----- //
+let uploading = false;
+
 function uploadFiles(input) {
-  const form = input.form;
   const files = Array.from(input.files);
+  input.value = '';
+  startUpload(input.form, files);
+}
+
+function startUpload(form, files) {
   if (!files.length) {
+    return;
+  }
+  if (uploading) {
+    showToast('Wait until the upload is finished, then add more files.', 'warning');
     return;
   }
   const total = files.reduce((sum, file) => sum + file.size, 0);
   if (total > Number(form.dataset.freeSpace)) {
     alert('Not enough free space: ' + Math.ceil(total / 1048576) + ' MB selected but only ' +
           form.dataset.freeSpaceText + ' is free.');
-    input.value = '';
     return;
   }
+  uploading = true;
   document.getElementById('uploadProgress').hidden = false;
   const messages = [];
   // One at a time; then reload the page to show the new files, and the messages after it
@@ -306,6 +316,80 @@ function uploadFile(url, file, index, count) {
     const data = new FormData();
     data.append('file', file);
     request.send(data);
+  });
+}
+
+// Files dragged onto the playlist are uploaded
+function draggingFiles(event) {
+  return Boolean(event.dataTransfer) && Array.from(event.dataTransfer.types).includes('Files');
+}
+
+function droppedFiles(dataTransfer) {
+  const items = Array.from(dataTransfer.items || []).filter(item => item.kind === 'file');
+  if (!items.length || !items[0].webkitGetAsEntry) {
+    return {files: Array.from(dataTransfer.files), folders: 0};
+  }
+  const files = [];
+  let folders = 0;
+  items.forEach(item => {
+    const entry = item.webkitGetAsEntry();
+    if (entry && entry.isDirectory) {
+      folders += 1;
+    } else {
+      const file = item.getAsFile();
+      if (file) {
+        files.push(file);
+      }
+    }
+  });
+  return {files, folders};
+}
+
+function setUpDropUpload() {
+  const form = document.getElementById('uploadForm');
+  const card = form && form.closest('.playlist-card');
+  if (!card) {
+    return;
+  }
+  // Files dropped anywhere else would be opened by the browser, leaving the page
+  ['dragover', 'drop'].forEach(type => document.addEventListener(type, event => {
+    if (draggingFiles(event)) {
+      event.preventDefault();
+      if (!card.contains(event.target)) {
+        event.dataTransfer.dropEffect = 'none';
+      }
+    }
+  }));
+  // Counted, as dragging over the card's contents leaves and enters them
+  let inside = 0;
+  card.addEventListener('dragenter', event => {
+    if (draggingFiles(event)) {
+      inside += 1;
+      card.classList.add('drop-target');
+    }
+  });
+  card.addEventListener('dragleave', event => {
+    if (draggingFiles(event)) {
+      inside = Math.max(0, inside - 1);
+      card.classList.toggle('drop-target', inside > 0);
+    }
+  });
+  card.addEventListener('dragover', event => {
+    if (draggingFiles(event)) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+  });
+  card.addEventListener('drop', event => {
+    if (!draggingFiles(event)) {
+      return;
+    }
+    inside = 0;
+    card.classList.remove('drop-target');
+    const dropped = droppedFiles(event.dataTransfer);
+    if (dropped.folders) {
+      showToast("Folders can't be uploaded: open the folder and drop the files in it.", 'warning');
+    }
+    startUpload(form, dropped.files);
   });
 }
 
@@ -689,6 +773,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   fitPlaylist();
   window.addEventListener('resize', fitPlaylist);
+  setUpDropUpload();
   if (document.getElementById('clone')) {
     followClone();
   }
