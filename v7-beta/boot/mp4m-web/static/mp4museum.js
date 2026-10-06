@@ -229,21 +229,33 @@ function sendPlayerForm(form) {
 }
 
 // ----- Media ----- //
+let uploading = false;
+
 function uploadFiles(input) {
-  const form = input.form;
   const files = Array.from(input.files);
+  input.value = '';
+  startUpload(input.form, files);
+}
+
+// notes: messages to show with the upload's results, after the page reloads
+function startUpload(form, files, notes) {
   if (!files.length) {
+    (notes || []).forEach(([category, message]) => showToast(message, category));
+    return;
+  }
+  if (uploading) {
+    showToast('Wait until the upload is finished, then add more files.', 'warning');
     return;
   }
   const total = files.reduce((sum, file) => sum + file.size, 0);
   if (total > Number(form.dataset.freeSpace)) {
     alert('Not enough free space: ' + Math.ceil(total / 1048576) + ' MB selected but only ' +
           form.dataset.freeSpaceText + ' is free.');
-    input.value = '';
     return;
   }
+  uploading = true;
   document.getElementById('uploadProgress').hidden = false;
-  const messages = [];
+  const messages = (notes || []).slice();
   // One at a time; then reload the page to show the new files, and the messages after it
   const next = index => {
     if (index >= files.length) {
@@ -306,6 +318,86 @@ function uploadFile(url, file, index, count) {
     const data = new FormData();
     data.append('file', file);
     request.send(data);
+  });
+}
+
+// Files dragged onto the playlist are uploaded
+function draggingFiles(event) {
+  return Boolean(event.dataTransfer) && Array.from(event.dataTransfer.types).includes('Files');
+}
+
+// The files dropped, and messages about what can't be uploaded
+function droppedFiles(dataTransfer) {
+  const items = Array.from(dataTransfer.items || []).filter(item => item.kind === 'file');
+  const files = [];
+  let folders = 0;
+  let unreadable = 0;
+  if (items.length && items[0].webkitGetAsEntry) {
+    items.forEach(item => {
+      const entry = item.webkitGetAsEntry();
+      const file = entry && entry.isDirectory ? null : item.getAsFile();
+      if (entry && entry.isDirectory) {
+        folders += 1;
+      } else if (file) {
+        files.push(file);
+      } else {
+        // e.g. dragged out of a zip file
+        unreadable += 1;
+      }
+    });
+  } else {
+    files.push(...Array.from(dataTransfer.files));
+  }
+  const notes = [];
+  if (folders) {
+    notes.push(['warning', "Folders can't be uploaded: open the folder and drop the files in it."]);
+  }
+  if (unreadable) {
+    notes.push(['warning', "The browser couldn't read " + unreadable + ' of the dropped items. ' +
+                           'Save them to a folder first, or use the Upload button.']);
+  }
+  return {files, notes};
+}
+
+function setUpDropUpload() {
+  const form = document.getElementById('uploadForm');
+  const card = form && form.closest('.playlist-card');
+  if (!card) {
+    return;
+  }
+  // Shown while files are dragged over the card: browsers keep sending dragover then, and
+  // don't always send dragleave (Esc, or leaving the window quickly)
+  let hideTimer = null;
+  const hideOverlay = () => {
+    clearTimeout(hideTimer);
+    card.classList.remove('drop-target');
+  };
+  document.addEventListener('dragover', event => {
+    if (!draggingFiles(event)) {
+      return;
+    }
+    // Files dropped anywhere else would be opened by the browser, leaving the page
+    event.preventDefault();
+    const accepted = card.contains(event.target) && !uploading;
+    event.dataTransfer.dropEffect = accepted ? 'copy' : 'none';
+    if (accepted) {
+      card.classList.add('drop-target');
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(hideOverlay, 300);
+    } else {
+      hideOverlay();
+    }
+  });
+  document.addEventListener('drop', event => {
+    if (!draggingFiles(event)) {
+      return;
+    }
+    event.preventDefault();
+    hideOverlay();
+    if (card.contains(event.target)) {
+      const dropped = droppedFiles(event.dataTransfer);
+      startUpload(form, dropped.files, dropped.notes);
+    }
   });
 }
 
@@ -571,7 +663,10 @@ function followCopies() {
     .then(response => response.ok ? response.json() : null)
     .then(status => {
       if (status && status.copying.length === 0) {
-        location.reload();
+        // (an upload reloads the page when it's done, which shows this too)
+        if (!uploading) {
+          location.reload();
+        }
       } else if (status) {
         setTimeout(followCopies, 2000);
       }
@@ -689,6 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   fitPlaylist();
   window.addEventListener('resize', fitPlaylist);
+  setUpDropUpload();
   if (document.getElementById('clone')) {
     followClone();
   }

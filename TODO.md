@@ -68,7 +68,7 @@ a network is optional.
 - [x] Playlist beside the player: every file the player plays (media partition and USB sticks), start any file from it, upload with a progress bar, download, delete
 - [x] Update bar when a new version is available (checked by the page at most every few hours, quietly when offline)
 - [x] Sound, Video and System tabs in side-by-side cards; sound cards listed with a Use button; Lucide icons
-- [ ] Test on the Pi: choosing a file (VLC and omxplayer loops), the position for videos and images, uploading several files, the update bar
+- [ ] Test on the Pi: choosing a file (VLC and omxplayer loops), the position for videos and images, uploading several files (also dropped on the playlist), the update bar
 - [ ] Test on the Pi: `omxplayer -i` reports the codec as expected (loops of H.264 files go to omxplayer, HEVC ones to VLC)
 - [x] Click a file's name to play it; play buttons stay on when the player isn't running and say why
 - [x] Deleting the file playing: the player moves off it first (switched off meanwhile) and the file is deleted once nothing has it open (`system.let_go_of`); refused if it's still in use after 10 seconds. Test on the Pi (VLC and omxplayer loops)
@@ -85,6 +85,7 @@ a network is optional.
 - [x] Graphics memory setting (Video tab): `gpu_mem`, recommended 256 MB on a Pi 3, 512 MB on a Pi 4
 - [x] Device info on the System tab: model, memory, graphics memory, temperature, power (under-voltage), media space, OS
 - [x] Upload progress bar and multiple files at once (large videos give no feedback while uploading)
+- [x] Drag and drop uploads: files dropped on the playlist are uploaded (folders are refused with a message)
 - [x] "Save and Reboot" asks once (it asked twice)
 - [x] Page titles start with the player's network name, to tell players apart in a browser's tabs
 - [x] The playlist fills the window and scrolls inside its card, with a scrollbar that shows on the dark background; the file playing is kept in view
