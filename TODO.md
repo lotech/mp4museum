@@ -137,17 +137,25 @@ as on the image).
 
 ## 7. Two screens (Pi 4, Pi 5)
 
-A clip (or playlist) on each HDMI port. Players with one screen must work exactly as now:
-the second screen is off unless set up, and nothing changes for a Pi 3.
+A second screen shows the same as the first (mirror) by default, or a clip of its own. Players
+with one screen must work exactly as now, and nothing changes for a Pi 3 (one HDMI port).
 
 - [ ] Find out on a Pi 4 (Buster, `[pi4]` in `config.txt` already has `dtoverlay=vc4-fkms-v3d`
-  and `max_framebuffers=2`): does VLC choose the port (`vlc -H | grep -A3 mmal`: `--mmal-display
-  hdmi-1`/`hdmi-2`?); omxplayer with `--display 2` (HDMI 0) and `--display 7` (HDMI 1); both ports
-  playing at once (CPU, heat, `gpu_mem`); the ALSA device of each port (`aplay -l`); `[HDMI:1]`
-  sections for the second port's mode
-- [ ] First step: screen 2 loops one chosen file (e.g. `screen2_file=` in `mp4m-player.txt`), with
-  omxplayer or VLC on HDMI 1 and its sound on that port; screen 1 stays the full player. Choose the
-  file in the web interface (Media)
+  and `max_framebuffers=2`): what HDMI 1 shows today (the firmware doesn't mirror the ports:
+  probably nothing); does VLC choose the port (`vlc -H | grep -A3 mmal`: `--mmal-display
+  hdmi-1`/`hdmi-2`?), and does its `clone` video filter put a copy on each port; omxplayer with
+  `--display 2` (HDMI 0) and `--display 7` (HDMI 1); the same file decoded twice at once (CPU,
+  heat, `gpu_mem`, 1080p and 4K); the ALSA device of each port (`aplay -l`); `[HDMI:1]` sections
+  for the second port's mode; telling whether a screen is plugged into HDMI 1 (`tvservice -l`)
+- [ ] Mirror: when a screen is found on HDMI 1 at start, play the same file there too (a second
+  VLC player, or the `clone` filter if it works; for loop videos a second omxplayer with
+  `--display 7`). Pause, next, previous and rewind act on both. Not frame-locked: two players
+  started together may drift apart a little in long videos (check how much on the Pi; loops line
+  up again at each start if both are restarted together). Sound from screen 1 only
+- [ ] Setting for the second screen (`second_screen` in `mp4m-player.txt`, web interface: Video):
+  mirror, its own file (loops one chosen file, e.g. `second_screen_file=`, sound on its port), or
+  off. Mirror is the default only once it is tested on a Pi 4 (a player with a second screen
+  plugged in would change by itself after an update); until then, off by default
 - [ ] Then, if needed, a full player per screen: `mp4museum.py` started twice, once per port. Not one
   process driving both screens (the player keeps one playing file throughout). Each needs:
   - its files: a name prefix like `loop.` (`hdmi2.`), or a folder per screen (the player already only
