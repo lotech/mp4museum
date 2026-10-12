@@ -135,6 +135,44 @@ as on the image).
 - [ ] Offline setup: a Wi-Fi hotspot when no network is found, so the web interface can be reached without a router (`hostapd`/`dnsmasq` aren't on the image: needs `install.sh`, from `legacy.raspbian.org` like exfat-utils)
 - [ ] Test all of it on a Pi 3 B, a Pi 3 B+ (2.4 and 5 GHz) and a Pi 4, with the overlay on and after a reboot: a fixed address applied and kept; one not kept goes back (and the old address is gone); Wi-Fi joins without a country (channels 1–11) and with one; `iw reg get` after setting the country; scanning while wpa_supplicant scans (busy: `scan dump`); the rfkill message; the logo screen's address with a fixed address and on Wi-Fi only; a change while the page is on Wi-Fi
 
+## 7. Two screens (Pi 4, Pi 5)
+
+A second screen shows the same as the first (mirror) by default, or a clip of its own. Players
+with one screen must work exactly as now, and nothing changes for a Pi 3 (one HDMI port).
+
+- [ ] Find out on a Pi 4 (Buster, `[pi4]` in `config.txt` already has `dtoverlay=vc4-fkms-v3d`
+  and `max_framebuffers=2`): what HDMI 1 shows today (the firmware doesn't mirror the ports:
+  probably nothing); does VLC choose the port (`vlc -H | grep -A3 mmal`: `--mmal-display
+  hdmi-1`/`hdmi-2`?), and does its `clone` video filter put a copy on each port; omxplayer with
+  `--display 2` (HDMI 0) and `--display 7` (HDMI 1); the same file decoded twice at once (CPU,
+  heat, `gpu_mem`, 1080p and 4K); the ALSA device of each port (`aplay -l`); `[HDMI:1]` sections
+  for the second port's mode; telling whether a screen is plugged into HDMI 1 (`tvservice -l`)
+- [ ] Mirror: when a screen is found on HDMI 1 at start, play the same file there too (a second
+  VLC player, or the `clone` filter if it works; for loop videos a second omxplayer with
+  `--display 7`). Pause, next, previous and rewind act on both. Not frame-locked: two players
+  started together may drift apart a little in long videos (check how much on the Pi; loops line
+  up again at each start if both are restarted together). Sound from screen 1 only
+- [ ] Setting for the second screen (`second_screen` in `mp4m-player.txt`, web interface: Video):
+  mirror, its own file (loops one chosen file, e.g. `second_screen_file=`, sound on its port), or
+  off. Mirror is the default only once it is tested on a Pi 4 (a player with a second screen
+  plugged in would change by itself after an update); until then, off by default
+- [ ] Then, if needed, a full player per screen: `mp4museum.py` started twice, once per port. Not one
+  process driving both screens (the player keeps one playing file throughout). Each needs:
+  - its files: a name prefix like `loop.` (`hdmi2.`), or a folder per screen (the player already only
+    reads files directly in `/media/*/`, so screen 1 would ignore a `screen2/` folder)
+  - its own status, play request and skipped files in `/tmp`, and its process to signal; the web
+    interface shows both (now playing, pause, next per screen)
+  - a start line in `.bashrc` (outside `/boot`: `install.sh` and `updater.SYSTEM_FILES`)
+  - the buttons: both screens, screen 1 only, or other pins; the logo screen on each port or only
+    the first
+  - edited players: the web interface finds out what a player can do by searching its text, so one
+    without two-screen support must still work
+  - the screens aren't in sync with each other
+- [ ] Pi 5: needs Bookworm or newer (Buster doesn't start on it), so a port of the whole player
+  first: no omxplayer, VLC's video output works differently, everything learned on Buster to test
+  again (see the mpv item in 3). Meanwhile, on the desktop OS: two full-screen players started at
+  login, e.g. `mpv --fs --loop --fs-screen-name=HDMI-A-2 <file>` (to try)
+
 ## Development
 
 - [x] `CLAUDE.md` with the constraints and conventions for working on the code
