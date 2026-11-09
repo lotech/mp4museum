@@ -86,6 +86,8 @@ fi
 
 echo
 echo "Done. Later updates: sudo mp4m-update, or System -> Software Update in the web interface."
+# (setup.sh, which runs this on a fresh Raspberry Pi OS, turns the overlay on itself)
+[ -n "$MP4M_SETUP" ] && exit 0
 echo "Now turn the overlay file system back on:"
 echo "  sudo raspi-config -> Overlay File System -> Yes, and Yes to write-protecting the boot"
 echo "  partition if it asks (if it says the boot partition is already read-only, that's fine)"
