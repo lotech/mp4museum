@@ -55,6 +55,60 @@ The player is meant to run offline; a network is only needed for the web interfa
 See [`v7-beta/README.md`](v7-beta/README.md) for the files, how to try them on a Pi and how
 to install them, and [`TODO.md`](TODO.md) for what's planned.
 
+## Setting up a player from scratch
+
+You need a Raspberry Pi (tested on a Pi 3 B), an SD card (16 GB or more), and a network with
+internet for the setup. Once it's set up, the player needs no network.
+
+This fork installs on top of the **MP4MUSEUM v7 beta image**, which provides the read-only
+system, the media partition, auto-login and USB stick mounting. It doesn't install on a plain
+Raspberry Pi OS yet. If you already have one player, use *System → Clone to another device*
+instead (see below).
+
+1. **Flash the image.** Download [`mp4m-v7beta.img.zip`](https://mp4museum.org/mp4m-v7beta.img.zip)
+   from [mp4museum.org/v7-beta](https://mp4museum.org/v7-beta/) (3.89 GB). Write it to the SD
+   card with [Raspberry Pi Imager](https://www.raspberrypi.com/software/): *Choose OS → Use
+   custom*, choose the zip file. Don't change any settings in Imager.
+2. **Start the Pi** with a screen (HDMI) and Ethernet connected. It plays the boot video and
+   shows the logo.
+3. **Log in over SSH** from a computer on the same network: `ssh pi@mp4museum.local`, password
+   `mp4museum` (or use the Pi's IP address from your router).
+4. **Turn off the overlay file system**, which keeps the system read-only: `sudo raspi-config` →
+   *Performance Options* (or *Advanced Options*) → *Overlay File System* → **No**. If it says the
+   boot partition is read-only, leave it so. Then `sudo reboot` and log in again.
+5. **Download this repository onto the Pi** (no git needed):
+   ```bash
+   mkdir -p ~/mp4m-src
+   curl -fL https://github.com/lotech/mp4museum/archive/refs/heads/master.tar.gz | tar xz -C ~/mp4m-src --strip-components=1
+   ```
+   Without internet on the Pi: download that `.tar.gz` file on a computer, copy it over with
+   `scp master.tar.gz pi@mp4museum.local:`, and on the Pi run
+   `mkdir -p ~/mp4m-src && tar xzf master.tar.gz -C ~/mp4m-src --strip-components=1`.
+6. **Install:**
+   ```bash
+   cd ~/mp4m-src/v7-beta
+   sudo ./install.sh
+   ```
+7. **Turn the overlay file system back on:** `sudo raspi-config` → *Overlay File System* →
+   **Yes**, and **Yes** to write-protecting the boot partition if it asks. Then `sudo reboot`.
+8. **Open the web interface** at the address the logo screen shows
+   (`http://mp4museum-xxxx.local`). The password is `mp4museum`: change it on the System tab.
+   Upload media on the Media page, or copy it from a USB stick.
+
+**Buttons** (physical pin numbers on the Pi's header, buttons that close when pressed):
+
+| Button | Wire between | Does |
+|---|---|---|
+| Next | pin 13 (GPIO 27) and pin 1 (3.3 V) | Once: next file. Twice: previous file. Held: back to the start |
+| Pause | pin 11 (GPIO 17) and pin 1 or 17 (3.3 V) | Pause and resume |
+
+The Pi's internal pull-down resistors are used, so no resistors are needed. Wire buttons to
+3.3 V, never 5 V.
+
+From then on the player updates itself from GitHub (*System → Software Update*, or
+`sudo mp4m-update`). More details on each step are in
+[`v7-beta/README.md`](v7-beta/README.md#installing-permanently).
+
 ## What's in this repository
 
 | Path | What it is |

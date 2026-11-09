@@ -155,6 +155,10 @@ to the media partition as hidden `.upload-…` files first.
 
 ## Getting the code onto the Pi
 
+Everything below needs a Pi running the v7 beta image (or a player already set up from it).
+To start with no player at all, see "Setting up a player from scratch" in the
+[main README](../README.md#setting-up-a-player-from-scratch).
+
 The Pi can download the repository itself into `~/mp4m-src` (replace `master` with a
 branch name to try a branch):
 
