@@ -31,6 +31,7 @@ The player is meant to run offline. A network is optional and only needed for th
 | `etc/systemd/system/getty@tty1.service.d/autologin.conf` | Auto-login of user `pi` on tty1 |
 | `etc/initramfs-tools/scripts/overlay` | Read-only root with tmpfs overlay (standard raspi-config overlay script) |
 | `install.sh` | Installs the files above that aren't on the image (see "Installing permanently") |
+| `setup.sh` | Turns a fresh Raspberry Pi OS Lite (Buster 2023-05-03) into a player without the v7 image: media partition, packages, `config.txt`, `cmdline.txt`, usbmount, auto-login, then `install.sh` and the overlay (see the main README) |
 
 `boot/cmdline.txt`, `boot/config.txt`, `boot/issue.txt` and the files in `etc/` other than the
 service are as on the image, for reference: `install.sh` doesn't install them.
@@ -155,9 +156,10 @@ to the media partition as hidden `.upload-…` files first.
 
 ## Getting the code onto the Pi
 
-Everything below needs a Pi running the v7 beta image (or a player already set up from it).
-To start with no player at all, see "Setting up a player from scratch" in the
-[main README](../README.md#setting-up-a-player-from-scratch).
+Everything below needs a Pi running the v7 beta image, or a player already set up. To start
+from a fresh Raspberry Pi OS Lite, see "Setting up a player from scratch" in the
+[main README](../README.md#setting-up-a-player-from-scratch): `setup.sh` does there what the v7
+image and `install.sh` do.
 
 The Pi can download the repository itself into `~/mp4m-src` (replace `master` with a
 branch name to try a branch):

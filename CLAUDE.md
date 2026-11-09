@@ -85,6 +85,9 @@ Plans and ideas are tracked in `TODO.md`; keep it up to date when finishing or f
   Icons are [Lucide](https://lucide.dev) symbols in `static/icons.svg`, used with the `icon()`
   macro in `templates/_icons.html`; to add one, copy its `<symbol>` from the lucide-static
   package (same version) into the sprite. `test_every_icon_is_in_the_sprite` checks them.
+- `setup.sh` turns a fresh Raspberry Pi OS Lite (Buster 2023-05-03) into what the v7 image is
+  (media partition, packages, settings), runs `install.sh` and turns the overlay on; it isn't
+  installed on the Pi, so it doesn't go in `SYSTEM_FILES`.
 - `install.sh` installs onto a v7 image (overlay off); `usr/local/bin/mp4m-update` and
   `etc/systemd/system/mp4m-webservice.service` are installed by it, and exfat-utils (from
   `legacy.raspbian.org`, where Buster's packages moved) if it isn't there.

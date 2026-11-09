@@ -57,43 +57,54 @@ to install them, and [`TODO.md`](TODO.md) for what's planned.
 
 ## Setting up a player from scratch
 
-You need a Raspberry Pi (tested on a Pi 3 B), an SD card (16 GB or more), and a network with
-internet for the setup. Once it's set up, the player needs no network.
+You need a Raspberry Pi (the player is tested on a Pi 3 B), an SD card of 8 GB or more, and a network with
+internet for the setup. Once it's set up, the player needs no network. If you already have a
+player, *System → Clone to another device* is quicker (see
+[`v7-beta/README.md`](v7-beta/README.md#cloning-a-player-to-another-sd-card)).
 
-This fork installs on top of the **MP4MUSEUM v7 beta image**, which provides the read-only
-system, the media partition, auto-login and USB stick mounting. It doesn't install on a plain
-Raspberry Pi OS yet. If you already have one player, use *System → Clone to another device*
-instead (see below).
+The player runs on **Raspberry Pi OS (Legacy) Lite, Buster, 2023-05-03**, the system the
+MP4MUSEUM v7 image is built on. Newer versions from Raspberry Pi Imager's list don't work yet.
 
-1. **Flash the image.** Download [`mp4m-v7beta.img.zip`](https://mp4museum.org/mp4m-v7beta.img.zip)
-   from [mp4museum.org/v7-beta](https://mp4museum.org/v7-beta/) (3.89 GB). Write it to the SD
-   card with [Raspberry Pi Imager](https://www.raspberrypi.com/software/): *Choose OS → Use
-   custom*, choose the zip file. Don't change any settings in Imager.
-2. **Start the Pi** with a screen (HDMI) and Ethernet connected. It plays the boot video and
-   shows the logo.
-3. **Log in over SSH** from a computer on the same network: `ssh pi@mp4museum.local`, password
-   `mp4museum` (or use the Pi's IP address from your router).
-4. **Turn off the overlay file system**, which keeps the system read-only: `sudo raspi-config` →
-   *Performance Options* (or *Advanced Options*) → *Overlay File System* → **No**. If it says the
-   boot partition is read-only, leave it so. Then `sudo reboot` and log in again.
-5. **Download this repository onto the Pi** (no git needed):
+1. **Download** [`2023-05-03-raspios-buster-armhf-lite.img.xz`](https://downloads.raspberrypi.org/raspios_oldstable_lite_armhf/images/raspios_oldstable_lite_armhf-2023-05-03/2023-05-03-raspios-buster-armhf-lite.img.xz)
+   (336 MB) on a computer. Don't unpack it.
+2. **Write it to the SD card** with [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
+   - *Choose Device*: your Pi. *Choose OS*: *Use Custom* (at the bottom), and choose the file.
+     *Choose Storage*: the SD card.
+   - When it asks about OS customisation, choose *Edit Settings*: username **`pi`** (the
+     player needs this name) and a password (`mp4museum` is what MP4MUSEUM uses), and on the
+     *Services* tab, *Enable SSH* with password authentication. Wi-Fi can be set here too.
+     Save, and *Yes* to use the settings.
+3. **Keep room for the media partition.** Take the card out and put it back in: its boot
+   partition shows up as a drive called `boot`. Open `cmdline.txt` in a text editor and take
+   out this part (with the space in front of it), leaving the rest on one line:
+   ```
+    init=/usr/lib/raspi-config/init_resize.sh
+   ```
+   Save it, and eject the card. Without this, the system fills the card at its first start.
+4. **Start the Pi** with the card, a screen (HDMI) and Ethernet. It restarts once by itself
+   while it applies the settings.
+5. **Log in over SSH** from a computer on the same network: `ssh pi@raspberrypi.local` (or the
+   name you gave it in Imager, or the Pi's IP address from your router).
+6. **Download this repository onto the Pi** (no git needed):
    ```bash
    mkdir -p ~/mp4m-src
    curl -fL https://github.com/lotech/mp4museum/archive/refs/heads/master.tar.gz | tar xz -C ~/mp4m-src --strip-components=1
    ```
-   Without internet on the Pi: download that `.tar.gz` file on a computer, copy it over with
-   `scp master.tar.gz pi@mp4museum.local:`, and on the Pi run
-   `mkdir -p ~/mp4m-src && tar xzf master.tar.gz -C ~/mp4m-src --strip-components=1`.
-6. **Install:**
+   If `curl` says a certificate isn't valid yet, the Pi's clock hasn't been set from the
+   internet: wait a minute and try again.
+7. **Set it up:**
    ```bash
    cd ~/mp4m-src/v7-beta
-   sudo ./install.sh
+   sudo ./setup.sh
    ```
-7. **Turn the overlay file system back on:** `sudo raspi-config` → *Overlay File System* →
-   **Yes**, and **Yes** to write-protecting the boot partition if it asks. Then `sudo reboot`.
-8. **Open the web interface** at the address the logo screen shows
-   (`http://mp4museum-xxxx.local`). The password is `mp4museum`: change it on the System tab.
-   Upload media on the Media page, or copy it from a USB stick.
+   This takes 10 to 20 minutes. It makes the media partition (exFAT, the card's space after
+   4 GB for the system), installs VLC, omxplayer, usbmount and the web interface's Python
+   packages, sets the video settings, auto-login and USB sticks up as on the v7 image, installs
+   the player and web interface (`install.sh`) and makes the system read-only. If it stops
+   part way, run it again. If it says to reboot first, do that, then run it again.
+8. **Reboot** (`sudo reboot`). The player starts and the logo screen shows its address
+   (`http://mp4museum-xxxx.local`). The web interface's password is `mp4museum`: change it on
+   the System tab. Upload media on the Media page, or copy it from a USB stick.
 
 **Buttons** (physical pin numbers on the Pi's header, buttons that close when pressed):
 
@@ -106,8 +117,12 @@ The Pi's internal pull-down resistors are used, so no resistors are needed. Wire
 3.3 V, never 5 V.
 
 From then on the player updates itself from GitHub (*System → Software Update*, or
-`sudo mp4m-update`). More details on each step are in
-[`v7-beta/README.md`](v7-beta/README.md#installing-permanently).
+`sudo mp4m-update`).
+
+**From the MP4MUSEUM v7 beta image instead:** write
+[`mp4m-v7beta.img.zip`](https://mp4museum.org/v7-beta/) (3.9 GB) to the card with Imager (no
+settings), log in with `ssh pi@mp4museum.local`, password `mp4museum`, and install this fork on
+it with `install.sh` as in [`v7-beta/README.md`](v7-beta/README.md#installing-permanently).
 
 ## What's in this repository
 
