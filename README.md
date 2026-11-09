@@ -8,7 +8,7 @@ For the official player, ready-made images and help, go to [mp4museum.org](https
 or the [original repository](https://github.com/JuliusCode/MP4MUSEUM). This fork is not
 affiliated with or supported by the original project. I have used this for many of my own projects from art installations to film sets. 
 As I added the odd feature I realised I should be sharing the code and so this fork shares those additional features. 
-Without Julius’s original work this fork would not exist - so thank again.
+Without Julius’s original work this fork would not exist - so thanks again.
 
 ## What MP4MUSEUM is
 
